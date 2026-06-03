@@ -7,14 +7,17 @@ import {
   checkSwarmOwnership,
   completeSwarmJob,
   createSwarmManifest,
+  createSwarmLeases,
   createSwarmPlan,
   createSwarmProof,
   createSwarmRun,
+  createSwarmSchedule,
   defineSwarmTasks,
   recordSwarmEvent,
   type FrontierSwarmCommand,
   type FrontierSwarmJob,
   type FrontierSwarmJobResultInput,
+  type FrontierSwarmLease,
   type FrontierSwarmManifestInput,
   type FrontierSwarmPlan,
   type FrontierSwarmPlanInput,
@@ -192,6 +195,10 @@ export function coerceCodexSwarmTasksInput(value: unknown): FrontierSwarmTaskInp
       lane: typeof task.lane === 'string' ? task.lane : undefined,
       layer: typeof task.layer === 'string' ? task.layer : undefined,
       compute: typeof task.compute === 'string' ? task.compute : undefined,
+      dependsOn: readStringArray(task.dependsOn),
+      concurrencyKey: typeof task.concurrencyKey === 'string' ? task.concurrencyKey : undefined,
+      budget: isObject(task.budget) ? task.budget : undefined,
+      review: isObject(task.review) ? task.review : undefined,
       priority: typeof task.priority === 'number' ? task.priority : undefined,
       sourceRefs: readStringArray(task.sourceRefs).concat(readStringArray(task.legacySourcePaths)),
       targetRefs: readStringArray(task.targetRefs).concat(readStringArray(task.ownedFiles), readStringArray(task.files)),
@@ -213,7 +220,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   await fs.writeFile(path.join(outDir, 'swarm-plan.json'), JSON.stringify(plan, null, 2) + '\n');
   let run = createSwarmRun({ plan, status: 'running', startedAt: Date.now() });
   run = recordSwarmEvent(run, { type: 'swarm.started', at: run.startedAt, data: { jobCount: plan.jobs.length } });
-  const results = await runJobPool(plan.jobs, Math.max(1, options.maxConcurrency ?? 1), (job) => runCodexJob(job, options, outDir));
+  const results = await runScheduledJobPool(plan, Math.max(1, options.maxConcurrency ?? 1), (job, lease) => runCodexJob(job, options, outDir, lease));
   for (const result of results) run = completeSwarmJob(run, result);
   const proof = createSwarmProof(run, { validation: plan.validation });
   const ok = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
@@ -224,7 +231,8 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
 export async function runCodexJob(
   job: FrontierSwarmJob,
   options: FrontierCodexSwarmRunOptions,
-  outDir: string
+  outDir: string,
+  lease?: FrontierSwarmLease
 ): Promise<FrontierSwarmJobResultInput> {
   const paths = await createJobPaths(outDir, job);
   const workspace = await prepareCodexWorkspace(job, options);
@@ -265,7 +273,8 @@ export async function runCodexJob(
     evidencePaths: [paths.evidenceDir],
     verification,
     lastMessage: execution.lastMessage,
-    error: execution.error
+    error: execution.error,
+    metadata: lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : undefined
   };
 }
 
@@ -276,7 +285,6 @@ export function buildCodexArgs(
   const model = job.compute.model ?? input.model ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL;
   const effort = job.compute.reasoningEffort ?? input.reasoningEffort ?? FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT;
   const sandbox = job.compute.sandbox ?? input.sandbox ?? 'workspace-write';
-  const approval = job.compute.approval ?? input.approval ?? 'never';
   const args = [
     'exec',
     '--cd',
@@ -285,8 +293,6 @@ export function buildCodexArgs(
     path.resolve(input.cwd ?? process.cwd(), input.outDir),
     '--sandbox',
     sandbox,
-    '--ask-for-approval',
-    approval,
     '--json',
     '--output-last-message',
     input.paths.lastMessagePath,
@@ -332,6 +338,12 @@ export function renderCodexPrompt(
     '## Task',
     '',
     job.task.objective,
+    '',
+    'Dependencies:',
+    ...bullets(job.dependsOn),
+    '',
+    'Budget:',
+    ...bullets(formatBudget(job)),
     '',
     'Source refs:',
     ...bullets(job.task.sourceRefs),
@@ -612,6 +624,61 @@ async function runVerification(commands: readonly FrontierSwarmCommand[], cwd: s
   return results;
 }
 
+async function runScheduledJobPool(
+  plan: FrontierSwarmPlan,
+  concurrency: number,
+  worker: (job: FrontierSwarmJob, lease: FrontierSwarmLease) => Promise<FrontierSwarmJobResultInput>
+): Promise<FrontierSwarmJobResultInput[]> {
+  const results: FrontierSwarmJobResultInput[] = [];
+  const active = new Map<string, Promise<FrontierSwarmJobResultInput>>();
+  const leases: FrontierSwarmLease[] = [];
+  const completed = new Set<string>();
+  const resultByJob = new Map<string, FrontierSwarmJobResultInput>();
+  while (resultByJob.size < plan.jobs.length) {
+    const run = createSwarmRun({ plan, status: 'running', results });
+    run.jobs = run.jobs.map((job) => active.has(job.id) ? { ...job, status: 'running' } : job);
+    const schedule = createSwarmSchedule({
+      plan,
+      run,
+      maxReadyJobs: Math.max(0, concurrency - active.size)
+    });
+    const nextLeases = createSwarmLeases({
+      schedule,
+      workerId: 'frontier-swarm-codex',
+      count: Math.max(0, concurrency - active.size),
+      existingLeases: leases
+    });
+    for (const lease of nextLeases) {
+      const job = plan.jobs.find((entry) => entry.id === lease.jobId);
+      if (!job || active.has(job.id) || completed.has(job.id)) continue;
+      leases.push(lease);
+      active.set(job.id, worker(job, lease));
+    }
+    if (active.size === 0) {
+      for (const blocked of schedule.blocked) {
+        if (resultByJob.has(blocked.jobId)) continue;
+        const result: FrontierSwarmJobResultInput = {
+          jobId: blocked.jobId,
+          status: 'blocked',
+          startedAt: Date.now(),
+          finishedAt: Date.now(),
+          error: blocked.reasons.join(', '),
+          metadata: { waitingFor: blocked.waitingFor, reasons: blocked.reasons }
+        };
+        results.push(result);
+        resultByJob.set(result.jobId, result);
+      }
+      break;
+    }
+    const settled = await Promise.race(Array.from(active.entries()).map(async ([jobId, promise]) => ({ jobId, result: await promise })));
+    active.delete(settled.jobId);
+    completed.add(settled.jobId);
+    results.push(settled.result);
+    resultByJob.set(settled.jobId, settled.result);
+  }
+  return plan.jobs.map((job) => resultByJob.get(job.id)).filter((result): result is FrontierSwarmJobResultInput => !!result);
+}
+
 async function runJobPool(
   jobs: readonly FrontierSwarmJob[],
   concurrency: number,
@@ -663,6 +730,17 @@ function formatCommand(command: FrontierSwarmCommand): string {
 
 function bullets(values: readonly string[]): string[] {
   return values.length ? values.map((value) => `- ${value}`) : ['- none'];
+}
+
+function formatBudget(job: FrontierSwarmJob): string[] {
+  if (!job.budget) return ['none'];
+  return [
+    job.budget.maxCostUsd === undefined ? undefined : `maxCostUsd=${job.budget.maxCostUsd}`,
+    job.budget.maxInputTokens === undefined ? undefined : `maxInputTokens=${job.budget.maxInputTokens}`,
+    job.budget.maxOutputTokens === undefined ? undefined : `maxOutputTokens=${job.budget.maxOutputTokens}`,
+    job.budget.maxDurationMs === undefined ? undefined : `maxDurationMs=${job.budget.maxDurationMs}`,
+    `maxRetries=${job.budget.maxRetries}`
+  ].filter((value): value is string => !!value);
 }
 
 function arrayOfObjects(value: unknown): Record<string, unknown>[] {

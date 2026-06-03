@@ -60,6 +60,7 @@ const args = buildCodexArgs(plan.jobs[0], { outDir: tmp, workspacePath: tmp, pat
 assert.ok(args.includes('--model'));
 assert.ok(args.includes('gpt-5.5'));
 assert.ok(args.includes('model_reasoning_effort="xhigh"'));
+assert.ok(!args.includes('--ask-for-approval'));
 assert.ok(!args.includes('--skip-git-repo-check'));
 const copyArgs = buildCodexArgs(plan.jobs[0], {
   outDir: tmp,
@@ -85,6 +86,40 @@ const result = await runCodexSwarm(plan, {
 assert.strictEqual(result.ok, true);
 assert.strictEqual(result.run.results[0].ownershipViolations.length, 0);
 assert.ok(result.proof.hash);
+
+const orderedPlan = createCodexSwarmPlan({
+  manifest: manifestInput,
+  tasks: {
+    items: [
+      {
+        id: 'runtime-parent',
+        lane: 'runtime',
+        ownedFiles: ['src/runtime/parent.ts']
+      },
+      {
+        id: 'runtime-child',
+        lane: 'runtime',
+        dependsOn: ['runtime-parent'],
+        ownedFiles: ['src/runtime/child.ts']
+      }
+    ]
+  },
+  plan: { maxLaneConcurrency: { runtime: 2 } }
+});
+const order = [];
+const orderedResult = await runCodexSwarm(orderedPlan, {
+  outDir: path.join(tmp, 'ordered-run'),
+  cwd: tmp,
+  maxConcurrency: 2,
+  executor: async (input) => {
+    order.push(input.job.taskId);
+    await fs.writeFile(input.paths.lastMessagePath, input.job.taskId + '\n');
+    return { exitCode: 0, changedPaths: input.job.task.targetRefs, lastMessage: input.job.taskId };
+  }
+});
+assert.strictEqual(orderedResult.ok, true);
+assert.deepStrictEqual(order, ['runtime-parent', 'runtime-child']);
+assert.ok(orderedResult.run.results.every((entry) => typeof entry.metadata?.fencingToken === 'number'));
 
 await fs.writeFile(path.join(tmp, 'fixture.txt'), 'fixture\n');
 await fs.mkdir(path.join(tmp, 'skip'), { recursive: true });

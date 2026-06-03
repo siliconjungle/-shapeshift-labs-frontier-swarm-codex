@@ -222,6 +222,12 @@ Large monorepos do not need one full git worktree per worker. The adapter suppor
 
 For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, ROM/test artifacts) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Use `linkPaths` for heavy shared directories such as `packages`, corpora, ROMs, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, and `snapshotLinkPaths`.
 
+## Scalable Scheduling
+
+`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. This keeps the public runner simple while making the execution model compatible with much larger queues and external lease-backed workers.
+
+Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
+
 ## Surface
 
 - `createCodexSwarmPlan`
