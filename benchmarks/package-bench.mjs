@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url';
 import {
   buildCodexArgs,
   createCodexSwarmPlan,
+  createCodexWorkspacePlan,
+  createSwarmWorkspaceManifest,
+  normalizeCodexApprovalPolicy,
+  normalizeCodexModelFlag,
   renderCodexPrompt
 } from '../dist/index.js';
 
@@ -27,7 +31,11 @@ const paths = {
   eventsPath: 'events.jsonl',
   stderrPath: 'stderr.log',
   lastMessagePath: 'last.md',
-  evidenceDir: 'evidence'
+  evidenceDir: 'evidence',
+  workspaceProofPath: 'workspace-proof.json',
+  patchPath: 'changes.patch',
+  mergeBundlePath: 'merge.json',
+  pidManifestPath: 'pids.json'
 };
 
 const rows = [
@@ -35,7 +43,16 @@ const rows = [
     plan = createCodexSwarmPlan(input);
     return plan.jobs.length;
   }),
-  measure('build-args-' + taskCount, 64, () => buildCodexArgs(plan.jobs[cursor++ % plan.jobs.length], { outDir: '.', workspacePath: '.', paths }).length),
+  measure('build-args-config-default-' + taskCount, 64, () => buildCodexArgs(plan.jobs[cursor++ % plan.jobs.length], { outDir: '.', workspacePath: '.', paths }).length),
+  measure('build-args-plan-model-' + taskCount, 64, () => buildCodexArgs(plan.jobs[cursor++ % plan.jobs.length], { outDir: '.', workspacePath: '.', paths, modelPolicy: 'plan', approval: 'full-auto' }).length),
+  measure('workspace-manifest-' + taskCount, 32, () => {
+    const workspacePlan = createCodexWorkspacePlan(plan.jobs[cursor++ % plan.jobs.length], {
+      outDir: '.',
+      workspace: { mode: 'copy', includes: ['AGENTS.md', 'package.json'], linkPaths: ['packages'], linkNodeModules: true }
+    });
+    return createSwarmWorkspaceManifest(workspacePlan).includeCount;
+  }),
+  measure('compat-normalize', 256, () => (normalizeCodexModelFlag('default') ? 1 : 0) + normalizeCodexApprovalPolicy('full-auto').length),
   measure('render-prompt-' + taskCount, 32, () => renderCodexPrompt(plan.jobs[cursor++ % plan.jobs.length], { workspacePath: '.', paths }).length)
 ];
 

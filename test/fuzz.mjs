@@ -26,10 +26,15 @@ for (let i = 0; i < cases; i += 1) {
     eventsPath: 'events.jsonl',
     stderrPath: 'stderr.log',
     lastMessagePath: 'last.md',
-    evidenceDir: 'evidence'
+    evidenceDir: 'evidence',
+    workspaceProofPath: 'workspace-proof.json',
+    patchPath: 'changes.patch',
+    mergeBundlePath: 'merge.json',
+    pidManifestPath: 'pids.json'
   };
   const codexArgs = buildCodexArgs(job, { outDir: '.', workspacePath: '.', paths });
-  assert.ok(codexArgs.includes('--model'));
+  assert.ok(!codexArgs.includes('--model'));
+  assert.ok(buildCodexArgs(job, { outDir: '.', workspacePath: '.', paths, modelPolicy: 'plan' }).includes('--model'));
   assert.ok(renderCodexPrompt(job, { workspacePath: '.', paths }).includes(job.id));
   checked += 1;
 }

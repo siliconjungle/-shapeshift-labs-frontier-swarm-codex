@@ -4,7 +4,7 @@ Node Codex CLI runner adapter for Frontier swarm plans.
 
 `frontier-swarm-codex` executes `@shapeshift-labs/frontier-swarm` plans with the Codex CLI. It owns Node process spawning, prompt rendering, worktree/snapshot workspace setup, command shaping, JSONL output capture, last-message capture, optional verification commands, changed-path ownership checks, and swarm result/proof artifacts.
 
-The default Codex compute profile is `gpt-5.5` with `model_reasoning_effort="xhigh"`. The pure `frontier-swarm` package stays runtime-neutral.
+The default swarm compute profile records `gpt-5.5` with `model_reasoning_effort="xhigh"` for planning. The Codex CLI invocation defaults to the local Codex config instead of forwarding planned model flags, because model availability and accepted flag values vary by Codex binary and account. Pass `--model ...`, `--model-policy plan`, or `modelPolicy: 'plan'` when a runner should force the planned profile. The pure `frontier-swarm` package stays runtime-neutral.
 
 
 ## Related Packages
@@ -38,7 +38,7 @@ The published Frontier package family is generated from one shared package catal
 - [`@shapeshift-labs/frontier-workflow`](https://www.npmjs.com/package/@shapeshift-labs/frontier-workflow): Serializable durable workflow/process manifests for Frontier apps, including steps, waits, approvals, timers, retries, expected patches, compensation, records, timelines, and registry graph output.
 - [`@shapeshift-labs/frontier-worker`](https://www.npmjs.com/package/@shapeshift-labs/frontier-worker): Serializable worker and edge task descriptors for Frontier apps, including queues, idempotency keys, retry and timeout policy, declared reads/writes/effects, snapshots, patch outputs, produced assets, execution records, logs, trace links, proof hashes, dedupe indexes, and registry graph output.
 - [`@shapeshift-labs/frontier-queue`](https://www.npmjs.com/package/@shapeshift-labs/frontier-queue): Serializable durable queue state, leases, retries, dedupe keys, patch-carrying jobs, dead-letter records, replay evidence, and queue inspection for Frontier apps.
-- [`@shapeshift-labs/frontier-swarm`](https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm): Hierarchical swarm plans, lanes, compute profiles, ownership policy, task queues, event streams, run records, changed-path checks, and proof artifacts for Frontier agent work.
+- [`@shapeshift-labs/frontier-swarm`](https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm): Hierarchical swarm plans, lanes, compute profiles, ownership policy, semantic ownership regions, task queues, event streams, run records, merge bundles, changed-path checks, and proof artifacts for Frontier agent work.
 - [`@shapeshift-labs/frontier-kv`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv): Serializable in-memory key/value state for Frontier apps, including TTL, versioned compare-and-set, batched patch mutations, scans, watchers, snapshots, JSONL event evidence, and replay verification.
 - [`@shapeshift-labs/frontier-kv-locks`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv-locks): Lease-style lock records on top of Frontier KV, including acquire, renew, release, fencing tokens, expiration, owner evidence, and replayable lock events.
 - [`@shapeshift-labs/frontier-kv-rate-limit`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv-rate-limit): Patch-native rate limit buckets for Frontier KV, including fixed windows, sliding windows, token buckets, deterministic refill, consume evidence, and reset records.
@@ -184,6 +184,13 @@ frontier-swarm-codex run \
   --link-path packages \
   --link-node-modules true \
   --sandbox workspace-write
+
+frontier-swarm stop --run agent-runs/codex-swarm/run-1
+
+frontier-swarm collect \
+  --run agent-runs/codex-swarm/run-1 \
+  --outDir agent-runs/codex-swarm/run-1/collected \
+  --branch-prefix codex/swarm-slice
 ```
 
 ## API
@@ -199,6 +206,7 @@ const plan = createCodexSwarmPlan({ manifest, tasks });
 await runCodexSwarm(plan, {
   outDir: 'agent-runs/codex-swarm/run-1',
   maxConcurrency: 4,
+  modelPolicy: 'config-default',
   workspace: {
     mode: 'copy',
     root: '../agent-workspaces',
@@ -211,6 +219,10 @@ await runCodexSwarm(plan, {
 });
 ```
 
+App-specific adapters should keep orchestration inside this package and use hooks for local policy. `prepareJobWorkspace` can link generated package artifacts or shared fixtures, `renderJobPrompt` can append product-specific migration rules, `changedPathFilter` can hide runner-owned symlinks from ownership checks, and `onJobStarted`/`onJobFinished`/`onSwarmFinished` can mirror lifecycle records into project-specific JSONL streams.
+
+Use `modelPolicy: 'config-default'` for portable swarms that should respect each machine's Codex config. Use `modelPolicy: 'plan'` only when the installed Codex CLI and account are known to accept the planned model IDs. `approval: 'full-auto'` and `--approval-policy full-auto` are normalized to the current `--ask-for-approval never` spelling.
+
 ## Minimal Repro Workspaces
 
 Large monorepos do not need one full git worktree per worker. The adapter supports four workspace modes:
@@ -220,13 +232,24 @@ Large monorepos do not need one full git worktree per worker. The adapter suppor
 - `copy`: create a minimal copied workspace from declared includes, task `files`, `sourceRefs`, `targetRefs`, and task `snapshotIncludes`.
 - `snapshot`: same minimal-copy mechanics with snapshot-oriented naming for legacy SNES-style task manifests.
 
-For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, ROM/test artifacts) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Use `linkPaths` for heavy shared directories such as `packages`, corpora, ROMs, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, and `snapshotLinkPaths`.
+For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, ROM/test artifacts) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Runner-owned artifacts are recorded in `workspace-proof.json` and filtered out of ownership checks, which keeps parent dirty files and copied workspace logs from falsely failing useful workers. Each job also writes `changes.patch` when a patch can be derived and `merge.json` with the touched owned files, evidence paths, verification results, queue item IDs, risk, and merge disposition. Use `linkPaths` for heavy shared directories such as `packages`, corpora, ROMs, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, `snapshotLinkPaths`, `requiredIncludes`, and `optionalIncludes`.
 
 ## Scalable Scheduling
 
-`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. This keeps the public runner simple while making the execution model compatible with much larger queues and external lease-backed workers.
+`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. Browser lanes can declare capabilities, port pools, profile directory prefixes, and lower lane concurrency in the upstream swarm manifest. This keeps the public runner simple while making the execution model compatible with much larger queues and external lease-backed workers.
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
+
+Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
+
+`frontier-swarm collect --run <run-dir>` derives status from immutable worker overlays instead of asking workers to edit a central queue. It scans `merge.json` files and writes:
+
+- `ready-to-apply/` for auto-mergeable verified slices,
+- `needs-human-port/` for patch candidates and discovery-only results,
+- `failed-evidence/` for failed workers, blockers, ownership violations, or failed required commands,
+- `stale-against-head/` for patch bundles that no longer apply.
+
+The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
 
 ## Surface
 
@@ -234,10 +257,15 @@ Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the
 - `coerceCodexSwarmManifestInput`
 - `coerceCodexSwarmTasksInput`
 - `createCodexWorkspacePlan`
+- `createSwarmWorkspaceManifest`, `createSwarmWorkspaceProof`
 - `prepareCodexWorkspace`
 - `runCodexSwarm`
 - `runCodexJob`
 - `buildCodexArgs`
+- `normalizeCodexModelFlag`, `normalizeCodexApprovalPolicy`
+- `initFileSwarmEventStream`, `appendFileSwarmEvent`, `writeSwarmCoordinatorSnapshot`
+- `appendCodexPidManifest`, `readCodexPidManifest`, `stopCodexSwarmRun`
+- `collectCodexSwarmRun`
 - `renderCodexPrompt`
 - `spawnCodexExecutor`
 
@@ -249,7 +277,7 @@ Run the package-local benchmark:
 npm run bench
 ```
 
-The benchmark writes `benchmarks/results/frontier-swarm-codex-package-bench-latest.json` when run from the monorepo. These are Frontier-only package measurements for input coercion, Codex argument construction, and prompt rendering.
+The benchmark writes `benchmarks/results/frontier-swarm-codex-package-bench-latest.json` when run from the monorepo. These are Frontier-only package measurements for input coercion, Codex argument construction, model/approval compatibility normalization, workspace manifest creation, and prompt rendering.
 
 ## Source Repository
 
