@@ -1,9 +1,11 @@
 import assert from 'node:assert';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
   appendCodexPidManifest,
+  applyCodexSwarmCollection,
   buildCodexArgs,
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
@@ -16,6 +18,7 @@ import {
   readCodexPidManifest,
   renderCodexPrompt,
   runCodexSwarm,
+  scoreCodexSwarmPatches,
   stopCodexSwarmRun
 } from '../dist/index.js';
 
@@ -133,7 +136,103 @@ assert.deepStrictEqual(mergeBundle.queueItemIds, ['runtime-action']);
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);
+assert.strictEqual(collection.mergeIndex.summary.entryCount, 1);
+assert.strictEqual(collection.queueOverlay.summary.entryCount, 1);
 assert.ok(await exists(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json')));
+assert.ok(await exists(path.join(collection.outDir, 'merge-index.json')));
+assert.ok(await exists(path.join(collection.outDir, 'queue-overlay.json')));
+const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
+assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
+
+const applyRepo = path.join(tmp, 'apply-repo');
+await fs.mkdir(path.join(applyRepo, 'src'), { recursive: true });
+await fs.writeFile(path.join(applyRepo, 'src', 'apply.ts'), 'old\n');
+await execFileP('git', ['init'], { cwd: applyRepo });
+const readyDir = path.join(tmp, 'ready-collection', 'ready-to-apply', 'apply-job');
+await fs.mkdir(readyDir, { recursive: true });
+await fs.writeFile(path.join(readyDir, 'changes.patch'), [
+  'diff --git a/src/apply.ts b/src/apply.ts',
+  '--- a/src/apply.ts',
+  '+++ b/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'));
+await fs.writeFile(path.join(readyDir, 'merge.json'), JSON.stringify({
+  ...mergeBundle,
+  jobId: 'apply-job',
+  taskId: 'apply-task',
+  status: 'verified',
+  mergeReadiness: 'verified-patch',
+  disposition: 'auto-mergeable',
+  riskLevel: 'low',
+  autoMergeable: true,
+  changedPaths: ['src/apply.ts'],
+  changedRegions: [],
+  ownedFilesTouched: ['src/apply.ts'],
+  patchPath: 'changes.patch',
+  commandsPassed: [],
+  commandsFailed: [],
+  queueItemIds: ['apply-task'],
+  staleAgainstHead: false,
+  reasons: []
+}, null, 2) + '\n');
+const applyDryRun = await applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo });
+assert.strictEqual(applyDryRun.ok, true);
+assert.strictEqual(applyDryRun.dryRun, true);
+assert.strictEqual(applyDryRun.summary.checked, 1);
+assert.strictEqual(applyDryRun.entries[0].dryRun, true);
+assert.strictEqual(await fs.readFile(path.join(applyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+const patchScore = await scoreCodexSwarmPatches({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: applyRepo,
+  workspaceIncludes: ['src'],
+  focusedCommands: [{ name: 'assert-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
+});
+assert.strictEqual(patchScore.ok, true);
+assert.strictEqual(patchScore.summary['accepted-clean'], 1);
+assert.strictEqual(await fs.readFile(path.join(applyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+const cliScore = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'score',
+  '--collection',
+  path.join(tmp, 'ready-collection'),
+  '--include',
+  'src',
+  '--focused-command',
+  "node -e \"const fs=require('fs'); const label='a,b'; if(label !== 'a,b' || fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
+], { cwd: applyRepo });
+assert.strictEqual(JSON.parse(cliScore.stdout).ok, true);
+await assert.rejects(
+  () => applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo, dryRun: false }),
+  /dirty worktree/
+);
+
+const cleanApplyRepo = path.join(tmp, 'clean-apply-repo');
+await fs.mkdir(path.join(cleanApplyRepo, 'src'), { recursive: true });
+await execFileP('git', ['init'], { cwd: cleanApplyRepo });
+await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: cleanApplyRepo });
+await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: cleanApplyRepo });
+await fs.writeFile(path.join(cleanApplyRepo, 'src', 'apply.ts'), 'old\n');
+await execFileP('git', ['add', '--', 'src/apply.ts'], { cwd: cleanApplyRepo });
+await execFileP('git', ['commit', '-m', 'Initial apply fixture'], { cwd: cleanApplyRepo });
+const committedApply = await applyCodexSwarmCollection({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: cleanApplyRepo,
+  dryRun: false,
+  branchPrefix: 'codex/tiny',
+  commit: true
+});
+assert.strictEqual(committedApply.ok, true);
+assert.strictEqual(committedApply.dryRun, false);
+assert.strictEqual(committedApply.summary.committed, 1);
+assert.strictEqual(committedApply.entries[0].status, 'committed');
+assert.strictEqual(committedApply.entries[0].branchName, 'codex/tiny/apply-job');
+assert.match(committedApply.entries[0].commit, /^[0-9a-f]{40}$/);
+assert.strictEqual(await fs.readFile(path.join(cleanApplyRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+assert.strictEqual((await execFileP('git', ['branch', '--show-current'], { cwd: cleanApplyRepo })).stdout.trim(), 'codex/tiny/apply-job');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: cleanApplyRepo })).stdout, '');
 
 const hookEvents = [];
 const hookedResult = await runCodexSwarm(plan, {
@@ -266,6 +365,10 @@ const changedResult = await runCodexSwarm(plan, {
     await fs.writeFile(path.join(input.workspacePath, 'src/runtime/action.ts'), 'export const ok = true;\n');
     await fs.mkdir(path.join(input.workspacePath, 'agent-runs/noisy'), { recursive: true });
     await fs.writeFile(path.join(input.workspacePath, 'agent-runs/noisy/evidence.json'), '{}\n');
+    await fs.mkdir(path.join(input.workspacePath, 'packages/frontier-swarm/dist'), { recursive: true });
+    await fs.writeFile(path.join(input.workspacePath, 'packages/frontier-swarm/dist/index.js'), 'generated\n');
+    await fs.mkdir(path.join(input.workspacePath, 'packages/frontier-swarm/node_modules/.cache'), { recursive: true });
+    await fs.writeFile(path.join(input.workspacePath, 'packages/frontier-swarm/node_modules/.cache/tsconfig.tsbuildinfo'), '{}\n');
     await fs.writeFile(input.paths.lastMessagePath, 'changed\n');
     return { exitCode: 0, lastMessage: 'changed' };
   }
@@ -274,7 +377,11 @@ assert.strictEqual(changedResult.ok, true);
 assert.deepStrictEqual(changedResult.run.results[0].changedPaths, ['src/runtime/action.ts']);
 const changedWorkspaceProofPath = changedResult.run.results[0].evidencePaths.find((entry) => entry.endsWith('workspace-proof.json'));
 const changedWorkspaceProof = JSON.parse(await fs.readFile(changedWorkspaceProofPath, 'utf8'));
-assert.deepStrictEqual(changedWorkspaceProof.ignoredChangedPaths, ['agent-runs/noisy/evidence.json']);
+assert.deepStrictEqual(changedWorkspaceProof.ignoredChangedPaths, [
+  'agent-runs/noisy/evidence.json',
+  'packages/frontier-swarm/dist/index.js',
+  'packages/frontier-swarm/node_modules/.cache/tsconfig.tsbuildinfo'
+]);
 
 const writtenPlan = createCodexSwarmPlan({ manifest: manifestInput, tasks: tasksInput, plan: { limit: 1 } });
 await fs.writeFile(path.join(tmp, 'swarm-plan.json'), JSON.stringify(writtenPlan, null, 2) + '\n');
@@ -287,6 +394,15 @@ assert.ok(cliSource.includes('stopCodexSwarmRun'));
 const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
 await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: 'pid-test', startedAt: Date.now() }, 'pid-test');
 assert.strictEqual((await readCodexPidManifest(pidManifestPath)).entries.length, 1);
+const concurrentPidManifestPath = path.join(tmp, 'pid-test', 'pids-concurrent.json');
+await Promise.all(Array.from({ length: 8 }, (_, index) => appendCodexPidManifest(concurrentPidManifestPath, {
+  pid: 900000 + index,
+  role: 'codex',
+  runId: 'pid-test',
+  jobId: `job-${index}`,
+  startedAt: Date.now() + index
+}, 'pid-test')));
+assert.strictEqual((await readCodexPidManifest(concurrentPidManifestPath)).entries.length, 8);
 const stopResult = await stopCodexSwarmRun({ run: pidManifestPath });
 assert.strictEqual(stopResult.ok, true);
 assert.deepStrictEqual(stopResult.stopped, []);
@@ -298,4 +414,13 @@ async function exists(file) {
   } catch {
     return false;
   }
+}
+
+function execFileP(command, args, options) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout, stderr }));
+      else resolve({ stdout, stderr });
+    });
+  });
 }

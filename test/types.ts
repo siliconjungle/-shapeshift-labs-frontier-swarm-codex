@@ -1,13 +1,17 @@
 import {
+  applyCodexSwarmCollection,
   buildCodexArgs,
   collectCodexSwarmRun,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
   createSwarmWorkspaceManifest,
   runCodexSwarm,
+  scoreCodexSwarmPatches,
   type FrontierCodexWorkspacePlan,
   type FrontierCodexWorkspaceManifest,
   type FrontierCodexCollectResult,
+  type FrontierCodexApplyResult,
+  type FrontierCodexPatchScoreResult,
   type FrontierCodexSwarmRunResult
 } from '../dist/index.js';
 
@@ -52,9 +56,13 @@ const workspacePlan: FrontierCodexWorkspacePlan = createCodexWorkspacePlan(job, 
 });
 const workspaceManifest: FrontierCodexWorkspaceManifest = createSwarmWorkspaceManifest(workspacePlan);
 const collectPromise: Promise<FrontierCodexCollectResult> = collectCodexSwarmRun({ run: '.', checkStale: false });
+const applyPromise: Promise<FrontierCodexApplyResult> = applyCodexSwarmCollection({ collection: '.', dryRun: true });
+const scorePromise: Promise<FrontierCodexPatchScoreResult> = scoreCodexSwarmPatches({ collection: '.', focusedCommands: ['npm test'] });
 
 args satisfies string[];
 workspacePlan satisfies FrontierCodexWorkspacePlan;
 workspaceManifest.kind satisfies string;
 resultPromise satisfies Promise<FrontierCodexSwarmRunResult>;
 collectPromise satisfies Promise<FrontierCodexCollectResult>;
+applyPromise satisfies Promise<FrontierCodexApplyResult>;
+scorePromise satisfies Promise<FrontierCodexPatchScoreResult>;

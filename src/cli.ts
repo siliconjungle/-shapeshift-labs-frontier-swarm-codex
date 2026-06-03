@@ -2,11 +2,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
+  applyCodexSwarmCollection,
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
   collectCodexSwarmRun,
   createCodexSwarmPlan,
   runCodexSwarm,
+  scoreCodexSwarmPatches,
   stopCodexSwarmRun,
   type FrontierCodexModelPolicy
 } from './index.js';
@@ -78,6 +80,38 @@ try {
       outDir: stringArg(args.outDir ?? args.out),
       checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
       branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix'])
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'apply') {
+    const result = await applyCodexSwarmCollection({
+      collection: stringArg(args.collection),
+      run: stringArg(args.run),
+      outDir: stringArg(args.outDir ?? args.out),
+      bucket: bucketArg(args.bucket),
+      jobIds: listArg(args.job ?? args.jobId ?? args['job-id']),
+      dryRun: boolArg(args.dryRun ?? args['dry-run'], true),
+      allowDirty: boolArg(args.allowDirty ?? args['allow-dirty'], false),
+      commit: boolArg(args.commit, false),
+      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
+      limit: numberArg(args.limit, undefined)
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'score') {
+    const result = await scoreCodexSwarmPatches({
+      collection: stringArg(args.collection),
+      run: stringArg(args.run),
+      outDir: stringArg(args.outDir ?? args.out),
+      bucket: bucketArg(args.bucket),
+      jobIds: listArg(args.job ?? args.jobId ?? args['job-id']),
+      workspaceIncludes: listArg(args.include),
+      workspaceExcludes: listArg(args.exclude),
+      focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
+      globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
+      globalGlobs: listArg(args.globalGlob ?? args['global-glob']),
+      limit: numberArg(args.limit, undefined),
+      keepWorkspaces: boolArg(args.keepWorkspaces ?? args['keep-workspaces'], false)
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
@@ -156,6 +190,19 @@ function readWorkspaceMode(value: CliValue | undefined) {
   const mode = stringArg(value);
   if (mode === 'snapshot' || mode === 'copy' || mode === 'git-worktree') return mode;
   return 'current';
+}
+
+function bucketArg(value: CliValue | undefined) {
+  const bucket = stringArg(value);
+  if (bucket === undefined) return undefined;
+  if (bucket === 'all' || bucket === 'ready-to-apply' || bucket === 'needs-human-port' || bucket === 'failed-evidence' || bucket === 'stale-against-head') return bucket;
+  throw new Error(`unsupported --bucket ${bucket}`);
+}
+
+function commandListArg(value: CliValue | undefined) {
+  if (value === undefined) return undefined;
+  const raw = Array.isArray(value) ? value : [String(value)];
+  return raw.map((command) => command.trim()).filter(Boolean).map((command) => ({ name: command, command: 'sh', args: ['-c', command], required: true }));
 }
 
 function boolArg(value: CliValue | undefined, fallback: boolean): boolean {

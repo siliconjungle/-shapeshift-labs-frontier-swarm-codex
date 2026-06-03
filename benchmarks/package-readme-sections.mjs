@@ -242,7 +242,7 @@ if (!delegated) {
   {
     "id": "frontier-swarm",
     "name": "@shapeshift-labs/frontier-swarm",
-    "role": "Hierarchical swarm plans, lanes, compute profiles, ownership policy, semantic ownership regions, task queues, event streams, run records, merge bundles, changed-path checks, and proof artifacts for Frontier agent work.",
+    "role": "Hierarchical swarm plans, lanes, compute profiles, ownership policy, semantic ownership regions, task queues, event streams, run records, merge bundles, merge indexes, queue overlays, merge admission, changed-path checks, and proof artifacts for Frontier agent work.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-swarm",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm"
@@ -250,7 +250,7 @@ if (!delegated) {
   {
     "id": "frontier-swarm-codex",
     "name": "@shapeshift-labs/frontier-swarm-codex",
-    "role": "Node Codex CLI adapter for Frontier swarm plans, including prompt rendering, worktree and snapshot workspaces, Codex argument compatibility, JSONL capture, verification commands, pid-backed stop, collect buckets, merge bundles, and result artifacts.",
+    "role": "Node Codex CLI adapter for Frontier swarm plans, including prompt rendering, worktree and snapshot workspaces, Codex argument compatibility, JSONL capture, verification commands, pid-backed stop, collect/apply workflows, merge indexes, queue overlays, merge bundles, and result artifacts.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm-codex",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-swarm-codex",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm-codex"
