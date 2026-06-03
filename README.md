@@ -236,7 +236,7 @@ For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `
 
 ## Scalable Scheduling
 
-`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. Browser lanes can declare capabilities, port pools, profile directory prefixes, and lower lane concurrency in the upstream swarm manifest. This keeps the public runner simple while making the execution model compatible with much larger queues and external lease-backed workers.
+`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. Browser lanes can declare capabilities, port pools, profile directory prefixes, and lower lane concurrency in the upstream swarm manifest. The adapter turns those declarations into a per-job resource allocation, writes `resource-allocation.json`, includes the allocation in the worker prompt and event stream, creates browser profile directories, and passes env vars such as `PORT`, `FRONTIER_SWARM_BROWSER_PORT`, and `FRONTIER_SWARM_BROWSER_PROFILE_DIR` into the Codex process. This keeps the public runner simple while making the execution model compatible with much larger queues and external lease-backed workers.
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
 
@@ -265,6 +265,7 @@ It also writes `merge-index.json` and `queue-overlay.json` so coordinator dashbo
 - `prepareCodexWorkspace`
 - `runCodexSwarm`
 - `runCodexJob`
+- `createCodexResourceAllocation`
 - `buildCodexArgs`
 - `normalizeCodexModelFlag`, `normalizeCodexApprovalPolicy`
 - `initFileSwarmEventStream`, `appendFileSwarmEvent`, `writeSwarmCoordinatorSnapshot`

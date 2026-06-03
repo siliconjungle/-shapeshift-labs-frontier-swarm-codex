@@ -250,7 +250,7 @@ if (!delegated) {
   {
     "id": "frontier-swarm-codex",
     "name": "@shapeshift-labs/frontier-swarm-codex",
-    "role": "Node Codex CLI adapter for Frontier swarm plans, including prompt rendering, worktree and snapshot workspaces, Codex argument compatibility, JSONL capture, verification commands, pid-backed stop, collect/apply workflows, merge indexes, queue overlays, merge bundles, and result artifacts.",
+    "role": "Node Codex CLI adapter for Frontier swarm plans, including prompt rendering, worktree and snapshot workspaces, Codex argument compatibility, browser resource allocation, JSONL capture, verification commands, pid-backed stop, collect/apply workflows, merge indexes, queue overlays, merge bundles, and result artifacts.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm-codex",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-swarm-codex",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm-codex"

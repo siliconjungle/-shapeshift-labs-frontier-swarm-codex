@@ -144,10 +144,26 @@ export interface FrontierCodexJobPaths {
   stderrPath: string;
   lastMessagePath: string;
   evidenceDir: string;
+  resourceAllocationPath: string;
   workspaceProofPath: string;
   patchPath: string;
   mergeBundlePath: string;
   pidManifestPath: string;
+}
+
+export interface FrontierCodexBrowserAllocation {
+  required: boolean;
+  portPool: string[];
+  port?: string;
+  profileDir?: string;
+  headless?: boolean;
+}
+
+export interface FrontierCodexResourceAllocation {
+  capabilities: string[];
+  resources: Record<string, number>;
+  env: Record<string, string>;
+  browser?: FrontierCodexBrowserAllocation;
 }
 
 export type FrontierCodexCollectBucket =
@@ -353,6 +369,8 @@ export interface FrontierCodexExecutorInput {
   workspacePath: string;
   codexPath: string;
   paths: FrontierCodexJobPaths;
+  resourceAllocation: FrontierCodexResourceAllocation;
+  env: Record<string, string>;
   timeoutMs: number;
 }
 
@@ -373,6 +391,7 @@ export interface FrontierCodexJobHookInput {
   workspacePath: string;
   workspacePlan: FrontierCodexWorkspacePlan;
   paths: FrontierCodexJobPaths;
+  resourceAllocation: FrontierCodexResourceAllocation;
 }
 
 export interface FrontierCodexJobPromptHookInput extends FrontierCodexJobHookInput {
@@ -569,19 +588,28 @@ export async function runCodexJob(
   const paths = await createJobPaths(outDir, job, options);
   const workspace = await prepareCodexWorkspace(job, options);
   const workspacePlan = createCodexWorkspacePlan(job, options);
+  const resourceAllocation = createCodexResourceAllocation(job, {
+    cwd: options.cwd ?? process.cwd(),
+    outDir,
+    workspacePath: workspace,
+    lease
+  });
+  if (resourceAllocation.browser?.profileDir) await fs.mkdir(resourceAllocation.browser.profileDir, { recursive: true });
   const hookInput = {
     job,
     cwd: options.cwd ?? process.cwd(),
     outDir,
     workspacePath: workspace,
     workspacePlan,
-    paths
+    paths,
+    resourceAllocation
   };
   await options.prepareJobWorkspace?.(hookInput);
   const fileSnapshot = shouldSnapshotWorkspaceChanges(workspacePlan, options)
     ? await snapshotWorkspaceFiles(workspace)
     : undefined;
-  const basePrompt = renderCodexPrompt(job, { workspacePath: workspace, paths });
+  await fs.writeFile(paths.resourceAllocationPath, JSON.stringify(resourceAllocation, null, 2) + '\n');
+  const basePrompt = renderCodexPrompt(job, { workspacePath: workspace, paths, resourceAllocation });
   const prompt = options.renderJobPrompt
     ? await options.renderJobPrompt({ ...hookInput, prompt: basePrompt })
     : basePrompt;
@@ -593,7 +621,12 @@ export async function runCodexJob(
     jobId: job.id,
     taskId: job.taskId,
     lane: job.lane,
-    data: { workspace: workspacePlan.path, capabilities: job.capabilities, resourceRequirements: job.resourceRequirements }
+    data: {
+      workspace: workspacePlan.path,
+      capabilities: job.capabilities,
+      resourceRequirements: job.resourceRequirements,
+      resourceAllocation
+    }
   });
   const startedAt = Date.now();
   const execution = options.dryRun
@@ -606,6 +639,8 @@ export async function runCodexJob(
       workspacePath: workspace,
       codexPath: options.codexPath ?? 'codex',
       paths,
+      resourceAllocation,
+      env: resourceAllocation.env,
       timeoutMs: job.compute.timeoutMs ?? options.jobTimeoutMs ?? 7200000
     });
   const collected = execution.changedPaths
@@ -638,20 +673,23 @@ export async function runCodexJob(
     changedPaths,
     changedRegions: job.changedRegions,
     ownershipViolations: ownership.violations,
-    evidencePaths: [paths.evidenceDir, paths.workspaceProofPath, paths.mergeBundlePath, ...(patchPath ? [patchPath] : [])],
+    evidencePaths: [paths.evidenceDir, paths.resourceAllocationPath, paths.workspaceProofPath, paths.mergeBundlePath, ...(patchPath ? [patchPath] : [])],
     ...(patchPath ? { patchPath } : {}),
     queueItemIds: [job.taskId],
     verification,
     lastMessage: execution.lastMessage,
     error: execution.error,
-    metadata: lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : undefined
+    metadata: {
+      ...(lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : {}),
+      resourceAllocation
+    }
   };
   const mergeBundle = createSwarmMergeBundle({
     runId: options.eventStream?.runId,
     job,
     result,
     ...(patchPath ? { patchPath } : {}),
-    evidencePaths: [paths.evidenceDir, paths.workspaceProofPath],
+    evidencePaths: [paths.evidenceDir, paths.resourceAllocationPath, paths.workspaceProofPath],
     queueItemIds: [job.taskId]
   });
   await fs.writeFile(paths.mergeBundlePath, JSON.stringify(mergeBundle, null, 2) + '\n');
@@ -742,10 +780,52 @@ function resolveCodexReasoningEffort(
   return effort ? String(effort).trim() : undefined;
 }
 
+export function createCodexResourceAllocation(
+  job: FrontierSwarmJob,
+  input: { cwd?: string; outDir: string; workspacePath?: string; lease?: FrontierSwarmLease }
+): FrontierCodexResourceAllocation {
+  const requirements = job.resourceRequirements;
+  const capabilities = uniqueStrings([...(job.capabilities ?? []), ...(requirements?.capabilities ?? [])]);
+  const resources = { ...(requirements?.resources ?? {}) };
+  const env: Record<string, string> = {
+    FRONTIER_SWARM_JOB_ID: job.id,
+    FRONTIER_SWARM_TASK_ID: job.taskId,
+    FRONTIER_SWARM_LANE: job.lane,
+    FRONTIER_SWARM_CAPABILITIES: capabilities.join(',')
+  };
+  const browser = requirements?.browser;
+  if (!browser) return { capabilities, resources, env };
+  const portPool = uniqueWorkspacePaths(browser.portPool ?? []);
+  const port = portPool.length ? portPool[resourceSlot(job, input.lease, portPool.length)] : undefined;
+  const profileDir = resolveBrowserProfileDir(job, browser.profileDir, browser.profileDirPrefix, input.cwd ?? process.cwd());
+  const browserAllocation: FrontierCodexBrowserAllocation = {
+    required: browser.required,
+    portPool,
+    ...(port ? { port } : {}),
+    ...(profileDir ? { profileDir } : {}),
+    ...(browser.headless !== undefined ? { headless: browser.headless } : {})
+  };
+  env.FRONTIER_SWARM_BROWSER_REQUIRED = String(browser.required);
+  if (port) {
+    env.FRONTIER_SWARM_BROWSER_PORT = port;
+    env.PORT = port;
+  }
+  if (profileDir) env.FRONTIER_SWARM_BROWSER_PROFILE_DIR = profileDir;
+  if (browser.headless !== undefined) env.FRONTIER_SWARM_BROWSER_HEADLESS = String(browser.headless);
+  env.FRONTIER_SWARM_RESOURCE_ALLOCATION = JSON.stringify({ capabilities, resources, browser: browserAllocation });
+  return {
+    capabilities,
+    resources,
+    env,
+    browser: browserAllocation
+  };
+}
+
 export function renderCodexPrompt(
   job: FrontierSwarmJob,
-  input: { workspacePath: string; paths: FrontierCodexJobPaths }
+  input: { workspacePath: string; paths: FrontierCodexJobPaths; resourceAllocation?: FrontierCodexResourceAllocation }
 ): string {
+  const resourceAllocation = input.resourceAllocation ?? createCodexResourceAllocation(job, { outDir: input.paths.jobDir, workspacePath: input.workspacePath });
   return [
     '# Frontier Swarm Codex Job',
     '',
@@ -777,6 +857,9 @@ export function renderCodexPrompt(
     'Budget:',
     ...bullets(formatBudget(job)),
     '',
+    'Resource allocation:',
+    ...bullets(formatResourceAllocation(resourceAllocation)),
+    '',
     'Source refs:',
     ...bullets(job.task.sourceRefs),
     '',
@@ -804,7 +887,11 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
   await fs.writeFile(input.paths.eventsPath, '');
   await fs.writeFile(input.paths.stderrPath, '');
   return new Promise((resolve) => {
-    const child = spawn(input.codexPath, input.args, { cwd: input.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(input.codexPath, input.args, {
+      cwd: input.cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, ...input.env }
+    });
     if (child.pid) {
       appendCodexPidManifest(input.paths.pidManifestPath, {
         pid: child.pid,
@@ -842,6 +929,7 @@ async function createJobPaths(outDir: string, job: FrontierSwarmJob, options: Fr
     stderrPath: path.join(jobDir, 'codex-stderr.log'),
     lastMessagePath: path.join(jobDir, 'last-message.md'),
     evidenceDir: path.join(jobDir, 'evidence'),
+    resourceAllocationPath: path.join(jobDir, 'evidence', 'resource-allocation.json'),
     workspaceProofPath: path.join(jobDir, 'evidence', 'workspace-proof.json'),
     patchPath: path.join(jobDir, 'evidence', 'changes.patch'),
     mergeBundlePath: path.join(jobDir, 'evidence', 'merge.json'),
@@ -1828,6 +1916,47 @@ function formatBudget(job: FrontierSwarmJob): string[] {
     job.budget.maxDurationMs === undefined ? undefined : `maxDurationMs=${job.budget.maxDurationMs}`,
     `maxRetries=${job.budget.maxRetries}`
   ].filter((value): value is string => !!value);
+}
+
+function formatResourceAllocation(allocation: FrontierCodexResourceAllocation): string[] {
+  const entries = [
+    allocation.capabilities.length ? `capabilities=${allocation.capabilities.join(',')}` : undefined,
+    Object.keys(allocation.resources).length ? `resources=${JSON.stringify(allocation.resources)}` : undefined,
+    allocation.browser ? `browser.required=${allocation.browser.required}` : undefined,
+    allocation.browser?.port ? `browser.port=${allocation.browser.port}` : undefined,
+    allocation.browser?.profileDir ? `browser.profileDir=${allocation.browser.profileDir}` : undefined,
+    allocation.browser?.headless === undefined ? undefined : `browser.headless=${allocation.browser.headless}`,
+    Object.keys(allocation.env).length ? `env=${Object.keys(allocation.env).sort().join(',')}` : undefined
+  ].filter((value): value is string => !!value);
+  return entries.length ? entries : ['none'];
+}
+
+function resourceSlot(job: FrontierSwarmJob, lease: FrontierSwarmLease | undefined, count: number): number {
+  if (count <= 1) return 0;
+  const seed = lease ? lease.fencingToken - 1 : Number.parseInt(stableHash(job.id).slice(0, 8), 16);
+  return Math.abs(seed) % count;
+}
+
+function resolveBrowserProfileDir(job: FrontierSwarmJob, profileDir: string | undefined, profileDirPrefix: string | undefined, cwd: string): string | undefined {
+  const raw = profileDir ?? (profileDirPrefix ? path.join(profileDirPrefix, safePathSegment(job.id)) : undefined);
+  if (!raw) return undefined;
+  return path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
+}
+
+function safePathSegment(value: string): string {
+  return value.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'job';
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const normalized = String(value).trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
 }
 
 function arrayOfObjects(value: unknown): Record<string, unknown>[] {

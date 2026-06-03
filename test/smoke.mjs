@@ -13,6 +13,7 @@ import {
   createCodexSwarmPlan,
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
+  createCodexResourceAllocation,
   normalizeCodexApprovalPolicy,
   normalizeCodexModelFlag,
   readCodexPidManifest,
@@ -65,6 +66,7 @@ const paths = {
   stderrPath: path.join(tmp, 'stderr.log'),
   lastMessagePath: path.join(tmp, 'last.md'),
   evidenceDir: path.join(tmp, 'evidence'),
+  resourceAllocationPath: path.join(tmp, 'resource-allocation.json'),
   workspaceProofPath: path.join(tmp, 'workspace-proof.json'),
   patchPath: path.join(tmp, 'changes.patch'),
   mergeBundlePath: path.join(tmp, 'merge.json'),
@@ -110,13 +112,70 @@ assert.ok(copyArgs.includes('--skip-git-repo-check'));
 
 const prompt = renderCodexPrompt(plan.jobs[0], { workspacePath: tmp, paths });
 assert.ok(prompt.includes('Allowed write globs'));
+assert.ok(prompt.includes('Resource allocation'));
 assert.ok(prompt.includes('src/runtime/action.ts'));
+
+const browserPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'browser-resources',
+    lanes: [{
+      id: 'browser',
+      allowedGlobs: ['e2e.mjs'],
+      capabilities: ['browser.playwright'],
+      resourceRequirements: {
+        resources: { browser: 1 },
+        browser: {
+          required: true,
+          portPool: [4177, 4178],
+          profileDirPrefix: 'agent-runs/browser-profiles',
+          maxConcurrency: 1,
+          headless: true
+        }
+      }
+    }]
+  },
+  tasks: {
+    items: [{
+      id: 'browser-smoke',
+      lane: 'browser',
+      ownedFiles: ['e2e.mjs'],
+      capabilities: ['dom.assertions']
+    }]
+  }
+});
+const browserJob = browserPlan.jobs[0];
+const browserAllocation = createCodexResourceAllocation(browserJob, {
+  cwd: tmp,
+  outDir: path.join(tmp, 'browser-run'),
+  workspacePath: tmp,
+  lease: {
+    kind: 'frontier.swarm.lease',
+    version: 1,
+    id: 'lease',
+    jobId: browserJob.id,
+    workerId: 'worker',
+    token: 'token',
+    leasedAt: 0,
+    expiresAt: 1,
+    fencingToken: 2,
+    status: 'active'
+  }
+});
+assert.strictEqual(browserAllocation.browser.port, '4178');
+assert.strictEqual(browserAllocation.env.PORT, '4178');
+assert.strictEqual(browserAllocation.env.FRONTIER_SWARM_BROWSER_HEADLESS, 'true');
+assert.ok(browserAllocation.browser.profileDir.endsWith(path.join('agent-runs', 'browser-profiles', browserJob.id)));
+const browserPrompt = renderCodexPrompt(browserJob, { workspacePath: tmp, paths, resourceAllocation: browserAllocation });
+assert.ok(browserPrompt.includes('browser.port=4178'));
+assert.ok(browserPrompt.includes('FRONTIER_SWARM_BROWSER_PROFILE_DIR'));
 
 const result = await runCodexSwarm(plan, {
   outDir: path.join(tmp, 'run'),
   cwd: tmp,
   dryRun: false,
   executor: async (input) => {
+    assert.strictEqual(input.resourceAllocation.env.FRONTIER_SWARM_JOB_ID, input.job.id);
+    assert.strictEqual(input.env.FRONTIER_SWARM_TASK_ID, input.job.taskId);
     await fs.writeFile(input.paths.lastMessagePath, 'done\n');
     return { exitCode: 0, changedPaths: ['src/runtime/action.ts'], lastMessage: 'done' };
   }
@@ -126,6 +185,7 @@ assert.strictEqual(result.run.results[0].ownershipViolations.length, 0);
 assert.ok(result.proof.hash);
 assert.ok(await exists(path.join(tmp, 'run', 'coordinator-dashboard.json')));
 assert.ok(await exists(path.join(tmp, 'run', 'pids.json')));
+assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('resource-allocation.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('workspace-proof.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('merge.json')));
 assert.strictEqual(result.run.results[0].mergeReadiness, 'patch-candidate');
@@ -143,6 +203,23 @@ assert.ok(await exists(path.join(collection.outDir, 'merge-index.json')));
 assert.ok(await exists(path.join(collection.outDir, 'queue-overlay.json')));
 const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
 assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
+
+const browserRun = await runCodexSwarm(browserPlan, {
+  outDir: path.join(tmp, 'browser-run'),
+  cwd: tmp,
+  dryRun: false,
+  executor: async (input) => {
+    assert.strictEqual(input.resourceAllocation.browser.port, '4177');
+    assert.strictEqual(input.env.PORT, '4177');
+    assert.ok(await exists(input.resourceAllocation.browser.profileDir));
+    await fs.writeFile(input.paths.lastMessagePath, 'browser done\n');
+    return { exitCode: 0, changedPaths: ['e2e.mjs'], lastMessage: 'browser done' };
+  }
+});
+assert.strictEqual(browserRun.ok, true);
+const browserResourcePath = browserRun.run.results[0].evidencePaths.find((entry) => entry.endsWith('resource-allocation.json'));
+const browserResourceEvidence = JSON.parse(await fs.readFile(browserResourcePath, 'utf8'));
+assert.strictEqual(browserResourceEvidence.browser.port, '4177');
 
 const applyRepo = path.join(tmp, 'apply-repo');
 await fs.mkdir(path.join(applyRepo, 'src'), { recursive: true });
