@@ -38,7 +38,7 @@ The published Frontier package family is generated from one shared package catal
 - [`@shapeshift-labs/frontier-workflow`](https://www.npmjs.com/package/@shapeshift-labs/frontier-workflow): Serializable durable workflow/process manifests for Frontier apps, including steps, waits, approvals, timers, retries, expected patches, compensation, records, timelines, and registry graph output.
 - [`@shapeshift-labs/frontier-worker`](https://www.npmjs.com/package/@shapeshift-labs/frontier-worker): Serializable worker and edge task descriptors for Frontier apps, including queues, idempotency keys, retry and timeout policy, declared reads/writes/effects, snapshots, patch outputs, produced assets, execution records, logs, trace links, proof hashes, dedupe indexes, and registry graph output.
 - [`@shapeshift-labs/frontier-queue`](https://www.npmjs.com/package/@shapeshift-labs/frontier-queue): Serializable durable queue state, leases, retries, dedupe keys, patch-carrying jobs, dead-letter records, replay evidence, and queue inspection for Frontier apps.
-- [`@shapeshift-labs/frontier-swarm`](https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm): Hierarchical swarm plans, lanes, compute profiles, ownership policy, semantic ownership regions, task queues, event streams, run records, merge bundles, changed-path checks, and proof artifacts for Frontier agent work.
+- [`@shapeshift-labs/frontier-swarm`](https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm): Hierarchical swarm plans, lanes, compute profiles, ownership policy, semantic ownership regions, task queues, event streams, run records, merge bundles, merge indexes, queue overlays, merge admission, changed-path checks, and proof artifacts for Frontier agent work.
 - [`@shapeshift-labs/frontier-kv`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv): Serializable in-memory key/value state for Frontier apps, including TTL, versioned compare-and-set, batched patch mutations, scans, watchers, snapshots, JSONL event evidence, and replay verification.
 - [`@shapeshift-labs/frontier-kv-locks`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv-locks): Lease-style lock records on top of Frontier KV, including acquire, renew, release, fencing tokens, expiration, owner evidence, and replayable lock events.
 - [`@shapeshift-labs/frontier-kv-rate-limit`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv-rate-limit): Patch-native rate limit buckets for Frontier KV, including fixed windows, sliding windows, token buckets, deterministic refill, consume evidence, and reset records.
@@ -236,7 +236,7 @@ For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `
 
 ## Scalable Scheduling
 
-`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. Browser lanes can declare capabilities, port pools, profile directory prefixes, and lower lane concurrency in the upstream swarm manifest. This keeps the public runner simple while making the execution model compatible with much larger queues and external lease-backed workers.
+`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. Browser lanes can declare capabilities, port pools, profile directory prefixes, and lower lane concurrency in the upstream swarm manifest. The adapter turns those declarations into a per-job resource allocation, writes `resource-allocation.json`, includes the allocation in the worker prompt and event stream, creates browser profile directories, and passes env vars such as `PORT`, `FRONTIER_SWARM_BROWSER_PORT`, and `FRONTIER_SWARM_BROWSER_PROFILE_DIR` into the Codex process. This keeps the public runner simple while making the execution model compatible with much larger queues and external lease-backed workers.
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
 
@@ -249,7 +249,11 @@ Each run writes event streams under `streams/`, a `coordinator-dashboard.json` s
 - `failed-evidence/` for failed workers, blockers, ownership violations, or failed required commands,
 - `stale-against-head/` for patch bundles that no longer apply.
 
-The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
+It also writes `merge-index.json` and `queue-overlay.json` so coordinator dashboards can show stale patches, conflicts, derived queue status, and ready merge pressure without scraping every worker directory. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
+
+`frontier-swarm apply --collection <collection-dir>` reviews the `ready-to-apply/` bucket and writes `apply-ledger.json`. It defaults to `--dry-run`, which runs `git apply --check` without mutating the checkout. Non-dry-run apply refuses a dirty worktree unless `--allow-dirty` is passed, and can optionally create small branches with `--branch-prefix` and commits with `--commit`.
+
+`frontier-swarm score --collection <collection-dir>` applies each collected bundle in a throwaway workspace and writes `patch-score.json`. Use `--focused-command` for the gate that proves the slice and `--global-command` with `--global-glob` for shared-code smoke/type/build gates. Scores are classified as `accepted-clean`, `accepted-needs-port`, `conflict`, `test-fail`, `stale`, or `evidence-only`, so the coordinator can review the best patch candidates before manually reading every bundle.
 
 ## Surface
 
@@ -261,11 +265,14 @@ The optional `--branch-prefix` adds suggested tiny patch branch names to each co
 - `prepareCodexWorkspace`
 - `runCodexSwarm`
 - `runCodexJob`
+- `createCodexResourceAllocation`
 - `buildCodexArgs`
 - `normalizeCodexModelFlag`, `normalizeCodexApprovalPolicy`
 - `initFileSwarmEventStream`, `appendFileSwarmEvent`, `writeSwarmCoordinatorSnapshot`
 - `appendCodexPidManifest`, `readCodexPidManifest`, `stopCodexSwarmRun`
 - `collectCodexSwarmRun`
+- `applyCodexSwarmCollection`
+- `scoreCodexSwarmPatches`
 - `renderCodexPrompt`
 - `spawnCodexExecutor`
 

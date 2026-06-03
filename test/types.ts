@@ -1,13 +1,19 @@
 import {
+  applyCodexSwarmCollection,
   buildCodexArgs,
   collectCodexSwarmRun,
+  createCodexResourceAllocation,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
   createSwarmWorkspaceManifest,
   runCodexSwarm,
+  scoreCodexSwarmPatches,
   type FrontierCodexWorkspacePlan,
   type FrontierCodexWorkspaceManifest,
   type FrontierCodexCollectResult,
+  type FrontierCodexApplyResult,
+  type FrontierCodexPatchScoreResult,
+  type FrontierCodexResourceAllocation,
   type FrontierCodexSwarmRunResult
 } from '../dist/index.js';
 
@@ -27,6 +33,7 @@ const args = buildCodexArgs(job, {
     stderrPath: 'stderr.log',
     lastMessagePath: 'last.md',
     evidenceDir: 'evidence',
+    resourceAllocationPath: 'evidence/resource-allocation.json',
     workspaceProofPath: 'evidence/workspace-proof.json',
     patchPath: 'evidence/changes.patch',
     mergeBundlePath: 'evidence/merge.json',
@@ -50,11 +57,20 @@ const workspacePlan: FrontierCodexWorkspacePlan = createCodexWorkspacePlan(job, 
   outDir: '.',
   workspace: { mode: 'snapshot', includes: ['src'], linkNodeModules: false }
 });
+const resourceAllocation: FrontierCodexResourceAllocation = createCodexResourceAllocation(job, {
+  outDir: '.',
+  workspacePath: '.'
+});
 const workspaceManifest: FrontierCodexWorkspaceManifest = createSwarmWorkspaceManifest(workspacePlan);
 const collectPromise: Promise<FrontierCodexCollectResult> = collectCodexSwarmRun({ run: '.', checkStale: false });
+const applyPromise: Promise<FrontierCodexApplyResult> = applyCodexSwarmCollection({ collection: '.', dryRun: true });
+const scorePromise: Promise<FrontierCodexPatchScoreResult> = scoreCodexSwarmPatches({ collection: '.', focusedCommands: ['npm test'] });
 
 args satisfies string[];
 workspacePlan satisfies FrontierCodexWorkspacePlan;
+resourceAllocation.env satisfies Record<string, string>;
 workspaceManifest.kind satisfies string;
 resultPromise satisfies Promise<FrontierCodexSwarmRunResult>;
 collectPromise satisfies Promise<FrontierCodexCollectResult>;
+applyPromise satisfies Promise<FrontierCodexApplyResult>;
+scorePromise satisfies Promise<FrontierCodexPatchScoreResult>;
