@@ -16,7 +16,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "frontier-swarm-codex": "./dist/cli.js"
+    "frontier-swarm-codex": "dist/cli.js"
   },
   "exports": {
     ".": {
