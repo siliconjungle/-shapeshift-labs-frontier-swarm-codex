@@ -1,6 +1,6 @@
 {
   "name": "@shapeshift-labs/frontier-swarm-codex",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Node Codex CLI runner adapter for Frontier swarm plans.",
   "type": "module",
   "license": "MIT",
@@ -16,6 +16,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "frontier-swarm": "./dist/cli.js",
     "frontier-swarm-codex": "./dist/cli.js"
   },
   "exports": {
@@ -61,7 +62,7 @@
     "evidence"
   ],
   "dependencies": {
-    "@shapeshift-labs/frontier-swarm": "0.2.0"
+    "@shapeshift-labs/frontier-swarm": "0.3.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

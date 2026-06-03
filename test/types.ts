@@ -1,9 +1,13 @@
 import {
   buildCodexArgs,
+  collectCodexSwarmRun,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
+  createSwarmWorkspaceManifest,
   runCodexSwarm,
   type FrontierCodexWorkspacePlan,
+  type FrontierCodexWorkspaceManifest,
+  type FrontierCodexCollectResult,
   type FrontierCodexSwarmRunResult
 } from '../dist/index.js';
 
@@ -22,7 +26,11 @@ const args = buildCodexArgs(job, {
     eventsPath: 'events.jsonl',
     stderrPath: 'stderr.log',
     lastMessagePath: 'last.md',
-    evidenceDir: 'evidence'
+    evidenceDir: 'evidence',
+    workspaceProofPath: 'evidence/workspace-proof.json',
+    patchPath: 'evidence/changes.patch',
+    mergeBundlePath: 'evidence/merge.json',
+    pidManifestPath: 'pids.json'
   }
 });
 
@@ -42,7 +50,11 @@ const workspacePlan: FrontierCodexWorkspacePlan = createCodexWorkspacePlan(job, 
   outDir: '.',
   workspace: { mode: 'snapshot', includes: ['src'], linkNodeModules: false }
 });
+const workspaceManifest: FrontierCodexWorkspaceManifest = createSwarmWorkspaceManifest(workspacePlan);
+const collectPromise: Promise<FrontierCodexCollectResult> = collectCodexSwarmRun({ run: '.', checkStale: false });
 
 args satisfies string[];
 workspacePlan satisfies FrontierCodexWorkspacePlan;
+workspaceManifest.kind satisfies string;
 resultPromise satisfies Promise<FrontierCodexSwarmRunResult>;
+collectPromise satisfies Promise<FrontierCodexCollectResult>;
