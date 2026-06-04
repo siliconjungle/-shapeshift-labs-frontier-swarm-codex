@@ -232,7 +232,7 @@ Large monorepos do not need one full git worktree per worker. The adapter suppor
 - `copy`: create a minimal copied workspace from declared includes, task `files`, `sourceRefs`, `targetRefs`, and task `snapshotIncludes`.
 - `snapshot`: same minimal-copy mechanics with snapshot-oriented naming for legacy SNES-style task manifests.
 
-For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, ROM/test artifacts) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Runner-owned artifacts are recorded in `workspace-proof.json` and filtered out of ownership checks, which keeps parent dirty files and copied workspace logs from falsely failing useful workers. Each job also writes `changes.patch` when a patch can be derived and `merge.json` with the touched owned files, evidence paths, verification results, queue item IDs, risk, and merge disposition. Use `linkPaths` for heavy shared directories such as `packages`, corpora, ROMs, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, `snapshotLinkPaths`, `requiredIncludes`, and `optionalIncludes`.
+For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, and build outputs) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Runner-owned artifacts are recorded in `workspace-proof.json` and filtered out of ownership checks, which keeps parent dirty files and copied workspace logs from falsely failing useful workers. Each job also writes `changes.patch` when a patch can be derived and `merge.json` with the touched owned files, evidence paths, verification results, queue item IDs, risk, and merge disposition. Use `linkPaths` for heavy shared directories such as `packages`, corpora, fixtures, generated assets, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, `snapshotLinkPaths`, `requiredIncludes`, and `optionalIncludes`.
 
 ## Scalable Scheduling
 
@@ -240,7 +240,7 @@ For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
 
-Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
+Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
 
 `frontier-swarm collect --run <run-dir>` derives status from immutable worker overlays instead of asking workers to edit a central queue. It scans `merge.json` files and writes:
 
@@ -265,6 +265,7 @@ It also writes `merge-index.json` and `queue-overlay.json` so coordinator dashbo
 - `prepareCodexWorkspace`
 - `runCodexSwarm`
 - `runCodexJob`
+- `discoverCodexHandoffArtifacts`
 - `createCodexResourceAllocation`
 - `buildCodexArgs`
 - `normalizeCodexModelFlag`, `normalizeCodexApprovalPolicy`

@@ -20,7 +20,9 @@ const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'plan';
 
 try {
-  if (command === 'plan') {
+  if (command === 'help' || args.help === true || args.h === true) {
+    printHelp();
+  } else if (command === 'plan') {
     const plan = await loadPlan(args);
     const outDir = path.resolve(String(args.outDir ?? args.out ?? `agent-runs/frontier-swarm-codex/${stamp()}`));
     await fs.mkdir(outDir, { recursive: true });
@@ -121,6 +123,31 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
+}
+
+function printHelp() {
+  console.log([
+    'frontier-swarm <command> [options]',
+    '',
+    'Commands:',
+    '  plan      Build a swarm plan from --manifest and --tasks',
+    '  run       Run planned jobs through the Codex CLI',
+    '  stop      Stop a run using pids.json',
+    '  collect   Collect merge bundles into ready/needs-port/failed/stale buckets',
+    '  score     Score collected patches in throwaway workspaces',
+    '  apply     Dry-run or apply collected patch bundles',
+    '  verify    Verify a swarm-results.json proof',
+    '',
+    'Useful options:',
+    '  --model-policy config-default|plan|explicit',
+    '  --approval never|on-request|on-failure|untrusted',
+    '  --workspace current|copy|snapshot|git-worktree',
+    '  --include <path> --exclude <path> --link <path>',
+    '  --focused-command <cmd> --global-command <cmd>',
+    '',
+    'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',
+    'merge.json, changes.patch, and discovered debug/replay/watchpoint/trace artifacts.'
+  ].join('\n'));
 }
 
 async function loadPlan(options: CliArgs) {

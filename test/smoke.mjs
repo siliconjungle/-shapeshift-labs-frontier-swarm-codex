@@ -14,6 +14,7 @@ import {
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
   createCodexResourceAllocation,
+  discoverCodexHandoffArtifacts,
   normalizeCodexApprovalPolicy,
   normalizeCodexModelFlag,
   readCodexPidManifest,
@@ -72,6 +73,16 @@ const paths = {
   mergeBundlePath: path.join(tmp, 'merge.json'),
   pidManifestPath: path.join(tmp, 'pids.json')
 };
+await fs.writeFile(path.join(tmp, 'last-message.md'), 'handoff\n');
+await fs.mkdir(path.join(tmp, 'evidence'), { recursive: true });
+await fs.writeFile(path.join(tmp, 'evidence', 'debug-handoff.json'), '{}\n');
+await fs.writeFile(path.join(tmp, 'evidence', 'trace.jsonl'), '{}\n');
+await fs.writeFile(path.join(tmp, 'evidence', 'watchpoints.json'), '{}\n');
+const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: tmp });
+assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'last-message'));
+assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'debug-handoff'));
+assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'trace'));
+assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'watchpoint'));
 const args = buildCodexArgs(plan.jobs[0], { outDir: tmp, workspacePath: tmp, paths });
 assert.ok(!args.includes('--model'));
 assert.ok(!args.includes('gpt-5.5'));
@@ -452,6 +463,8 @@ const changedResult = await runCodexSwarm(plan, {
 });
 assert.strictEqual(changedResult.ok, true);
 assert.deepStrictEqual(changedResult.run.results[0].changedPaths, ['src/runtime/action.ts']);
+assert.ok(changedResult.run.results[0].metadata.codexHandoffArtifacts.some((artifact) => artifact.kind === 'last-message'));
+assert.ok(changedResult.run.results[0].evidencePaths.some((entry) => entry.endsWith('last-message.md')));
 const changedWorkspaceProofPath = changedResult.run.results[0].evidencePaths.find((entry) => entry.endsWith('workspace-proof.json'));
 const changedWorkspaceProof = JSON.parse(await fs.readFile(changedWorkspaceProofPath, 'utf8'));
 assert.deepStrictEqual(changedWorkspaceProof.ignoredChangedPaths, [
@@ -467,6 +480,8 @@ assert.strictEqual(JSON.parse(await fs.readFile(path.join(tmp, 'swarm-plan.json'
 const cliSource = await fs.readFile(new URL('../dist/cli.js', import.meta.url), 'utf8');
 assert.ok(cliSource.includes("from './index.js'"));
 assert.ok(cliSource.includes('stopCodexSwarmRun'));
+assert.ok(cliSource.includes('frontier-swarm <command> [options]'));
+assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
 
 const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
 await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: 'pid-test', startedAt: Date.now() }, 'pid-test');

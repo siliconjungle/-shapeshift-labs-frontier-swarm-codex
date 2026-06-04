@@ -11,7 +11,7 @@ const packageName = packageJson.name;
 const stack = new Set((process.env.FRONTIER_PACKAGE_BUILD_STACK || '').split(path.delimiter).filter(Boolean));
 const nextStack = new Set(stack);
 nextStack.add(packageName);
-linkLocalPackage(packageName, packageDir);
+unlinkSelfPackage(packageName);
 
 for (const dependency of readLocalDependencies(packageJson)) {
   const targetDir = localPackageDir(dependency);
@@ -28,8 +28,14 @@ for (const dependency of readLocalDependencies(packageJson)) {
   }
 }
 
+if (process.argv.includes('--typecheck')) {
+  runTsc(['-p', path.join(packageDir, 'tsconfig.json'), '--noEmit']);
+  runTsc(['-p', path.join(packageDir, 'test', 'tsconfig.json'), '--noEmit']);
+  process.exit(0);
+}
+
 fs.rmSync(path.join(packageDir, 'dist'), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-execFileSync(resolveTsc(), ['-b', path.join(packageDir, 'tsconfig.json'), '--force'], { stdio: 'inherit' });
+runTsc(['-b', path.join(packageDir, 'tsconfig.json'), '--force']);
 fs.chmodSync(path.join(packageDir, 'dist', 'cli.js'), 0o755);
 
 function readLocalDependencies(pkg) {
@@ -73,6 +79,17 @@ function linkLocalPackage(name, targetDir) {
   }
 }
 
+function unlinkSelfPackage(name) {
+  const parts = name.split('/');
+  const linkPath = path.join(packageDir, 'node_modules', ...parts);
+  try {
+    const stat = fs.lstatSync(linkPath);
+    if (stat.isSymbolicLink()) fs.unlinkSync(linkPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
 function isPackageBuildCurrent(targetDir) {
   const distEntry = path.join(targetDir, 'dist', 'index.js');
   const distTypes = path.join(targetDir, 'dist', 'index.d.ts');
@@ -108,4 +125,18 @@ function resolveTsc() {
     if (fs.existsSync(candidate)) return candidate;
   }
   return command;
+}
+
+function resolveTscScript() {
+  const candidates = [
+    path.join(packageDir, 'node_modules', 'typescript', 'bin', 'tsc'),
+    path.join(rootDir, 'node_modules', 'typescript', 'bin', 'tsc')
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function runTsc(args) {
+  const tscScript = resolveTscScript();
+  if (tscScript) execFileSync(process.execPath, [tscScript, ...args], { stdio: 'inherit' });
+  else execFileSync(resolveTsc(), args, { stdio: 'inherit' });
 }
