@@ -802,6 +802,7 @@ export async function runCodexJob(
     ...(patchPath ? { patchPath } : {}),
     queueItemIds: [job.taskId],
     verification,
+    ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {}),
     lastMessage: execution.lastMessage,
     error: execution.error,
     metadata: {
@@ -824,6 +825,7 @@ export async function runCodexJob(
       ...handoffArtifacts.map((artifact) => artifact.path)
     ]),
     queueItemIds: [job.taskId],
+    ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {}),
     ...(semanticImport ? { metadata: { semanticImport: semanticImport.sidecar.summary } } : {})
   });
   await fs.writeFile(paths.mergeBundlePath, JSON.stringify(mergeBundle, null, 2) + '\n');
