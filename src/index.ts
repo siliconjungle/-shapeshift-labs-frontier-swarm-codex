@@ -153,6 +153,8 @@ export interface FrontierCodexSemanticImportRecord {
     relations: number;
     facts: number;
   };
+  semanticSidecar?: unknown;
+  sourceProjection?: unknown;
   mergeCandidate?: unknown;
   error?: string;
 }
@@ -183,6 +185,21 @@ export interface FrontierCodexSemanticImportSidecar {
       occurrences: number;
       relations: number;
       facts: number;
+    };
+    semanticSidecars: {
+      total: number;
+      symbols: number;
+      ownershipRegions: number;
+      patchHints: number;
+      empty: number;
+    };
+    sourceProjections: {
+      total: number;
+      preserved: number;
+      stubs: number;
+      ready: number;
+      needsReview: number;
+      blocked: number;
     };
     readiness: Record<string, number>;
   };
@@ -871,6 +888,19 @@ async function createCodexSemanticImportSidecar(input: {
         }
       });
       const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
+      const semanticSidecar = api.createSemanticImportSidecar
+        ? api.createSemanticImportSidecar(importResult, {
+          targetPath: file.path,
+          metadata: {
+            swarmJobId: input.job.id,
+            swarmTaskId: input.job.taskId,
+            swarmLane: input.job.lane
+          }
+        })
+        : undefined;
+      const sourceProjection = api.projectNativeImportToSource
+        ? api.projectNativeImportToSource(importResult, { sourceText, sourcePath: file.path })
+        : undefined;
       const sourceMaps = Array.isArray(importResult?.sourceMaps)
         ? importResult.sourceMaps
         : Array.isArray(importResult?.universalAst?.sourceMaps)
@@ -893,6 +923,8 @@ async function createCodexSemanticImportSidecar(input: {
         lossCount: Array.isArray(importResult?.losses) ? importResult.losses.length : 0,
         losses: summarizeSemanticLosses(importResult?.losses),
         semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
+        semanticSidecar: summarizeLangSemanticImportSidecar(semanticSidecar),
+        sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
       });
     } catch (error) {
@@ -2209,6 +2241,8 @@ type FrontierLangSemanticImportApi = {
   ok: true;
   importNativeSource(input: Record<string, unknown>): any;
   createSemanticMergeCandidateFromImport(input: Record<string, unknown>): any;
+  createSemanticImportSidecar?(importResult: unknown, options?: Record<string, unknown>): any;
+  projectNativeImportToSource?(importResult: unknown, options?: Record<string, unknown>): any;
   hashUniversalAstEnvelope?(input: unknown): string;
 } | {
   ok: false;
@@ -2291,6 +2325,8 @@ async function loadFrontierLangForSemanticImport(): Promise<FrontierLangSemantic
       ok: true,
       importNativeSource: api.importNativeSource,
       createSemanticMergeCandidateFromImport: api.createSemanticMergeCandidateFromImport,
+      ...(typeof api.createSemanticImportSidecar === 'function' ? { createSemanticImportSidecar: api.createSemanticImportSidecar } : {}),
+      ...(typeof api.projectNativeImportToSource === 'function' ? { projectNativeImportToSource: api.projectNativeImportToSource } : {}),
       ...(typeof api.hashUniversalAstEnvelope === 'function' ? { hashUniversalAstEnvelope: api.hashUniversalAstEnvelope } : {})
     };
   } catch (error) {
@@ -2311,6 +2347,27 @@ function createSemanticImportSidecar(
     totals.facts += record.semanticIndex?.facts ?? 0;
     return totals;
   }, { documents: 0, symbols: 0, occurrences: 0, relations: 0, facts: 0 });
+  const semanticSidecars = records.reduce((totals, record) => {
+    const summary = record.semanticSidecar as { symbols?: number; ownershipRegions?: number; patchHints?: number; emptySemanticIndex?: boolean } | undefined;
+    if (!summary) return totals;
+    totals.total += 1;
+    totals.symbols += summary.symbols ?? 0;
+    totals.ownershipRegions += summary.ownershipRegions ?? 0;
+    totals.patchHints += summary.patchHints ?? 0;
+    if (summary.emptySemanticIndex) totals.empty += 1;
+    return totals;
+  }, { total: 0, symbols: 0, ownershipRegions: 0, patchHints: 0, empty: 0 });
+  const sourceProjections = records.reduce((totals, record) => {
+    const summary = record.sourceProjection as { mode?: string; readiness?: string } | undefined;
+    if (!summary) return totals;
+    totals.total += 1;
+    if (summary.mode === 'preserved-source') totals.preserved += 1;
+    if (summary.mode === 'native-source-stubs') totals.stubs += 1;
+    if (summary.readiness === 'ready' || summary.readiness === 'ready-with-losses') totals.ready += 1;
+    else if (summary.readiness === 'blocked') totals.blocked += 1;
+    else totals.needsReview += 1;
+    return totals;
+  }, { total: 0, preserved: 0, stubs: 0, ready: 0, needsReview: 0, blocked: 0 });
   const lossesBySeverity: Record<string, number> = {};
   const readiness: Record<string, number> = {};
   for (const record of records) {
@@ -2345,6 +2402,8 @@ function createSemanticImportSidecar(
       lossCount: records.reduce((sum, record) => sum + (record.lossCount ?? 0), 0),
       lossesBySeverity,
       semanticIndex,
+      semanticSidecars,
+      sourceProjections,
       readiness
     }
   };
@@ -2358,6 +2417,49 @@ function summarizeSemanticIndex(value: any): FrontierCodexSemanticImportRecord['
     occurrences: Array.isArray(value.occurrences) ? value.occurrences.length : 0,
     relations: Array.isArray(value.relations) ? value.relations.length : 0,
     facts: Array.isArray(value.facts) ? value.facts.length : 0
+  };
+}
+
+function summarizeLangSemanticImportSidecar(value: any): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  return {
+    kind: value.kind,
+    id: value.id,
+    imports: value.summary?.imports,
+    symbols: value.summary?.symbols,
+    ownershipRegions: value.summary?.ownershipRegions,
+    sourceMapMappings: value.summary?.sourceMapMappings,
+    readiness: value.summary?.readiness,
+    emptySemanticIndex: value.summary?.emptySemanticIndex,
+    patchHints: Array.isArray(value.patchHints) ? value.patchHints.length : 0,
+    sampleOwnershipRegions: Array.isArray(value.ownershipRegions)
+      ? value.ownershipRegions.slice(0, 12).map((region: any) => ({
+        id: region?.id,
+        key: region?.key,
+        sourcePath: region?.sourcePath,
+        symbolName: region?.symbolName,
+        symbolKind: region?.symbolKind,
+        sourceSpan: region?.sourceSpan,
+        precision: region?.precision
+      }))
+      : []
+  };
+}
+
+function summarizeNativeSourceProjection(value: any): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  return {
+    kind: value.kind,
+    id: value.id,
+    language: value.language,
+    sourcePath: value.sourcePath,
+    mode: value.mode,
+    outputHash: value.outputHash,
+    declarationCount: Array.isArray(value.declarations) ? value.declarations.length : 0,
+    lossCount: Array.isArray(value.losses) ? value.losses.length : 0,
+    readiness: value.readiness?.readiness,
+    sourceHashVerified: value.metadata?.sourceHashVerified,
+    exactSourceAvailable: value.metadata?.exactSourceAvailable
   };
 }
 

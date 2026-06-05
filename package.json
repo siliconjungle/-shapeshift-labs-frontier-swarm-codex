@@ -1,6 +1,6 @@
 {
   "name": "@shapeshift-labs/frontier-swarm-codex",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Node Codex CLI runner adapter for Frontier swarm plans with resource allocation.",
   "type": "module",
   "license": "MIT",
@@ -65,7 +65,7 @@
     "@shapeshift-labs/frontier-swarm": "0.5.2"
   },
   "optionalDependencies": {
-    "@shapeshift-labs/frontier-lang": "0.4.8"
+    "@shapeshift-labs/frontier-lang": "0.4.9"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
