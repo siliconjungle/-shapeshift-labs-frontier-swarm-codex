@@ -39,6 +39,17 @@ The published Frontier package family is generated from one shared package catal
 - [`@shapeshift-labs/frontier-worker`](https://www.npmjs.com/package/@shapeshift-labs/frontier-worker): Serializable worker and edge task descriptors for Frontier apps, including queues, idempotency keys, retry and timeout policy, declared reads/writes/effects, snapshots, patch outputs, produced assets, execution records, logs, trace links, proof hashes, dedupe indexes, and registry graph output.
 - [`@shapeshift-labs/frontier-queue`](https://www.npmjs.com/package/@shapeshift-labs/frontier-queue): Serializable durable queue state, leases, retries, dedupe keys, patch-carrying jobs, dead-letter records, replay evidence, and queue inspection for Frontier apps.
 - [`@shapeshift-labs/frontier-swarm`](https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm): Hierarchical swarm plans, lanes, compute profiles, ownership policy, semantic ownership regions, task queues, event streams, run records, merge bundles, merge indexes, queue overlays, merge admission, changed-path checks, and proof artifacts for Frontier agent work.
+- [`@shapeshift-labs/frontier-lang-kernel`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-kernel): Runtime-neutral semantic source graph, type/lattice/extern declarations, patch bundles, replay, hashing, evidence records, and merge-admission kernel for Frontier Lang.
+- [`@shapeshift-labs/frontier-lang-parser`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-parser): Dependency-light Frontier Lang parser for modules, entities, state, actions, effects, types, externs, targets, and lattice declarations.
+- [`@shapeshift-labs/frontier-lang-checker`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-checker): Checker and diagnostics for Frontier Lang semantic documents, including type symbols, effects, regions, lattice laws, CRDT metadata, and patch evidence.
+- [`@shapeshift-labs/frontier-lang-typescript`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-typescript): TypeScript projection adapter for Frontier Lang semantic documents, including type/entity/state/action/extern declarations and CRDT lattice descriptors.
+- [`@shapeshift-labs/frontier-lang-javascript`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-javascript): JavaScript projection adapter for Frontier Lang semantic documents, including ESM action stubs and schema/lattice descriptors.
+- [`@shapeshift-labs/frontier-lang-rust`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-rust): Rust projection adapter for Frontier Lang semantic documents, including structs, aliases, and action stubs.
+- [`@shapeshift-labs/frontier-lang-python`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-python): Python projection adapter for Frontier Lang semantic documents, including dataclasses, typed patch records, and action stubs.
+- [`@shapeshift-labs/frontier-lang-c`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-c): C header projection adapter for Frontier Lang semantic documents, including structs and action prototypes.
+- [`@shapeshift-labs/frontier-lang-compiler`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-compiler): Compiler facade for Frontier Lang source documents, including parse, check, hash, diagnostics, and projection to TypeScript, JavaScript, Rust, Python, and C.
+- [`@shapeshift-labs/frontier-lang-cli`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-cli): Command line interface for parsing, checking, hashing, and emitting Frontier Lang projects.
+- [`@shapeshift-labs/frontier-lang`](https://www.npmjs.com/package/@shapeshift-labs/frontier-lang): Umbrella package for Frontier Lang kernel, parser, checker, and projection adapters.
 - [`@shapeshift-labs/frontier-kv`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv): Serializable in-memory key/value state for Frontier apps, including TTL, versioned compare-and-set, batched patch mutations, scans, watchers, snapshots, JSONL event evidence, and replay verification.
 - [`@shapeshift-labs/frontier-kv-locks`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv-locks): Lease-style lock records on top of Frontier KV, including acquire, renew, release, fencing tokens, expiration, owner evidence, and replayable lock events.
 - [`@shapeshift-labs/frontier-kv-rate-limit`](https://www.npmjs.com/package/@shapeshift-labs/frontier-kv-rate-limit): Patch-native rate limit buckets for Frontier KV, including fixed windows, sliding windows, token buckets, deterministic refill, consume evidence, and reset records.
@@ -115,6 +126,17 @@ Package source repositories:
 - [`siliconjungle/-shapeshift-labs-frontier-queue`](https://github.com/siliconjungle/-shapeshift-labs-frontier-queue)
 - [`siliconjungle/-shapeshift-labs-frontier-swarm`](https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm)
 - [`siliconjungle/-shapeshift-labs-frontier-swarm-codex`](https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm-codex)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-kernel`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-kernel)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-parser`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-parser)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-checker`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-checker)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-typescript`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-typescript)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-javascript`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-javascript)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-rust`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-rust)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-python`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-python)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-c`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-c)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-compiler`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-compiler)
+- [`siliconjungle/-shapeshift-labs-frontier-lang-cli`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-cli)
+- [`siliconjungle/-shapeshift-labs-frontier-lang`](https://github.com/siliconjungle/-shapeshift-labs-frontier-lang)
 - [`siliconjungle/-shapeshift-labs-frontier-kv`](https://github.com/siliconjungle/-shapeshift-labs-frontier-kv)
 - [`siliconjungle/-shapeshift-labs-frontier-kv-locks`](https://github.com/siliconjungle/-shapeshift-labs-frontier-kv-locks)
 - [`siliconjungle/-shapeshift-labs-frontier-kv-rate-limit`](https://github.com/siliconjungle/-shapeshift-labs-frontier-kv-rate-limit)
@@ -183,6 +205,7 @@ frontier-swarm-codex run \
   --exclude node_modules,dist,agent-runs \
   --link-path packages \
   --link-node-modules true \
+  --semantic-import \
   --sandbox workspace-write
 
 frontier-swarm stop --run agent-runs/codex-swarm/run-1
@@ -223,6 +246,8 @@ App-specific adapters should keep orchestration inside this package and use hook
 
 Use `modelPolicy: 'config-default'` for portable swarms that should respect each machine's Codex config. Use `modelPolicy: 'plan'` only when the installed Codex CLI and account are known to accept the planned model IDs. `approval: 'full-auto'` and `--approval-policy full-auto` are normalized to the current `--ask-for-approval never` spelling.
 
+Pass `--semantic-import` or `semanticImport: true` to write a `semantic-imports.json` sidecar for changed source files. The sidecar uses the optional `@shapeshift-labs/frontier-lang` dependency to import supported native sources into Frontier Lang universal ASTs, summarize source maps/losses/semantic indexes, and attach semantic merge-candidate metadata to each worker merge bundle. Use `--semantic-import-include`, `--semantic-import-exclude`, `--semantic-import-max-files`, and `--semantic-import-max-bytes` to keep the import pass scoped.
+
 ## Minimal Repro Workspaces
 
 Large monorepos do not need one full git worktree per worker. The adapter supports four workspace modes:
@@ -232,7 +257,7 @@ Large monorepos do not need one full git worktree per worker. The adapter suppor
 - `copy`: create a minimal copied workspace from declared includes, task `files`, `sourceRefs`, `targetRefs`, and task `snapshotIncludes`.
 - `snapshot`: same minimal-copy mechanics with snapshot-oriented naming for legacy SNES-style task manifests.
 
-For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, ROM/test artifacts) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Runner-owned artifacts are recorded in `workspace-proof.json` and filtered out of ownership checks, which keeps parent dirty files and copied workspace logs from falsely failing useful workers. Each job also writes `changes.patch` when a patch can be derived and `merge.json` with the touched owned files, evidence paths, verification results, queue item IDs, risk, and merge disposition. Use `linkPaths` for heavy shared directories such as `packages`, corpora, ROMs, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, `snapshotLinkPaths`, `requiredIncludes`, and `optionalIncludes`.
+For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, and build outputs) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Runner-owned artifacts are recorded in `workspace-proof.json` and filtered out of ownership checks, which keeps parent dirty files and copied workspace logs from falsely failing useful workers. Each job also writes `changes.patch` when a patch can be derived and `merge.json` with the touched owned files, evidence paths, verification results, queue item IDs, risk, and merge disposition. Use `linkPaths` for heavy shared directories such as `packages`, corpora, fixtures, generated assets, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, `snapshotLinkPaths`, `requiredIncludes`, and `optionalIncludes`.
 
 ## Scalable Scheduling
 
@@ -240,7 +265,7 @@ For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
 
-Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
+Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
 
 `frontier-swarm collect --run <run-dir>` derives status from immutable worker overlays instead of asking workers to edit a central queue. It scans `merge.json` files and writes:
 
@@ -265,6 +290,7 @@ It also writes `merge-index.json` and `queue-overlay.json` so coordinator dashbo
 - `prepareCodexWorkspace`
 - `runCodexSwarm`
 - `runCodexJob`
+- `discoverCodexHandoffArtifacts`
 - `createCodexResourceAllocation`
 - `buildCodexArgs`
 - `normalizeCodexModelFlag`, `normalizeCodexApprovalPolicy`
@@ -275,6 +301,7 @@ It also writes `merge-index.json` and `queue-overlay.json` so coordinator dashbo
 - `scoreCodexSwarmPatches`
 - `renderCodexPrompt`
 - `spawnCodexExecutor`
+- `FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND`
 
 ## Benchmarks
 

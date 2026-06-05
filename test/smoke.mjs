@@ -14,6 +14,7 @@ import {
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
   createCodexResourceAllocation,
+  discoverCodexHandoffArtifacts,
   normalizeCodexApprovalPolicy,
   normalizeCodexModelFlag,
   readCodexPidManifest,
@@ -72,6 +73,16 @@ const paths = {
   mergeBundlePath: path.join(tmp, 'merge.json'),
   pidManifestPath: path.join(tmp, 'pids.json')
 };
+await fs.writeFile(path.join(tmp, 'last-message.md'), 'handoff\n');
+await fs.mkdir(path.join(tmp, 'evidence'), { recursive: true });
+await fs.writeFile(path.join(tmp, 'evidence', 'debug-handoff.json'), '{}\n');
+await fs.writeFile(path.join(tmp, 'evidence', 'trace.jsonl'), '{}\n');
+await fs.writeFile(path.join(tmp, 'evidence', 'watchpoints.json'), '{}\n');
+const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: tmp });
+assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'last-message'));
+assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'debug-handoff'));
+assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'trace'));
+assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'watchpoint'));
 const args = buildCodexArgs(plan.jobs[0], { outDir: tmp, workspacePath: tmp, paths });
 assert.ok(!args.includes('--model'));
 assert.ok(!args.includes('gpt-5.5'));
@@ -172,10 +183,13 @@ assert.ok(browserPrompt.includes('FRONTIER_SWARM_BROWSER_PROFILE_DIR'));
 const result = await runCodexSwarm(plan, {
   outDir: path.join(tmp, 'run'),
   cwd: tmp,
+  semanticImport: true,
   dryRun: false,
   executor: async (input) => {
     assert.strictEqual(input.resourceAllocation.env.FRONTIER_SWARM_JOB_ID, input.job.id);
     assert.strictEqual(input.env.FRONTIER_SWARM_TASK_ID, input.job.taskId);
+    await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
+    await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function action() { return 1; }\n');
     await fs.writeFile(input.paths.lastMessagePath, 'done\n');
     return { exitCode: 0, changedPaths: ['src/runtime/action.ts'], lastMessage: 'done' };
   }
@@ -188,11 +202,27 @@ assert.ok(await exists(path.join(tmp, 'run', 'pids.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('resource-allocation.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('workspace-proof.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('merge.json')));
+const semanticImportsPath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('semantic-imports.json'));
+assert.ok(semanticImportsPath);
+const semanticImports = JSON.parse(await fs.readFile(semanticImportsPath, 'utf8'));
+assert.strictEqual(semanticImports.kind, 'frontier.swarm-codex.semantic-imports');
+assert.strictEqual(semanticImports.summary.total, 1);
+assert.strictEqual(semanticImports.summary.selected, 1);
+assert.strictEqual(semanticImports.summary.eligible, 1);
+assert.strictEqual(semanticImports.summary.omitted, 0);
+assert.strictEqual(semanticImports.summary.imported + semanticImports.summary.errors, 1);
+assert.ok(semanticImports.summary.sourceMapCount >= 1);
+assert.ok(semanticImports.summary.sourceMapMappingCount >= 1);
+assert.ok(semanticImports.summary.lossCount >= 1);
+assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
+assert.ok(semanticImports.summary.readiness['ready-with-losses'] >= 1 || semanticImports.summary.readiness['ready'] >= 1);
 assert.strictEqual(result.run.results[0].mergeReadiness, 'patch-candidate');
 const mergeBundlePath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('merge.json'));
 const mergeBundle = JSON.parse(await fs.readFile(mergeBundlePath, 'utf8'));
 assert.strictEqual(mergeBundle.disposition, 'needs-port');
 assert.deepStrictEqual(mergeBundle.queueItemIds, ['runtime-action']);
+assert.strictEqual(mergeBundle.metadata.semanticImport.total, 1);
+assert.ok(mergeBundle.metadata.semanticImport.sourceMapCount >= 1);
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);
@@ -452,6 +482,8 @@ const changedResult = await runCodexSwarm(plan, {
 });
 assert.strictEqual(changedResult.ok, true);
 assert.deepStrictEqual(changedResult.run.results[0].changedPaths, ['src/runtime/action.ts']);
+assert.ok(changedResult.run.results[0].metadata.codexHandoffArtifacts.some((artifact) => artifact.kind === 'last-message'));
+assert.ok(changedResult.run.results[0].evidencePaths.some((entry) => entry.endsWith('last-message.md')));
 const changedWorkspaceProofPath = changedResult.run.results[0].evidencePaths.find((entry) => entry.endsWith('workspace-proof.json'));
 const changedWorkspaceProof = JSON.parse(await fs.readFile(changedWorkspaceProofPath, 'utf8'));
 assert.deepStrictEqual(changedWorkspaceProof.ignoredChangedPaths, [
@@ -467,6 +499,11 @@ assert.strictEqual(JSON.parse(await fs.readFile(path.join(tmp, 'swarm-plan.json'
 const cliSource = await fs.readFile(new URL('../dist/cli.js', import.meta.url), 'utf8');
 assert.ok(cliSource.includes("from './index.js'"));
 assert.ok(cliSource.includes('stopCodexSwarmRun'));
+assert.ok(cliSource.includes('frontier-swarm <command> [options]'));
+assert.ok(cliSource.includes('--semantic-import-include <glob>'));
+assert.ok(cliSource.includes('--semantic-import-exclude <glob>'));
+assert.ok(cliSource.includes('--semantic-import-max-files <n>'));
+assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
 
 const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
 await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: 'pid-test', startedAt: Date.now() }, 'pid-test');

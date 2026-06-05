@@ -6,8 +6,10 @@ import {
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
   createSwarmWorkspaceManifest,
+  discoverCodexHandoffArtifacts,
   runCodexSwarm,
   scoreCodexSwarmPatches,
+  type FrontierCodexHandoffArtifact,
   type FrontierCodexWorkspacePlan,
   type FrontierCodexWorkspaceManifest,
   type FrontierCodexCollectResult,
@@ -65,6 +67,7 @@ const workspaceManifest: FrontierCodexWorkspaceManifest = createSwarmWorkspaceMa
 const collectPromise: Promise<FrontierCodexCollectResult> = collectCodexSwarmRun({ run: '.', checkStale: false });
 const applyPromise: Promise<FrontierCodexApplyResult> = applyCodexSwarmCollection({ collection: '.', dryRun: true });
 const scorePromise: Promise<FrontierCodexPatchScoreResult> = scoreCodexSwarmPatches({ collection: '.', focusedCommands: ['npm test'] });
+const handoffArtifactsPromise: Promise<FrontierCodexHandoffArtifact[]> = discoverCodexHandoffArtifacts({ root: '.' });
 
 args satisfies string[];
 workspacePlan satisfies FrontierCodexWorkspacePlan;
@@ -74,3 +77,4 @@ resultPromise satisfies Promise<FrontierCodexSwarmRunResult>;
 collectPromise satisfies Promise<FrontierCodexCollectResult>;
 applyPromise satisfies Promise<FrontierCodexApplyResult>;
 scorePromise satisfies Promise<FrontierCodexPatchScoreResult>;
+handoffArtifactsPromise satisfies Promise<readonly { kind: string; path: string }[]>;
