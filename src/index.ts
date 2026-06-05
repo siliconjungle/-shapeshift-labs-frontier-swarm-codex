@@ -141,6 +141,8 @@ export interface FrontierCodexSemanticImportRecord {
   universalAstHash?: string;
   nativeAstId?: string;
   nativeSourceId?: string;
+  sourceMapCount?: number;
+  sourceMapMappingCount?: number;
   evidenceCount?: number;
   lossCount?: number;
   losses?: unknown;
@@ -164,9 +166,25 @@ export interface FrontierCodexSemanticImportSidecar {
   records: FrontierCodexSemanticImportRecord[];
   summary: {
     total: number;
+    selected: number;
+    eligible: number;
+    omitted: number;
+    maxFiles: number;
     imported: number;
     skipped: number;
     errors: number;
+    sourceMapCount: number;
+    sourceMapMappingCount: number;
+    lossCount: number;
+    lossesBySeverity: Record<string, number>;
+    semanticIndex: {
+      documents: number;
+      symbols: number;
+      occurrences: number;
+      relations: number;
+      facts: number;
+    };
+    readiness: Record<string, number>;
   };
 }
 
@@ -804,11 +822,12 @@ async function createCodexSemanticImportSidecar(input: {
 }): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
   const options = normalizeSemanticImportOptions(input.options);
   if (!options) return undefined;
-  const selected = selectSemanticImportPaths(input.changedPaths, options);
+  const selection = selectSemanticImportPaths(input.changedPaths, options);
+  const selected = selection.selected;
   const records: FrontierCodexSemanticImportRecord[] = [];
   const importPath = path.join(input.evidenceDir, 'semantic-imports.json');
   if (!selected.length) {
-    const sidecar = createSemanticImportSidecar(input.job, records);
+    const sidecar = createSemanticImportSidecar(input.job, records, selection);
     await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
     return { path: importPath, sidecar };
   }
@@ -823,7 +842,7 @@ async function createCodexSemanticImportSidecar(input: {
         error: api.error
       });
     }
-    const sidecar = createSemanticImportSidecar(input.job, records);
+    const sidecar = createSemanticImportSidecar(input.job, records, selection);
     await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
     return { path: importPath, sidecar };
   }
@@ -852,6 +871,11 @@ async function createCodexSemanticImportSidecar(input: {
         }
       });
       const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
+      const sourceMaps = Array.isArray(importResult?.sourceMaps)
+        ? importResult.sourceMaps
+        : Array.isArray(importResult?.universalAst?.sourceMaps)
+          ? importResult.universalAst.sourceMaps
+          : [];
       records.push({
         path: file.path,
         language: file.language,
@@ -863,6 +887,8 @@ async function createCodexSemanticImportSidecar(input: {
           : undefined,
         nativeAstId: importResult?.nativeAst?.id,
         nativeSourceId: importResult?.nativeSource?.id,
+        sourceMapCount: sourceMaps.length,
+        sourceMapMappingCount: sourceMaps.reduce((sum: number, sourceMap: any) => sum + (Array.isArray(sourceMap?.mappings) ? sourceMap.mappings.length : 0), 0),
         evidenceCount: Array.isArray(importResult?.evidence) ? importResult.evidence.length : 0,
         lossCount: Array.isArray(importResult?.losses) ? importResult.losses.length : 0,
         losses: summarizeSemanticLosses(importResult?.losses),
@@ -879,7 +905,7 @@ async function createCodexSemanticImportSidecar(input: {
       });
     }
   }
-  const sidecar = createSemanticImportSidecar(input.job, records);
+  const sidecar = createSemanticImportSidecar(input.job, records, selection);
   await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
   return { path: importPath, sidecar };
 }
@@ -2172,6 +2198,12 @@ function safePathSegment(value: string): string {
 }
 
 type SemanticImportSelectedPath = { path: string; language: string };
+type SemanticImportSelection = {
+  selected: SemanticImportSelectedPath[];
+  eligibleCount: number;
+  omittedCount: number;
+  maxFiles: number;
+};
 
 type FrontierLangSemanticImportApi = {
   ok: true;
@@ -2198,18 +2230,23 @@ function normalizeSemanticImportOptions(input: boolean | FrontierCodexSemanticIm
 function selectSemanticImportPaths(
   changedPaths: readonly string[],
   options: Required<Pick<FrontierCodexSemanticImportOptions, 'maxFiles' | 'maxBytes'>> & FrontierCodexSemanticImportOptions
-): SemanticImportSelectedPath[] {
-  const selected: SemanticImportSelectedPath[] = [];
+): SemanticImportSelection {
+  const eligible: SemanticImportSelectedPath[] = [];
   for (const file of uniqueWorkspacePaths(changedPaths)) {
-    if (selected.length >= options.maxFiles) break;
     if (pathHasIgnoredSegment(file, ['node_modules', 'dist', 'coverage', 'agent-runs', '.frontier-framework'])) continue;
     if (options.include?.length && !options.include.some((glob) => matchesGlob(file, glob))) continue;
     if (options.exclude?.some((glob) => matchesGlob(file, glob))) continue;
     const language = inferSemanticImportLanguage(file, options.languages);
     if (!language) continue;
-    selected.push({ path: file, language });
+    eligible.push({ path: file, language });
   }
-  return selected;
+  const maxFiles = Math.max(0, options.maxFiles);
+  return {
+    selected: eligible.slice(0, maxFiles),
+    eligibleCount: eligible.length,
+    omittedCount: Math.max(0, eligible.length - maxFiles),
+    maxFiles
+  };
 }
 
 function inferSemanticImportLanguage(file: string, overrides?: Readonly<Record<string, string>>): string | undefined {
@@ -2235,6 +2272,8 @@ function inferSemanticImportLanguage(file: string, overrides?: Readonly<Record<s
     '.kts': 'kotlin',
     '.swift': 'swift',
     '.cs': 'csharp',
+    '.wasm': 'wasm',
+    '.wat': 'wasm',
     '.php': 'php',
     '.rb': 'ruby',
     '.rake': 'ruby'
@@ -2259,7 +2298,32 @@ async function loadFrontierLangForSemanticImport(): Promise<FrontierLangSemantic
   }
 }
 
-function createSemanticImportSidecar(job: FrontierSwarmJob, records: FrontierCodexSemanticImportRecord[]): FrontierCodexSemanticImportSidecar {
+function createSemanticImportSidecar(
+  job: FrontierSwarmJob,
+  records: FrontierCodexSemanticImportRecord[],
+  selection?: SemanticImportSelection
+): FrontierCodexSemanticImportSidecar {
+  const semanticIndex = records.reduce((totals, record) => {
+    totals.documents += record.semanticIndex?.documents ?? 0;
+    totals.symbols += record.semanticIndex?.symbols ?? 0;
+    totals.occurrences += record.semanticIndex?.occurrences ?? 0;
+    totals.relations += record.semanticIndex?.relations ?? 0;
+    totals.facts += record.semanticIndex?.facts ?? 0;
+    return totals;
+  }, { documents: 0, symbols: 0, occurrences: 0, relations: 0, facts: 0 });
+  const lossesBySeverity: Record<string, number> = {};
+  const readiness: Record<string, number> = {};
+  for (const record of records) {
+    for (const loss of Array.isArray(record.losses) ? record.losses as any[] : []) {
+      const severity = String(loss?.severity ?? 'unknown');
+      lossesBySeverity[severity] = (lossesBySeverity[severity] ?? 0) + 1;
+    }
+    const candidate = record.mergeCandidate as { readiness?: unknown } | undefined;
+    if (candidate?.readiness !== undefined) {
+      const key = String(candidate.readiness);
+      readiness[key] = (readiness[key] ?? 0) + 1;
+    }
+  }
   return {
     kind: FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND,
     version: FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION,
@@ -2269,9 +2333,19 @@ function createSemanticImportSidecar(job: FrontierSwarmJob, records: FrontierCod
     records,
     summary: {
       total: records.length,
+      selected: selection?.selected.length ?? records.length,
+      eligible: selection?.eligibleCount ?? records.length,
+      omitted: selection?.omittedCount ?? 0,
+      maxFiles: selection?.maxFiles ?? records.length,
       imported: records.filter((record) => record.status === 'imported').length,
       skipped: records.filter((record) => record.status === 'skipped').length,
-      errors: records.filter((record) => record.status === 'error').length
+      errors: records.filter((record) => record.status === 'error').length,
+      sourceMapCount: records.reduce((sum, record) => sum + (record.sourceMapCount ?? 0), 0),
+      sourceMapMappingCount: records.reduce((sum, record) => sum + (record.sourceMapMappingCount ?? 0), 0),
+      lossCount: records.reduce((sum, record) => sum + (record.lossCount ?? 0), 0),
+      lossesBySeverity,
+      semanticIndex,
+      readiness
     }
   };
 }

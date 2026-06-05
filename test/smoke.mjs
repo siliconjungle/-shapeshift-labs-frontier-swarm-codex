@@ -189,7 +189,7 @@ const result = await runCodexSwarm(plan, {
     assert.strictEqual(input.resourceAllocation.env.FRONTIER_SWARM_JOB_ID, input.job.id);
     assert.strictEqual(input.env.FRONTIER_SWARM_TASK_ID, input.job.taskId);
     await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
-    await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export const action = 1;\n');
+    await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function action() { return 1; }\n');
     await fs.writeFile(input.paths.lastMessagePath, 'done\n');
     return { exitCode: 0, changedPaths: ['src/runtime/action.ts'], lastMessage: 'done' };
   }
@@ -207,13 +207,22 @@ assert.ok(semanticImportsPath);
 const semanticImports = JSON.parse(await fs.readFile(semanticImportsPath, 'utf8'));
 assert.strictEqual(semanticImports.kind, 'frontier.swarm-codex.semantic-imports');
 assert.strictEqual(semanticImports.summary.total, 1);
+assert.strictEqual(semanticImports.summary.selected, 1);
+assert.strictEqual(semanticImports.summary.eligible, 1);
+assert.strictEqual(semanticImports.summary.omitted, 0);
 assert.strictEqual(semanticImports.summary.imported + semanticImports.summary.errors, 1);
+assert.ok(semanticImports.summary.sourceMapCount >= 1);
+assert.ok(semanticImports.summary.sourceMapMappingCount >= 1);
+assert.ok(semanticImports.summary.lossCount >= 1);
+assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
+assert.ok(semanticImports.summary.readiness['ready-with-losses'] >= 1 || semanticImports.summary.readiness['ready'] >= 1);
 assert.strictEqual(result.run.results[0].mergeReadiness, 'patch-candidate');
 const mergeBundlePath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('merge.json'));
 const mergeBundle = JSON.parse(await fs.readFile(mergeBundlePath, 'utf8'));
 assert.strictEqual(mergeBundle.disposition, 'needs-port');
 assert.deepStrictEqual(mergeBundle.queueItemIds, ['runtime-action']);
 assert.strictEqual(mergeBundle.metadata.semanticImport.total, 1);
+assert.ok(mergeBundle.metadata.semanticImport.sourceMapCount >= 1);
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);
@@ -491,6 +500,9 @@ const cliSource = await fs.readFile(new URL('../dist/cli.js', import.meta.url), 
 assert.ok(cliSource.includes("from './index.js'"));
 assert.ok(cliSource.includes('stopCodexSwarmRun'));
 assert.ok(cliSource.includes('frontier-swarm <command> [options]'));
+assert.ok(cliSource.includes('--semantic-import-include <glob>'));
+assert.ok(cliSource.includes('--semantic-import-exclude <glob>'));
+assert.ok(cliSource.includes('--semantic-import-max-files <n>'));
 assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
 
 const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
