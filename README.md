@@ -246,7 +246,7 @@ App-specific adapters should keep orchestration inside this package and use hook
 
 Use `modelPolicy: 'config-default'` for portable swarms that should respect each machine's Codex config. Use `modelPolicy: 'plan'` only when the installed Codex CLI and account are known to accept the planned model IDs. `approval: 'full-auto'` and `--approval-policy full-auto` are normalized to the current `--ask-for-approval never` spelling.
 
-Pass `--semantic-import` or `semanticImport: true` to write a `semantic-imports.json` sidecar for changed source files. The sidecar uses the optional `@shapeshift-labs/frontier-lang` dependency to import supported native sources into Frontier Lang universal ASTs, summarize source maps/losses/semantic indexes, and attach semantic merge-candidate metadata to each worker merge bundle. Use `--semantic-import-include`, `--semantic-import-exclude`, `--semantic-import-max-files`, and `--semantic-import-max-bytes` to keep the import pass scoped.
+Pass `--semantic-import` or `semanticImport: true` to write a `semantic-imports.json` sidecar for changed source files. The sidecar uses the optional `@shapeshift-labs/frontier-lang` dependency to import supported native sources into Frontier Lang universal ASTs, summarize source maps/losses/semantic indexes, record native compile/projection readiness when available, and attach semantic merge-candidate metadata to each worker merge bundle. Use `--semantic-import-include`, `--semantic-import-exclude`, `--semantic-import-max-files`, and `--semantic-import-max-bytes` to keep the import pass scoped.
 
 ## Minimal Repro Workspaces
 

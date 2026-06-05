@@ -155,6 +155,7 @@ export interface FrontierCodexSemanticImportRecord {
   };
   semanticSidecar?: unknown;
   sourceProjection?: unknown;
+  nativeCompile?: unknown;
   mergeCandidate?: unknown;
   error?: string;
 }
@@ -197,6 +198,15 @@ export interface FrontierCodexSemanticImportSidecar {
       total: number;
       preserved: number;
       stubs: number;
+      ready: number;
+      needsReview: number;
+      blocked: number;
+    };
+    nativeCompiles: {
+      total: number;
+      emitted: number;
+      preserved: number;
+      targetStubs: number;
       ready: number;
       needsReview: number;
       blocked: number;
@@ -903,6 +913,9 @@ async function createCodexSemanticImportSidecar(input: {
       const sourceProjection = api.projectNativeImportToSource
         ? api.projectNativeImportToSource(importResult, { sourceText, sourcePath: file.path })
         : undefined;
+      const nativeCompile = api.compileNativeSource
+        ? api.compileNativeSource(importResult, { target: file.language, sourceText, sourcePath: file.path, emitOnBlocked: true })
+        : undefined;
       const sourceMaps = Array.isArray(importResult?.sourceMaps)
         ? importResult.sourceMaps
         : Array.isArray(importResult?.universalAst?.sourceMaps)
@@ -927,6 +940,7 @@ async function createCodexSemanticImportSidecar(input: {
         semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
         semanticSidecar: summarizeLangSemanticImportSidecar(semanticSidecar),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
+        nativeCompile: summarizeNativeSourceCompile(nativeCompile),
         mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
       });
     } catch (error) {
@@ -2245,6 +2259,7 @@ type FrontierLangSemanticImportApi = {
   createSemanticMergeCandidateFromImport(input: Record<string, unknown>): any;
   createSemanticImportSidecar?(importResult: unknown, options?: Record<string, unknown>): any;
   projectNativeImportToSource?(importResult: unknown, options?: Record<string, unknown>): any;
+  compileNativeSource?(importResult: unknown, options?: Record<string, unknown>): any;
   hashUniversalAstEnvelope?(input: unknown): string;
 } | {
   ok: false;
@@ -2329,6 +2344,7 @@ async function loadFrontierLangForSemanticImport(): Promise<FrontierLangSemantic
       createSemanticMergeCandidateFromImport: api.createSemanticMergeCandidateFromImport,
       ...(typeof api.createSemanticImportSidecar === 'function' ? { createSemanticImportSidecar: api.createSemanticImportSidecar } : {}),
       ...(typeof api.projectNativeImportToSource === 'function' ? { projectNativeImportToSource: api.projectNativeImportToSource } : {}),
+      ...(typeof api.compileNativeSource === 'function' ? { compileNativeSource: api.compileNativeSource } : {}),
       ...(typeof api.hashUniversalAstEnvelope === 'function' ? { hashUniversalAstEnvelope: api.hashUniversalAstEnvelope } : {})
     };
   } catch (error) {
@@ -2370,6 +2386,18 @@ function createSemanticImportSidecar(
     else totals.needsReview += 1;
     return totals;
   }, { total: 0, preserved: 0, stubs: 0, ready: 0, needsReview: 0, blocked: 0 });
+  const nativeCompiles = records.reduce((totals, record) => {
+    const summary = record.nativeCompile as { ok?: boolean; outputMode?: string; readiness?: string } | undefined;
+    if (!summary) return totals;
+    totals.total += 1;
+    if (summary.ok) totals.emitted += 1;
+    if (summary.outputMode === 'preserved-source') totals.preserved += 1;
+    if (summary.outputMode === 'target-stubs') totals.targetStubs += 1;
+    if (summary.readiness === 'ready' || summary.readiness === 'ready-with-losses') totals.ready += 1;
+    else if (summary.readiness === 'blocked') totals.blocked += 1;
+    else totals.needsReview += 1;
+    return totals;
+  }, { total: 0, emitted: 0, preserved: 0, targetStubs: 0, ready: 0, needsReview: 0, blocked: 0 });
   const lossesBySeverity: Record<string, number> = {};
   const readiness: Record<string, number> = {};
   for (const record of records) {
@@ -2406,6 +2434,7 @@ function createSemanticImportSidecar(
       semanticIndex,
       semanticSidecars,
       sourceProjections,
+      nativeCompiles,
       readiness
     }
   };
@@ -2462,6 +2491,28 @@ function summarizeNativeSourceProjection(value: any): unknown {
     readiness: value.readiness?.readiness,
     sourceHashVerified: value.metadata?.sourceHashVerified,
     exactSourceAvailable: value.metadata?.exactSourceAvailable
+  };
+}
+
+function summarizeNativeSourceCompile(value: any): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  return {
+    kind: value.kind,
+    id: value.id,
+    ok: value.ok,
+    language: value.language,
+    target: value.target,
+    sourcePath: value.sourcePath,
+    outputMode: value.outputMode,
+    outputHash: value.outputHash,
+    lossCount: Array.isArray(value.losses) ? value.losses.length : 0,
+    readiness: value.readiness?.readiness,
+    targetCoverage: value.targetCoverage ? {
+      target: value.targetCoverage.target,
+      lossClass: value.targetCoverage.lossClass,
+      supported: value.targetCoverage.supported,
+      readiness: value.targetCoverage.readiness
+    } : undefined
   };
 }
 
