@@ -290,6 +290,24 @@ await fs.writeFile(path.join(readyDir, 'merge.json'), JSON.stringify({
   commandsFailed: [],
   queueItemIds: ['apply-task'],
   staleAgainstHead: false,
+  semanticImport: {
+    total: 1,
+    selected: 1,
+    eligible: 1,
+    omitted: 0,
+    imported: 1,
+    skipped: 0,
+    errors: 0,
+    sourceMapCount: 1,
+    sourceMapMappingCount: 1,
+    lossCount: 0,
+    lossesBySeverity: {},
+    semanticIndex: { documents: 1, symbols: 1, occurrences: 1, relations: 0, facts: 0 },
+    semanticSidecars: { total: 1, symbols: 1, ownershipRegions: 1, patchHints: 1, empty: 0 },
+    sourceProjections: { total: 1, preserved: 1, stubs: 0, ready: 1, needsReview: 0, blocked: 0 },
+    nativeCompiles: { total: 1, emitted: 1, preserved: 1, targetStubs: 0, ready: 1, needsReview: 0, blocked: 0 },
+    readiness: { ready: 1 }
+  },
   reasons: []
 }, null, 2) + '\n');
 const applyDryRun = await applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo });
@@ -306,6 +324,9 @@ const patchScore = await scoreCodexSwarmPatches({
 });
 assert.strictEqual(patchScore.ok, true);
 assert.strictEqual(patchScore.summary['accepted-clean'], 1);
+assert.strictEqual(patchScore.entries[0].semanticEvidence.present, true);
+assert.strictEqual(patchScore.entries[0].semanticEvidence.cleanEligible, true);
+assert.strictEqual(patchScore.entries[0].semanticEvidence.sourceMapMappings, 1);
 assert.strictEqual(await fs.readFile(path.join(applyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 const cliScore = await execFileP(process.execPath, [
   new URL('../dist/cli.js', import.meta.url).pathname,
@@ -318,6 +339,32 @@ const cliScore = await execFileP(process.execPath, [
   "node -e \"const fs=require('fs'); const label='a,b'; if(label !== 'a,b' || fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
 ], { cwd: applyRepo });
 assert.strictEqual(JSON.parse(cliScore.stdout).ok, true);
+const missingSemanticCollection = path.join(tmp, 'missing-semantic-collection');
+const missingSemanticDir = path.join(missingSemanticCollection, 'ready-to-apply', 'missing-semantic-job');
+await fs.mkdir(missingSemanticDir, { recursive: true });
+await fs.writeFile(path.join(missingSemanticDir, 'changes.patch'), await fs.readFile(path.join(readyDir, 'changes.patch'), 'utf8'));
+const missingSemanticBundle = {
+  ...JSON.parse(await fs.readFile(path.join(readyDir, 'merge.json'), 'utf8')),
+  id: 'missing-semantic-bundle',
+  jobId: 'missing-semantic-job',
+  taskId: 'missing-semantic-task',
+  queueItemIds: ['missing-semantic-task']
+};
+delete missingSemanticBundle.semanticImport;
+delete missingSemanticBundle.metadata;
+await fs.writeFile(path.join(missingSemanticDir, 'merge.json'), JSON.stringify(missingSemanticBundle, null, 2) + '\n');
+const missingSemanticScore = await scoreCodexSwarmPatches({
+  collection: missingSemanticCollection,
+  cwd: applyRepo,
+  workspaceIncludes: ['src'],
+  focusedCommands: [{ name: 'assert-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
+});
+assert.strictEqual(missingSemanticScore.ok, true);
+assert.strictEqual(missingSemanticScore.summary['accepted-needs-port'], 1);
+assert.strictEqual(missingSemanticScore.entries[0].semanticEvidence.present, false);
+assert.strictEqual(missingSemanticScore.entries[0].semanticEvidence.cleanEligible, false);
+assert.strictEqual(missingSemanticScore.entries[0].score, 60);
+assert.ok(missingSemanticScore.entries[0].reasons.includes('missing semantic import sidecar'));
 await assert.rejects(
   () => applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo, dryRun: false }),
   /dirty worktree/

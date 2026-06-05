@@ -368,6 +368,22 @@ export interface FrontierCodexPatchScoreInput {
   keepWorkspaces?: boolean;
 }
 
+export interface FrontierCodexPatchScoreSemanticEvidence {
+  present: boolean;
+  total: number;
+  imported: number;
+  errors: number;
+  sourceMapMappings: number;
+  semanticSymbols: number;
+  ownershipRegions: number;
+  patchHints: number;
+  readiness: Record<string, number>;
+  lossesBySeverity: Record<string, number>;
+  scoreAdjustment: number;
+  cleanEligible: boolean;
+  reasons: string[];
+}
+
 export interface FrontierCodexPatchScoreEntry {
   jobId: string;
   status: FrontierCodexPatchScoreStatus;
@@ -377,6 +393,7 @@ export interface FrontierCodexPatchScoreEntry {
   workspacePath?: string;
   changedPaths: string[];
   reasons: string[];
+  semanticEvidence: FrontierCodexPatchScoreSemanticEvidence;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
 }
 
@@ -1757,46 +1774,196 @@ async function scoreCodexMergeBundle(input: {
 }): Promise<FrontierCodexPatchScoreEntry> {
   const commands: FrontierCodexPatchScoreEntry['commands'] = [];
   const patchPath = await resolveApplyPatchPath(input.bundle, input.mergePath);
+  const semanticEvidence = summarizePatchScoreSemanticEvidence(input.bundle);
   const base = {
     jobId: input.bundle.jobId,
     bundlePath: input.mergePath,
     ...(patchPath ? { patchPath } : {}),
     changedPaths: [...input.bundle.changedPaths],
+    semanticEvidence,
     commands
   };
   if (!patchPath || input.bundle.disposition === 'discovery-only' || input.bundle.changedPaths.length === 0) {
-    return { ...base, status: 'evidence-only', score: 20, reasons: ['no patch to apply'] };
+    return {
+      ...base,
+      status: 'evidence-only',
+      score: clampPatchScore(20 + Math.min(0, semanticEvidence.scoreAdjustment)),
+      reasons: uniqueStrings(['no patch to apply', ...semanticEvidence.reasons])
+    };
   }
   if (input.bundle.staleAgainstHead || input.bundle.disposition === 'stale-against-head') {
-    return { ...base, status: 'stale', score: 0, reasons: ['stale-against-head'] };
+    return { ...base, status: 'stale', score: 0, reasons: uniqueStrings(['stale-against-head', ...semanticEvidence.reasons]) };
   }
   const workspacePath = await createScoreWorkspace(input.cwd, input.bundle.jobId, input.input);
   try {
     const check = await runLoggedProcess('git', ['apply', '--check', patchPath], workspacePath);
     commands.push(check);
-    if (check.status !== 0) return { ...base, workspacePath, status: 'conflict', score: 0, reasons: ['git apply --check failed'] };
+    if (check.status !== 0) {
+      return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings(['git apply --check failed', ...semanticEvidence.reasons]) };
+    }
     const apply = await runLoggedProcess('git', ['apply', patchPath], workspacePath);
     commands.push(apply);
-    if (apply.status !== 0) return { ...base, workspacePath, status: 'conflict', score: 0, reasons: ['git apply failed'] };
+    if (apply.status !== 0) return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings(['git apply failed', ...semanticEvidence.reasons]) };
     const gates = scoreCommands(input.bundle, input.input);
     for (const gate of gates) {
       const run = await runLoggedProcess(gate.command, gate.args, gate.cwd ? path.resolve(workspacePath, gate.cwd) : workspacePath);
       commands.push(run);
       if (run.status !== 0 && gate.required !== false) {
-        return { ...base, workspacePath, status: 'test-fail', score: 10, reasons: [`gate failed: ${gate.name}`] };
+        return {
+          ...base,
+          workspacePath,
+          status: 'test-fail',
+          score: clampPatchScore(10 + Math.min(0, semanticEvidence.scoreAdjustment)),
+          reasons: uniqueStrings([`gate failed: ${gate.name}`, ...semanticEvidence.reasons])
+        };
       }
     }
-    const clean = input.bundle.disposition === 'auto-mergeable' && input.bundle.autoMergeable;
+    const clean = input.bundle.disposition === 'auto-mergeable' && input.bundle.autoMergeable && semanticEvidence.cleanEligible;
+    const reasons = uniqueStrings([
+      ...(input.bundle.disposition === 'auto-mergeable' && input.bundle.autoMergeable ? [] : ['patch applies but bundle is not auto-mergeable']),
+      ...semanticEvidence.reasons
+    ]);
     return {
       ...base,
       workspacePath,
       status: clean ? 'accepted-clean' : 'accepted-needs-port',
-      score: clean ? 100 : 70,
-      reasons: clean ? [] : ['patch applies but bundle is not auto-mergeable']
+      score: clampPatchScore((clean ? 100 : 70) + semanticEvidence.scoreAdjustment),
+      reasons
     };
   } finally {
     if (!input.input.keepWorkspaces) await fs.rm(workspacePath, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): FrontierCodexPatchScoreSemanticEvidence {
+  const summary = semanticImportSummaryFromBundle(bundle);
+  const changed = bundle.changedPaths.length > 0;
+  const reasons: string[] = [];
+  let scoreAdjustment = 0;
+  let cleanEligible = true;
+  if (!summary) {
+    if (changed) {
+      reasons.push('missing semantic import sidecar');
+      scoreAdjustment -= 10;
+      cleanEligible = false;
+    }
+    return {
+      present: false,
+      total: 0,
+      imported: 0,
+      errors: 0,
+      sourceMapMappings: 0,
+      semanticSymbols: 0,
+      ownershipRegions: 0,
+      patchHints: 0,
+      readiness: {},
+      lossesBySeverity: {},
+      scoreAdjustment,
+      cleanEligible,
+      reasons
+    };
+  }
+
+  const readiness = numberRecord(summary.readiness);
+  const lossesBySeverity = numberRecord(summary.lossesBySeverity);
+  const total = nonNegativeNumber(summary.total);
+  const imported = nonNegativeNumber(summary.imported);
+  const selected = nonNegativeNumber(summary.selected);
+  const errors = nonNegativeNumber(summary.errors);
+  const sourceMapMappings = nonNegativeNumber(summary.sourceMapMappingCount);
+  const semanticSymbols = nonNegativeNumber(summary.semanticIndex?.symbols);
+  const ownershipRegions = nonNegativeNumber(summary.semanticSidecars?.ownershipRegions);
+  const patchHints = nonNegativeNumber(summary.semanticSidecars?.patchHints);
+  const errorLosses = nonNegativeNumber(lossesBySeverity.error);
+  const warningLosses = nonNegativeNumber(lossesBySeverity.warning);
+  const blocked = nonNegativeNumber(readiness.blocked);
+  const needsReview = nonNegativeNumber(readiness['needs-review']);
+
+  if (errors > 0) {
+    reasons.push(`semantic import errors: ${errors}`);
+    scoreAdjustment -= 25;
+    cleanEligible = false;
+  }
+  if (errorLosses > 0) {
+    reasons.push(`semantic error losses: ${errorLosses}`);
+    scoreAdjustment -= 25;
+    cleanEligible = false;
+  }
+  if (blocked > 0) {
+    reasons.push(`blocked semantic imports: ${blocked}`);
+    scoreAdjustment -= 20;
+    cleanEligible = false;
+  }
+  if (total > 0 && imported === 0) {
+    reasons.push('semantic sidecar imported no files');
+    scoreAdjustment -= 15;
+    cleanEligible = false;
+  }
+  if (selected > 0 && semanticSymbols === 0) {
+    reasons.push('semantic sidecar has no symbols');
+    scoreAdjustment -= 10;
+    cleanEligible = false;
+  }
+  if (selected > 0 && ownershipRegions === 0) {
+    reasons.push('semantic sidecar has no ownership regions');
+    scoreAdjustment -= 10;
+    cleanEligible = false;
+  }
+  if (selected > 0 && sourceMapMappings === 0) {
+    reasons.push('semantic sidecar has no source-map mappings');
+    scoreAdjustment -= 5;
+    cleanEligible = false;
+  }
+  if (warningLosses > 0 || needsReview > 0) {
+    reasons.push('semantic evidence needs review');
+    scoreAdjustment -= Math.min(10, warningLosses + needsReview);
+    cleanEligible = false;
+  }
+  if (sourceMapMappings > 0 && semanticSymbols > 0 && ownershipRegions > 0) {
+    scoreAdjustment += 10;
+  }
+  if (patchHints > 0) scoreAdjustment += 5;
+
+  return {
+    present: true,
+    total,
+    imported,
+    errors,
+    sourceMapMappings,
+    semanticSymbols,
+    ownershipRegions,
+    patchHints,
+    readiness,
+    lossesBySeverity,
+    scoreAdjustment: Math.max(-60, Math.min(15, scoreAdjustment)),
+    cleanEligible,
+    reasons: uniqueStrings(reasons)
+  };
+}
+
+function semanticImportSummaryFromBundle(bundle: FrontierSwarmMergeBundle): FrontierSwarmMergeBundle['semanticImport'] | undefined {
+  if (bundle.semanticImport) return bundle.semanticImport;
+  const metadata = bundle.metadata as { semanticImport?: FrontierSwarmMergeBundle['semanticImport'] } | undefined;
+  return metadata?.semanticImport;
+}
+
+function numberRecord(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object') return {};
+  const result: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    result[key] = nonNegativeNumber(entry);
+  }
+  return result;
+}
+
+function nonNegativeNumber(value: unknown): number {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function clampPatchScore(score: number): number {
+  if (!Number.isFinite(score)) return 0;
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 async function createScoreWorkspace(cwd: string, jobId: string, input: FrontierCodexPatchScoreInput): Promise<string> {
