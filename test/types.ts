@@ -39,6 +39,8 @@ const args = buildCodexArgs(job, {
     workspaceProofPath: 'evidence/workspace-proof.json',
     patchPath: 'evidence/changes.patch',
     mergeBundlePath: 'evidence/merge.json',
+    patchIntentPath: 'evidence/patch-intent.json',
+    logSummaryPath: 'evidence/log-summary.json',
     pidManifestPath: 'pids.json'
   }
 });
@@ -46,6 +48,9 @@ const args = buildCodexArgs(job, {
 const resultPromise: Promise<FrontierCodexSwarmRunResult> = runCodexSwarm(plan, {
   outDir: '.',
   dryRun: true,
+  adaptiveConcurrency: true,
+  compactLogs: true,
+  semanticImportExpected: true,
   workspace: {
     mode: 'copy',
     includes: ['package.json'],

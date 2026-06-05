@@ -35,6 +35,9 @@ try {
       outDir,
       codexPath: stringArg(args.codex),
       maxConcurrency: numberArg(args.maxConcurrency ?? args['max-concurrency'], 1),
+      adaptiveConcurrency: adaptiveConcurrencyArg(args),
+      compactLogs: compactLogsArg(args),
+      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
       sandbox: stringArg(args.sandbox),
       approval: stringArg(args.approval ?? args['ask-for-approval'] ?? args['approval-policy']),
       model: stringArg(args.model),
@@ -82,6 +85,7 @@ try {
       run,
       outDir: stringArg(args.outDir ?? args.out),
       checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
+      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
       branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix'])
     });
     console.log(JSON.stringify(result, null, 2));
@@ -146,6 +150,10 @@ function printHelp() {
     '  --include <path> --exclude <path> --link <path>',
     '  --semantic-import --semantic-import-include <glob> --semantic-import-exclude <glob>',
     '  --semantic-import-max-files <n> --semantic-import-max-bytes <n>',
+    '  --semantic-import-expected',
+    '  --adaptive --adaptive-mode observe|conservative|balanced|aggressive',
+    '  --adaptive-min-concurrency <n> --adaptive-max-concurrency <n>',
+    '  --compact-logs --max-event-bytes <n> --max-stderr-bytes <n>',
     '  --focused-command <cmd> --global-command <cmd>',
     '',
     'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',
@@ -238,6 +246,26 @@ function semanticImportArg(args: CliArgs): boolean | { enabled: true; maxFiles?:
     maxBytes: numberArg(args.semanticImportMaxBytes ?? args['semantic-import-max-bytes'], undefined),
     include: listArg(args.semanticImportInclude ?? args['semantic-import-include']),
     exclude: listArg(args.semanticImportExclude ?? args['semantic-import-exclude'])
+  };
+}
+
+function adaptiveConcurrencyArg(args: CliArgs): boolean | { enabled: true; mode?: string; minConcurrency?: number; maxConcurrency?: number } {
+  const enabled = boolArg(args.adaptive ?? args.adaptiveConcurrency ?? args['adaptive-concurrency'], false);
+  if (!enabled) return false;
+  return {
+    enabled: true,
+    mode: stringArg(args.adaptiveMode ?? args['adaptive-mode']),
+    minConcurrency: numberArg(args.adaptiveMinConcurrency ?? args['adaptive-min-concurrency'], undefined),
+    maxConcurrency: numberArg(args.adaptiveMaxConcurrency ?? args['adaptive-max-concurrency'], undefined)
+  };
+}
+
+function compactLogsArg(args: CliArgs): boolean | { enabled: boolean; maxEventBytes?: number; maxStderrBytes?: number } {
+  const enabled = boolArg(args.compactLogs ?? args['compact-logs'], true);
+  return {
+    enabled,
+    maxEventBytes: numberArg(args.maxEventBytes ?? args['max-event-bytes'], undefined),
+    maxStderrBytes: numberArg(args.maxStderrBytes ?? args['max-stderr-bytes'], undefined)
   };
 }
 
