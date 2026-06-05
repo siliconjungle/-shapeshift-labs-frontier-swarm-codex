@@ -226,6 +226,14 @@ frontier-swarm collect \
   --run agent-runs/codex-swarm/run-1 \
   --outDir agent-runs/codex-swarm/run-1/collected \
   --branch-prefix codex/swarm-slice
+
+frontier-swarm repair-links \
+  --root . \
+  --package-root packages \
+  --package-root .. \
+  --scope @shapeshift-labs \
+  --exclude-package @shapeshift-labs/frontier-swarm,@shapeshift-labs/frontier-swarm-codex,@shapeshift-labs/frontier-lang \
+  --write
 ```
 
 ## API
@@ -277,6 +285,8 @@ For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
 
+After updating npm packages in a local multi-package checkout, use `frontier-swarm repair-links` to restore local workspace symlinks without replacing packages you intentionally want from npm. The command reads scoped dependencies from the target `package.json`, discovers matching local packages under one-level package roots, skips `--exclude-package` entries, and writes a JSON plan by default. Add `--write` to create or update symlinks. Existing real package directories are reported as conflicts unless `--replace` is passed, so npm-installed packages are preserved unless replacement is explicit.
+
 Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, per-job `evidence/evidence.json`, `patch-intent.json`, `log-summary.json`, and job results with merge-readiness classification. The normalized evidence file records changed paths, semantic regions, command pass/fail summaries, source citations, semantic sidecar stats, and ready-to-port patch hunk counts. `patch-intent.json` is the short review surface: what changed, why, risk, exact verification, semantic import quality, warnings, and whether the patch is safe to port manually. Raw Codex stdout/stderr capture is compacted by default; `log-summary.json` records original bytes, written bytes, and truncation counts, and `--max-event-bytes` / `--max-stderr-bytes` can tune the limits. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
 
 `frontier-swarm collect --run <run-dir>` derives status from immutable worker overlays instead of asking workers to edit a central queue. It scans `merge.json` files and writes:
@@ -286,7 +296,7 @@ Each run writes event streams under `streams/`, a `coordinator-dashboard.json` s
 - `failed-evidence/` for failed workers, blockers, ownership violations, or failed required commands,
 - `stale-against-head/` for patch bundles that no longer apply.
 
-It also writes `merge-index.json`, `queue-overlay.json`, `evidence-index.json`, `merge-admission.json`, `coordinator-query.json`, and `compact-dashboard.json` so coordinator dashboards can show changed paths, tests, semantic regions, source citations, risk, ready-to-port hunks, stale patches, duplicate surfaces, semantic import quality, evidence scores, pid liveness, conflicts, derived queue status, and ready merge pressure without scraping every worker directory. Stale checks distinguish patches that fail only because the coordinator worktree is dirty from patches whose base hashes no longer match HEAD. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
+It also writes `merge-index.json`, `queue-overlay.json`, `evidence-index.json`, `merge-admission.json`, `coordinator-query.json`, and `compact-dashboard.json` so coordinator dashboards can show changed paths, tests, semantic regions, source citations, risk, ready-to-port hunks, stale patches, duplicate surfaces, semantic import quality, evidence scores, pid liveness, conflicts, derived queue status, and ready merge pressure without scraping every worker directory. Stale checks distinguish patches that fail only because the coordinator worktree is dirty from patches whose base hashes no longer match HEAD. Copied/no-index workspace patches with source-side absolute paths are normalized back to repo-relative paths when possible; patches without comparable base hashes are treated as `needs-human-port`, not stale. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
 
 `frontier-swarm apply --collection <collection-dir>` reviews the `ready-to-apply/` bucket and writes `apply-ledger.json`. It defaults to `--dry-run`, which runs `git apply --check` without mutating the checkout. Non-dry-run apply refuses a dirty worktree unless `--allow-dirty` is passed, and can optionally create small branches with `--branch-prefix` and commits with `--commit`.
 
@@ -308,6 +318,7 @@ It also writes `merge-index.json`, `queue-overlay.json`, `evidence-index.json`, 
 - `normalizeCodexModelFlag`, `normalizeCodexApprovalPolicy`
 - `initFileSwarmEventStream`, `appendFileSwarmEvent`, `writeSwarmCoordinatorSnapshot`
 - `appendCodexPidManifest`, `readCodexPidManifest`, `stopCodexSwarmRun`
+- `repairCodexWorkspacePackageLinks`
 - `collectCodexSwarmRun`
 - `applyCodexSwarmCollection`
 - `scoreCodexSwarmPatches`

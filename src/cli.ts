@@ -7,6 +7,7 @@ import {
   coerceCodexSwarmTasksInput,
   collectCodexSwarmRun,
   createCodexSwarmPlan,
+  repairCodexWorkspacePackageLinks,
   runCodexSwarm,
   scoreCodexSwarmPatches,
   stopCodexSwarmRun,
@@ -122,6 +123,19 @@ try {
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
+  } else if (command === 'repair-links') {
+    const result = await repairCodexWorkspacePackageLinks({
+      root: stringArg(args.root),
+      packageRoots: listArg(args.packageRoot ?? args['package-root']),
+      scope: stringArg(args.scope),
+      packages: listArg(args.package ?? args.pkg),
+      excludePackages: listArg(args.excludePackage ?? args['exclude-package']),
+      write: boolArg(args.write, false),
+      replace: boolArg(args.replace, false),
+      outFile: stringArg(args.out ?? args.outFile ?? args['out-file'])
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (result.summary.conflicts > 0 || result.summary.missingLocalPackage > 0) process.exitCode = 1;
   } else {
     throw new Error(`unknown command: ${command}`);
   }
@@ -141,6 +155,7 @@ function printHelp() {
     '  collect   Collect merge bundles into ready/needs-port/failed/stale buckets',
     '  score     Score collected patches in throwaway workspaces',
     '  apply     Dry-run or apply collected patch bundles',
+    '  repair-links Restore local workspace package symlinks after npm installs',
     '  verify    Verify a swarm-results.json proof',
     '',
     'Useful options:',
@@ -155,6 +170,7 @@ function printHelp() {
     '  --adaptive-min-concurrency <n> --adaptive-max-concurrency <n>',
     '  --compact-logs --max-event-bytes <n> --max-stderr-bytes <n>',
     '  --focused-command <cmd> --global-command <cmd>',
+    '  --package-root <dir> --exclude-package <name> --write --replace',
     '',
     'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',
     'merge.json, changes.patch, and discovered debug/replay/watchpoint/trace artifacts.'

@@ -19,6 +19,7 @@ import {
   normalizeCodexModelFlag,
   readCodexPidManifest,
   renderCodexPrompt,
+  repairCodexWorkspacePackageLinks,
   runCodexSwarm,
   scoreCodexSwarmPatches,
   stopCodexSwarmRun
@@ -85,6 +86,41 @@ assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'last-message'))
 assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'debug-handoff'));
 assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'trace'));
 assert.ok(handoffArtifacts.some((artifact) => artifact.kind === 'watchpoint'));
+const linkRoot = path.join(tmp, 'link-root');
+const linkPackages = path.join(tmp, 'local-packages');
+await fs.mkdir(path.join(linkRoot, 'node_modules', '@test'), { recursive: true });
+await fs.mkdir(path.join(linkPackages, 'frontier-foo'), { recursive: true });
+await fs.mkdir(path.join(linkPackages, 'frontier-bar'), { recursive: true });
+await fs.writeFile(path.join(linkRoot, 'package.json'), JSON.stringify({
+  dependencies: {
+    '@test/frontier-foo': '^1.0.0',
+    '@test/frontier-swarm': '^1.0.0'
+  },
+  devDependencies: {
+    '@test/frontier-bar': '^1.0.0'
+  }
+}, null, 2) + '\n');
+await fs.writeFile(path.join(linkPackages, 'frontier-foo', 'package.json'), JSON.stringify({ name: '@test/frontier-foo' }) + '\n');
+await fs.writeFile(path.join(linkPackages, 'frontier-bar', 'package.json'), JSON.stringify({ name: '@test/frontier-bar' }) + '\n');
+const linkPlan = await repairCodexWorkspacePackageLinks({
+  root: linkRoot,
+  packageRoots: [linkPackages],
+  scope: '@test',
+  excludePackages: ['@test/frontier-swarm']
+});
+assert.strictEqual(linkPlan.summary.planned, 2);
+assert.strictEqual(linkPlan.summary.excluded, 1);
+assert.strictEqual(linkPlan.summary.conflicts, 0);
+const linkRepair = await repairCodexWorkspacePackageLinks({
+  root: linkRoot,
+  packageRoots: [linkPackages],
+  scope: '@test',
+  excludePackages: ['@test/frontier-swarm'],
+  write: true
+});
+assert.strictEqual(linkRepair.summary.linked, 2);
+assert.ok((await fs.lstat(path.join(linkRoot, 'node_modules', '@test', 'frontier-foo'))).isSymbolicLink());
+assert.strictEqual(await exists(path.join(linkRoot, 'node_modules', '@test', 'frontier-swarm')), false);
 const args = buildCodexArgs(plan.jobs[0], { outDir: tmp, workspacePath: tmp, paths });
 assert.ok(!args.includes('--model'));
 assert.ok(!args.includes('gpt-5.5'));
@@ -275,6 +311,49 @@ assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-r
 const coordinatorQuery = JSON.parse(await fs.readFile(path.join(collection.outDir, 'coordinator-query.json'), 'utf8'));
 assert.strictEqual(coordinatorQuery.kind, 'frontier.swarm.coordinator-dashboard');
 assert.ok(coordinatorQuery.jobs[0].primaryEvidencePath.endsWith('evidence.json'));
+const noIndexRepo = path.join(tmp, 'no-index-repo');
+await fs.mkdir(path.join(noIndexRepo, 'src'), { recursive: true });
+await execFileP('git', ['init'], { cwd: noIndexRepo });
+await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: noIndexRepo });
+await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: noIndexRepo });
+await fs.writeFile(path.join(noIndexRepo, 'src', 'foo.ts'), 'old\n');
+await execFileP('git', ['add', '--', 'src/foo.ts'], { cwd: noIndexRepo });
+await execFileP('git', ['commit', '-m', 'Initial no-index fixture'], { cwd: noIndexRepo });
+const noIndexOldHash = (await execFileP('git', ['rev-parse', 'HEAD:src/foo.ts'], { cwd: noIndexRepo })).stdout.trim();
+const noIndexRunDir = path.join(noIndexRepo, 'agent-runs', 'copy-run');
+const noIndexJobDir = path.join(noIndexRunDir, 'copy-worker');
+await fs.mkdir(noIndexJobDir, { recursive: true });
+await fs.writeFile(path.join(noIndexJobDir, 'changes.patch'), [
+  `diff --git ${path.join(noIndexRepo, 'src', 'foo.ts')} ${path.join(noIndexRepo, 'agent-worktrees', 'copy-worker', 'src', 'foo.ts')}`,
+  `index ${noIndexOldHash}..1234567 100644`,
+  `--- ${path.join(noIndexRepo, 'src', 'foo.ts')}`,
+  `+++ ${path.join(noIndexRepo, 'agent-worktrees', 'copy-worker', 'src', 'foo.ts')}`,
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'));
+await fs.writeFile(path.join(noIndexJobDir, 'merge.json'), JSON.stringify({
+  ...mergeBundle,
+  id: 'copy-worker-bundle',
+  jobId: 'copy-worker',
+  taskId: 'copy-task',
+  status: 'completed',
+  mergeReadiness: 'patch-candidate',
+  disposition: 'needs-port',
+  autoMergeable: false,
+  changedPaths: ['src/foo.ts'],
+  ownedFilesTouched: ['src/foo.ts'],
+  patchPath: 'changes.patch',
+  staleAgainstHead: false,
+  reasons: []
+}, null, 2) + '\n');
+const noIndexCollection = await collectCodexSwarmRun({ run: noIndexRunDir, cwd: noIndexRepo, outDir: path.join(noIndexRunDir, 'collected') });
+assert.strictEqual(noIndexCollection.summary['stale-against-head'], 0);
+assert.strictEqual(noIndexCollection.summary['needs-human-port'], 1);
+const noIndexCollectedBundle = JSON.parse(await fs.readFile(path.join(noIndexCollection.outDir, 'needs-human-port', 'copy-worker', 'merge.json'), 'utf8'));
+assert.strictEqual(noIndexCollectedBundle.staleAgainstHead, false);
+assert.ok(noIndexCollectedBundle.reasons.some((reason) => reason.includes('patch base hashes match HEAD')));
 
 const browserRun = await runCodexSwarm(browserPlan, {
   outDir: path.join(tmp, 'browser-run'),
