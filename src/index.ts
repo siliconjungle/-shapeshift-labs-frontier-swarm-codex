@@ -3895,6 +3895,9 @@ function normalizePatchBasePath(token: string | undefined, cwd: string): string 
     if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) return relative.replace(/\\/g, '/');
     return undefined;
   }
+  const rootedValue = path.join(path.parse(cwd).root, value);
+  const rootedRelative = path.relative(cwd, rootedValue);
+  if (rootedRelative && !rootedRelative.startsWith('..') && !path.isAbsolute(rootedRelative)) return rootedRelative.replace(/\\/g, '/');
   return value.replace(/\\/g, '/');
 }
 

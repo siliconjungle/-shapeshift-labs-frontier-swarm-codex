@@ -324,10 +324,10 @@ const noIndexRunDir = path.join(noIndexRepo, 'agent-runs', 'copy-run');
 const noIndexJobDir = path.join(noIndexRunDir, 'copy-worker');
 await fs.mkdir(noIndexJobDir, { recursive: true });
 await fs.writeFile(path.join(noIndexJobDir, 'changes.patch'), [
-  `diff --git ${path.join(noIndexRepo, 'src', 'foo.ts')} ${path.join(noIndexRepo, 'agent-worktrees', 'copy-worker', 'src', 'foo.ts')}`,
+  `diff --git a${path.join(noIndexRepo, 'src', 'foo.ts')} b${path.join(noIndexRepo, 'agent-worktrees', 'copy-worker', 'src', 'foo.ts')}`,
   `index ${noIndexOldHash}..1234567 100644`,
-  `--- ${path.join(noIndexRepo, 'src', 'foo.ts')}`,
-  `+++ ${path.join(noIndexRepo, 'agent-worktrees', 'copy-worker', 'src', 'foo.ts')}`,
+  `--- a${path.join(noIndexRepo, 'src', 'foo.ts')}`,
+  `+++ b${path.join(noIndexRepo, 'agent-worktrees', 'copy-worker', 'src', 'foo.ts')}`,
   '@@ -1 +1 @@',
   '-old',
   '+new',
