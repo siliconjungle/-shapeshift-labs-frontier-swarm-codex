@@ -202,6 +202,11 @@ assert.ok(await exists(path.join(tmp, 'run', 'pids.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('resource-allocation.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('workspace-proof.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('merge.json')));
+const jobEvidencePath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('evidence.json'));
+assert.ok(jobEvidencePath);
+const jobEvidence = JSON.parse(await fs.readFile(jobEvidencePath, 'utf8'));
+assert.strictEqual(jobEvidence.kind, 'frontier.swarm-codex.job-evidence');
+assert.strictEqual(jobEvidence.readyToPortHunkCount, jobEvidence.patchHunks.length);
 const semanticImportsPath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('semantic-imports.json'));
 assert.ok(semanticImportsPath);
 const semanticImports = JSON.parse(await fs.readFile(semanticImportsPath, 'utf8'));
@@ -235,11 +240,21 @@ assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);
 assert.strictEqual(collection.mergeIndex.summary.entryCount, 1);
 assert.strictEqual(collection.queueOverlay.summary.entryCount, 1);
+assert.strictEqual(collection.evidenceIndex.summary.jobCount, 1);
+assert.strictEqual(collection.admission.summary.deferredCount, 1);
+assert.strictEqual(collection.dashboard.summary.jobCount, 1);
 assert.ok(await exists(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json')));
+assert.ok(await exists(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'evidence.json')));
 assert.ok(await exists(path.join(collection.outDir, 'merge-index.json')));
 assert.ok(await exists(path.join(collection.outDir, 'queue-overlay.json')));
+assert.ok(await exists(path.join(collection.outDir, 'evidence-index.json')));
+assert.ok(await exists(path.join(collection.outDir, 'merge-admission.json')));
+assert.ok(await exists(path.join(collection.outDir, 'coordinator-query.json')));
 const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
 assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
+const coordinatorQuery = JSON.parse(await fs.readFile(path.join(collection.outDir, 'coordinator-query.json'), 'utf8'));
+assert.strictEqual(coordinatorQuery.kind, 'frontier.swarm.coordinator-dashboard');
+assert.ok(coordinatorQuery.jobs[0].primaryEvidencePath.endsWith('evidence.json'));
 
 const browserRun = await runCodexSwarm(browserPlan, {
   outDir: path.join(tmp, 'browser-run'),

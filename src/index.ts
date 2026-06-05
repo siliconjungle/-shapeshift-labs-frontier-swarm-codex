@@ -7,6 +7,9 @@ import {
   FRONTIER_SWARM_DEFAULT_REASONING_EFFORT,
   checkSwarmOwnership,
   completeSwarmJob,
+  createSwarmCoordinatorDashboard,
+  createSwarmEvidenceIndex,
+  createSwarmMergeAdmission,
   FRONTIER_SWARM_MERGE_BUNDLE_KIND,
   FRONTIER_SWARM_MERGE_BUNDLE_VERSION,
   createSwarmMergeBundle,
@@ -24,10 +27,15 @@ import {
   recordSwarmEvent,
   routeSwarmEventToMailboxes,
   type FrontierSwarmCommand,
+  type FrontierSwarmCoordinatorDashboard,
+  type FrontierSwarmCoordinatorProcessInput,
   type FrontierSwarmEventInput,
   type FrontierSwarmEventStream,
+  type FrontierSwarmEvidenceIndex,
+  type FrontierSwarmEvidenceIndexEntryInput,
   type FrontierSwarmJob,
   type FrontierSwarmJobResultInput,
+  type FrontierSwarmMergeAdmission,
   type FrontierSwarmMergeBundle,
   type FrontierSwarmMergeIndex,
   type FrontierSwarmLease,
@@ -55,6 +63,8 @@ export const FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND = 'frontier.swarm-codex.patch
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND = 'frontier.swarm-codex.semantic-imports';
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND = 'frontier.swarm-codex.job-evidence';
+export const FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION = 1;
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 
@@ -215,6 +225,45 @@ export interface FrontierCodexSemanticImportSidecar {
   };
 }
 
+export interface FrontierCodexPatchHunkSummary {
+  file?: string;
+  header: string;
+  oldStart?: number;
+  oldLines?: number;
+  newStart?: number;
+  newLines?: number;
+}
+
+export interface FrontierCodexJobEvidenceSummary {
+  kind: typeof FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION;
+  generatedAt: number;
+  jobId: string;
+  taskId: string;
+  lane: string;
+  status: string;
+  mergeReadiness: string;
+  disposition: string;
+  riskLevel: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  ownershipViolations: string[];
+  patchPath?: string;
+  mergeBundlePath: string;
+  semanticImportPath?: string;
+  evidencePaths: string[];
+  handoffArtifacts: FrontierCodexHandoffArtifact[];
+  commands: {
+    passed: Array<{ name: string; command: string[]; status?: number }>;
+    failed: Array<{ name: string; command: string[]; status?: number }>;
+  };
+  patchHunks: FrontierCodexPatchHunkSummary[];
+  readyToPortHunkCount: number;
+  semanticImport?: FrontierCodexSemanticImportSidecar['summary'];
+  sourceCitations: Array<{ path: string; kind: string; language?: string; hash?: string }>;
+  metadata?: Record<string, unknown>;
+}
+
 export interface FrontierCodexWorkspacePlan {
   mode: FrontierCodexSwarmWorkspaceMode;
   root: string;
@@ -293,6 +342,9 @@ export interface FrontierCodexCollectResult {
   buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]>;
   mergeIndex: FrontierSwarmMergeIndex;
   queueOverlay: FrontierSwarmQueueOverlay;
+  evidenceIndex: FrontierSwarmEvidenceIndex;
+  admission: FrontierSwarmMergeAdmission;
+  dashboard: FrontierSwarmCoordinatorDashboard;
   summary: Record<FrontierCodexCollectBucket, number> & { total: number };
 }
 
@@ -806,8 +858,10 @@ export async function runCodexJob(
     options: options.semanticImport
   });
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });
+  const evidenceSummaryPath = path.join(paths.evidenceDir, 'evidence.json');
   const evidencePaths = uniqueStrings([
     paths.evidenceDir,
+    evidenceSummaryPath,
     paths.resourceAllocationPath,
     paths.workspaceProofPath,
     paths.mergeBundlePath,
@@ -846,6 +900,7 @@ export async function runCodexJob(
     ...(patchPath ? { patchPath } : {}),
     evidencePaths: uniqueStrings([
       paths.evidenceDir,
+      evidenceSummaryPath,
       paths.resourceAllocationPath,
       paths.workspaceProofPath,
       ...(semanticImport ? [semanticImport.path] : []),
@@ -856,7 +911,123 @@ export async function runCodexJob(
     ...(semanticImport ? { metadata: { semanticImport: semanticImport.sidecar.summary } } : {})
   });
   await fs.writeFile(paths.mergeBundlePath, JSON.stringify(mergeBundle, null, 2) + '\n');
+  await writeCodexJobEvidenceSummary({
+    file: evidenceSummaryPath,
+    job,
+    result,
+    mergeBundle,
+    mergeBundlePath: paths.mergeBundlePath,
+    patchPath,
+    semanticImportPath: semanticImport?.path,
+    semanticImport: semanticImport?.sidecar,
+    handoffArtifacts
+  });
   return result;
+}
+
+async function writeCodexJobEvidenceSummary(input: {
+  file: string;
+  job: FrontierSwarmJob;
+  result: FrontierSwarmJobResultInput;
+  mergeBundle: FrontierSwarmMergeBundle;
+  mergeBundlePath: string;
+  patchPath?: string;
+  semanticImportPath?: string;
+  semanticImport?: FrontierCodexSemanticImportSidecar;
+  handoffArtifacts: readonly FrontierCodexHandoffArtifact[];
+}): Promise<void> {
+  const patchHunks = input.patchPath ? await readPatchHunks(input.patchPath) : [];
+  const sourceCitations = createCodexEvidenceSourceCitations(input.mergeBundle, input.semanticImport);
+  const evidence: FrontierCodexJobEvidenceSummary = {
+    kind: FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND,
+    version: FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION,
+    generatedAt: Date.now(),
+    jobId: input.job.id,
+    taskId: input.job.taskId,
+    lane: input.job.lane,
+    status: input.result.status ?? 'unknown',
+    mergeReadiness: input.mergeBundle.mergeReadiness,
+    disposition: input.mergeBundle.disposition,
+    riskLevel: input.mergeBundle.riskLevel,
+    changedPaths: [...input.mergeBundle.changedPaths],
+    changedRegions: [...input.mergeBundle.changedRegions],
+    ownershipViolations: [...input.mergeBundle.ownershipViolations],
+    ...(input.patchPath ? { patchPath: input.patchPath } : {}),
+    mergeBundlePath: input.mergeBundlePath,
+    ...(input.semanticImportPath ? { semanticImportPath: input.semanticImportPath } : {}),
+    evidencePaths: uniqueStrings(input.mergeBundle.evidencePaths),
+    handoffArtifacts: input.handoffArtifacts.map((artifact) => ({ ...artifact })),
+    commands: {
+      passed: input.mergeBundle.commandsPassed.map((command) => ({
+        name: command.name,
+        command: [...command.command],
+        ...(command.status !== undefined ? { status: command.status } : {})
+      })),
+      failed: input.mergeBundle.commandsFailed.map((command) => ({
+        name: command.name,
+        command: [...command.command],
+        ...(command.status !== undefined ? { status: command.status } : {})
+      }))
+    },
+    patchHunks,
+    readyToPortHunkCount: input.mergeBundle.disposition === 'needs-port' || input.mergeBundle.disposition === 'auto-mergeable' ? patchHunks.length : 0,
+    ...(input.semanticImport ? { semanticImport: input.semanticImport.summary } : {}),
+    sourceCitations,
+    metadata: {
+      autoMergeable: input.mergeBundle.autoMergeable,
+      staleAgainstHead: input.mergeBundle.staleAgainstHead,
+      reasons: input.mergeBundle.reasons
+    }
+  };
+  await fs.writeFile(input.file, JSON.stringify(evidence, null, 2) + '\n');
+}
+
+async function readPatchHunks(file: string): Promise<FrontierCodexPatchHunkSummary[]> {
+  const text = await fs.readFile(file, 'utf8').catch(() => '');
+  if (!text.trim()) return [];
+  const hunks: FrontierCodexPatchHunkSummary[] = [];
+  let currentFile: string | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('+++ ')) {
+      currentFile = line.slice(4).replace(/^b\//, '').trim();
+      continue;
+    }
+    if (!line.startsWith('@@')) continue;
+    const match = /^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?/.exec(line);
+    hunks.push({
+      ...(currentFile ? { file: currentFile } : {}),
+      header: line,
+      ...(match ? {
+        oldStart: Number(match[1]),
+        oldLines: Number(match[2] ?? '1'),
+        newStart: Number(match[3]),
+        newLines: Number(match[4] ?? '1')
+      } : {})
+    });
+  }
+  return hunks;
+}
+
+function createCodexEvidenceSourceCitations(
+  bundle: FrontierSwarmMergeBundle,
+  semanticImport?: FrontierCodexSemanticImportSidecar
+): Array<{ path: string; kind: string; language?: string; hash?: string }> {
+  const citations: Array<{ path: string; kind: string; language?: string; hash?: string }> = [
+    ...bundle.changedPaths.map((file) => ({ path: file, kind: 'changed-source' })),
+    ...(semanticImport?.records ?? []).map((record) => ({
+      path: record.path,
+      kind: 'semantic-import',
+      ...(record.language ? { language: record.language } : {}),
+      ...(record.universalAstHash ? { hash: record.universalAstHash } : {})
+    }))
+  ];
+  const seen = new Set<string>();
+  return citations.filter((citation) => {
+    const key = `${citation.kind}:${citation.path}:${citation.language ?? ''}:${citation.hash ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function createCodexSemanticImportSidecar(input: {
@@ -1446,35 +1617,19 @@ export async function writeSwarmCoordinatorSnapshot(
   file: string,
   input: FrontierCodexSwarmRunResult & { eventStream?: FrontierSwarmEventStream; pidManifestPath?: string }
 ): Promise<void> {
-  const byLane = input.run.jobs.reduce<Record<string, { total: number; completed: number; failed: number; blocked: number }>>((acc, job) => {
-    const current = acc[job.lane] ?? { total: 0, completed: 0, failed: 0, blocked: 0 };
-    current.total += 1;
-    const result = input.run.results.find((entry) => entry.jobId === job.id);
-    if (result?.status === 'completed' || result?.status === 'verified') current.completed += 1;
-    else if (result?.status === 'failed') current.failed += 1;
-    else if (result?.status === 'blocked') current.blocked += 1;
-    acc[job.lane] = current;
-    return acc;
-  }, {});
-  const mergeReadiness = input.run.results.reduce<Record<string, number>>((acc, result) => {
-    acc[result.mergeReadiness] = (acc[result.mergeReadiness] ?? 0) + 1;
-    return acc;
-  }, {});
-  const dashboard = {
-    kind: 'frontier.swarm-codex.coordinator-dashboard',
-    version: 1,
-    generatedAt: new Date().toISOString(),
-    ok: input.ok,
-    outDir: input.outDir,
-    runId: input.run.id,
-    planId: input.plan.id,
-    summary: input.run.summary,
-    byLane,
-    mergeReadiness,
-    eventStream: input.eventStream ?? null,
-    pidManifestPath: input.pidManifestPath ?? null,
-    proof: input.proof
-  };
+  const processes = input.pidManifestPath ? await readCodexPidProcesses(input.pidManifestPath).catch(() => []) : [];
+  const dashboard = createSwarmCoordinatorDashboard({
+    plan: input.plan,
+    run: input.run,
+    processes,
+    metadata: {
+      ok: input.ok,
+      outDir: input.outDir,
+      eventStream: input.eventStream ?? null,
+      pidManifestPath: input.pidManifestPath ?? null,
+      proof: input.proof
+    }
+  });
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(dashboard, null, 2) + '\n');
 }
@@ -1542,7 +1697,9 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     'stale-against-head': []
   };
   const collectedBundles: FrontierSwarmMergeBundle[] = [];
+  const evidenceEntries: FrontierSwarmEvidenceIndexEntryInput[] = [];
   const patchStatuses: Record<string, 'unknown' | 'applies' | 'missing' | 'stale'> = {};
+  const processes = await readCodexPidProcesses(path.join(runDir, 'pids.json')).catch(() => []);
   const mergePaths = (await findFilesByName(runDir, 'merge.json'))
     .filter((mergePath) => !pathHasIgnoredSegment(path.relative(runDir, mergePath), [
       'collected',
@@ -1566,19 +1723,30 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     const staleAgainstHead = input.checkStale === false ? false : await bundlePatchIsStale(bundle, mergePath, cwd);
     const bucket = classifyCodexCollectBucket(bundle, staleAgainstHead);
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(bundle.jobId)}` : bundle.branchName;
+    const outputDir = path.join(outDir, bucket, slug(bundle.jobId));
+    const collectedEvidencePath = path.join(outputDir, 'evidence.json');
     const nextBundle: FrontierSwarmMergeBundle = {
       ...bundle,
       ...(branchName ? { branchName } : {}),
       staleAgainstHead: bundle.staleAgainstHead || staleAgainstHead,
       disposition: staleAgainstHead ? 'stale-against-head' : bundle.disposition,
-      autoMergeable: bucket === 'ready-to-apply' && bundle.autoMergeable
+      autoMergeable: bucket === 'ready-to-apply' && bundle.autoMergeable,
+      evidencePaths: uniqueStrings([...bundle.evidencePaths, collectedEvidencePath])
     };
     collectedBundles.push(nextBundle);
     patchStatuses[nextBundle.jobId] = staleAgainstHead ? 'stale' : patchExists ? input.checkStale === false ? 'unknown' : 'applies' : 'missing';
-    const outputDir = path.join(outDir, bucket, slug(bundle.jobId));
     await fs.mkdir(outputDir, { recursive: true });
     await fs.writeFile(path.join(outputDir, 'merge.json'), JSON.stringify(nextBundle, null, 2) + '\n');
     if (patchPath && await pathExists(patchPath)) await fs.copyFile(patchPath, path.join(outputDir, 'changes.patch')).catch(() => {});
+    await copyOrWriteCollectedEvidenceSummary({
+      file: collectedEvidencePath,
+      bundle: nextBundle,
+      bucket,
+      mergePath,
+      patchPath,
+      patchStatus: patchStatuses[nextBundle.jobId]
+    });
+    evidenceEntries.push(...createCollectedEvidenceEntries(nextBundle, collectedEvidencePath, bucket));
     buckets[bucket].push({ bucket, jobId: bundle.jobId, mergePath, outputDir, bundle: nextBundle });
   }
   const mergeIndex = createSwarmMergeIndex({
@@ -1589,6 +1757,27 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const queueOverlay = createSwarmQueueOverlay({
     runId: path.basename(runDir),
     bundles: collectedBundles
+  });
+  const evidenceIndex = createSwarmEvidenceIndex({
+    id: `codex-evidence-index:${path.basename(runDir)}`,
+    entries: evidenceEntries,
+    generatedAt
+  });
+  const admission = createSwarmMergeAdmission({
+    index: mergeIndex,
+    maxReady: Math.max(mergeIndex.summary.readyToApplyCount, 1),
+    allowRisks: ['low', 'medium', 'unknown'],
+    generatedAt
+  });
+  const dashboard = createSwarmCoordinatorDashboard({
+    bundles: collectedBundles,
+    mergeIndex,
+    queueOverlay,
+    evidenceIndex,
+    admission,
+    processes,
+    generatedAt,
+    metadata: { runDir, outDir }
   });
   const summary = {
     total: mergeRecords.length,
@@ -1607,13 +1796,137 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     buckets,
     mergeIndex,
     queueOverlay,
+    evidenceIndex,
+    admission,
+    dashboard,
     summary
   };
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'collection.json'), JSON.stringify(result, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'merge-index.json'), JSON.stringify(mergeIndex, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'queue-overlay.json'), JSON.stringify(queueOverlay, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'evidence-index.json'), JSON.stringify(evidenceIndex, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'merge-admission.json'), JSON.stringify(admission, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'coordinator-query.json'), JSON.stringify(dashboard, null, 2) + '\n');
   return result;
+}
+
+async function readCodexPidProcesses(file: string): Promise<FrontierSwarmCoordinatorProcessInput[]> {
+  const manifest = await readCodexPidManifest(file);
+  return Promise.all(manifest.entries.map(async (entry) => ({
+    pid: entry.pid,
+    role: entry.role,
+    ...(entry.jobId ? { jobId: entry.jobId } : {}),
+    ...(entry.runId ? { runId: entry.runId } : {}),
+    status: await pidIsAlive(entry.pid) ? 'running' : 'missing',
+    startedAt: entry.startedAt,
+    ...(entry.command ? { command: entry.command } : {})
+  })));
+}
+
+async function pidIsAlive(pid: number): Promise<boolean> {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copyOrWriteCollectedEvidenceSummary(input: {
+  file: string;
+  bundle: FrontierSwarmMergeBundle;
+  bucket: FrontierCodexCollectBucket;
+  mergePath: string;
+  patchPath?: string;
+  patchStatus: string;
+}): Promise<void> {
+  const existing = input.bundle.evidencePaths.find((entry) => path.basename(entry) === 'evidence.json' && entry !== input.file);
+  await fs.mkdir(path.dirname(input.file), { recursive: true });
+  if (existing && await pathExists(existing)) {
+    await fs.copyFile(existing, input.file).catch(() => {});
+    if (await pathExists(input.file)) return;
+  }
+  const patchHunks = input.patchPath ? await readPatchHunks(input.patchPath) : [];
+  const evidence: FrontierCodexJobEvidenceSummary = {
+    kind: FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND,
+    version: FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION,
+    generatedAt: Date.now(),
+    jobId: input.bundle.jobId,
+    taskId: input.bundle.taskId ?? input.bundle.jobId,
+    lane: input.bundle.lane ?? 'unknown',
+    status: input.bundle.status,
+    mergeReadiness: input.bundle.mergeReadiness,
+    disposition: input.bundle.disposition,
+    riskLevel: input.bundle.riskLevel,
+    changedPaths: [...input.bundle.changedPaths],
+    changedRegions: [...input.bundle.changedRegions],
+    ownershipViolations: [...input.bundle.ownershipViolations],
+    ...(input.patchPath ? { patchPath: input.patchPath } : {}),
+    mergeBundlePath: input.mergePath,
+    evidencePaths: uniqueStrings(input.bundle.evidencePaths),
+    handoffArtifacts: input.bundle.evidencePaths.map((entry) => ({ path: entry, kind: classifyCodexHandoffArtifact(entry) ?? 'evidence' })),
+    commands: {
+      passed: input.bundle.commandsPassed.map((command) => ({ name: command.name, command: [...command.command], ...(command.status !== undefined ? { status: command.status } : {}) })),
+      failed: input.bundle.commandsFailed.map((command) => ({ name: command.name, command: [...command.command], ...(command.status !== undefined ? { status: command.status } : {}) }))
+    },
+    patchHunks,
+    readyToPortHunkCount: input.bucket === 'needs-human-port' || input.bucket === 'ready-to-apply' ? patchHunks.length : 0,
+    ...(input.bundle.semanticImport ? { semanticImport: input.bundle.semanticImport as FrontierCodexSemanticImportSidecar['summary'] } : {}),
+    sourceCitations: createCodexEvidenceSourceCitations(input.bundle),
+    metadata: {
+      bucket: input.bucket,
+      patchStatus: input.patchStatus,
+      autoMergeable: input.bundle.autoMergeable,
+      staleAgainstHead: input.bundle.staleAgainstHead,
+      reasons: input.bundle.reasons
+    }
+  };
+  await fs.writeFile(input.file, JSON.stringify(evidence, null, 2) + '\n');
+}
+
+function createCollectedEvidenceEntries(
+  bundle: FrontierSwarmMergeBundle,
+  collectedEvidencePath: string,
+  bucket: FrontierCodexCollectBucket
+): FrontierSwarmEvidenceIndexEntryInput[] {
+  const confidence = bucket === 'ready-to-apply' ? 0.95 : bucket === 'needs-human-port' ? 0.7 : bucket === 'failed-evidence' ? 0.25 : 0.2;
+  const entries: FrontierSwarmEvidenceIndexEntryInput[] = [{
+    jobId: bundle.jobId,
+    queueItemId: bundle.queueItemIds[0],
+    lane: bundle.lane,
+    topic: 'merge-admission',
+    path: collectedEvidencePath,
+    kind: 'evidence',
+    status: bucket,
+    confidence,
+    tags: ['coordinator-query', bucket],
+    facets: {
+      bucket,
+      disposition: bundle.disposition,
+      riskLevel: bundle.riskLevel,
+      autoMergeable: bundle.autoMergeable,
+      staleAgainstHead: bundle.staleAgainstHead,
+      semanticSymbols: bundle.semanticImport?.semanticIndex.symbols ?? 0,
+      semanticRegions: bundle.semanticImport?.semanticSidecars.ownershipRegions ?? 0
+    }
+  }];
+  for (const file of bundle.evidencePaths) {
+    if (file === collectedEvidencePath) continue;
+    entries.push({
+      jobId: bundle.jobId,
+      queueItemId: bundle.queueItemIds[0],
+      lane: bundle.lane,
+      topic: path.basename(file),
+      path: file,
+      kind: classifyCodexHandoffArtifact(file) ?? 'evidence',
+      status: bucket,
+      confidence,
+      tags: [bucket],
+      facets: { bucket, disposition: bundle.disposition }
+    });
+  }
+  return entries;
 }
 
 export async function applyCodexSwarmCollection(input: FrontierCodexApplyInput): Promise<FrontierCodexApplyResult> {
@@ -2831,7 +3144,9 @@ function normalizeCollectedMergeBundle(value: unknown, mergePath: string): Front
     ...(typeof input.branchName === 'string' ? { branchName: input.branchName } : {}),
     ...(typeof input.commit === 'string' ? { commit: input.commit } : {}),
     staleAgainstHead: Boolean(input.staleAgainstHead),
-    reasons: stringArray(input.reasons)
+    reasons: stringArray(input.reasons),
+    ...(isObject(input.semanticImport) ? { semanticImport: input.semanticImport as unknown as FrontierSwarmMergeBundle['semanticImport'] } : {}),
+    ...(isObject(input.metadata) ? { metadata: input.metadata as FrontierSwarmMergeBundle['metadata'] } : {})
   };
 }
 
