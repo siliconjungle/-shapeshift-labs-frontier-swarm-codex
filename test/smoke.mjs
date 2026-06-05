@@ -183,10 +183,13 @@ assert.ok(browserPrompt.includes('FRONTIER_SWARM_BROWSER_PROFILE_DIR'));
 const result = await runCodexSwarm(plan, {
   outDir: path.join(tmp, 'run'),
   cwd: tmp,
+  semanticImport: true,
   dryRun: false,
   executor: async (input) => {
     assert.strictEqual(input.resourceAllocation.env.FRONTIER_SWARM_JOB_ID, input.job.id);
     assert.strictEqual(input.env.FRONTIER_SWARM_TASK_ID, input.job.taskId);
+    await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
+    await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export const action = 1;\n');
     await fs.writeFile(input.paths.lastMessagePath, 'done\n');
     return { exitCode: 0, changedPaths: ['src/runtime/action.ts'], lastMessage: 'done' };
   }
@@ -199,11 +202,18 @@ assert.ok(await exists(path.join(tmp, 'run', 'pids.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('resource-allocation.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('workspace-proof.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('merge.json')));
+const semanticImportsPath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('semantic-imports.json'));
+assert.ok(semanticImportsPath);
+const semanticImports = JSON.parse(await fs.readFile(semanticImportsPath, 'utf8'));
+assert.strictEqual(semanticImports.kind, 'frontier.swarm-codex.semantic-imports');
+assert.strictEqual(semanticImports.summary.total, 1);
+assert.strictEqual(semanticImports.summary.imported + semanticImports.summary.errors, 1);
 assert.strictEqual(result.run.results[0].mergeReadiness, 'patch-candidate');
 const mergeBundlePath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('merge.json'));
 const mergeBundle = JSON.parse(await fs.readFile(mergeBundlePath, 'utf8'));
 assert.strictEqual(mergeBundle.disposition, 'needs-port');
 assert.deepStrictEqual(mergeBundle.queueItemIds, ['runtime-action']);
+assert.strictEqual(mergeBundle.metadata.semanticImport.total, 1);
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);

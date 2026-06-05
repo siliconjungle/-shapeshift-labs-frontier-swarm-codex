@@ -53,6 +53,8 @@ export const FRONTIER_SWARM_CODEX_APPLY_LEDGER_KIND = 'frontier.swarm-codex.appl
 export const FRONTIER_SWARM_CODEX_APPLY_LEDGER_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND = 'frontier.swarm-codex.patch-score';
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND = 'frontier.swarm-codex.semantic-imports';
+export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION = 1;
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 
@@ -114,9 +116,58 @@ export interface FrontierCodexSwarmRunOptions {
   prepareJobWorkspace?: FrontierCodexJobWorkspaceHook;
   renderJobPrompt?: FrontierCodexJobPromptHook;
   changedPathFilter?: FrontierCodexChangedPathFilter;
+  semanticImport?: boolean | FrontierCodexSemanticImportOptions;
   onJobStarted?: FrontierCodexJobStartedHook;
   onJobFinished?: FrontierCodexJobFinishedHook;
   onSwarmFinished?: FrontierCodexSwarmFinishedHook;
+}
+
+export interface FrontierCodexSemanticImportOptions {
+  enabled?: boolean;
+  maxFiles?: number;
+  maxBytes?: number;
+  include?: readonly string[];
+  exclude?: readonly string[];
+  languages?: Readonly<Record<string, string>>;
+}
+
+export interface FrontierCodexSemanticImportRecord {
+  path: string;
+  language?: string;
+  status: 'imported' | 'skipped' | 'error';
+  reason?: string;
+  bytes?: number;
+  importId?: string;
+  universalAstHash?: string;
+  nativeAstId?: string;
+  nativeSourceId?: string;
+  evidenceCount?: number;
+  lossCount?: number;
+  losses?: unknown;
+  semanticIndex?: {
+    documents: number;
+    symbols: number;
+    occurrences: number;
+    relations: number;
+    facts: number;
+  };
+  mergeCandidate?: unknown;
+  error?: string;
+}
+
+export interface FrontierCodexSemanticImportSidecar {
+  kind: typeof FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION;
+  generatedAt: number;
+  jobId: string;
+  taskId?: string;
+  records: FrontierCodexSemanticImportRecord[];
+  summary: {
+    total: number;
+    imported: number;
+    skipped: number;
+    errors: number;
+  };
 }
 
 export interface FrontierCodexWorkspacePlan {
@@ -685,6 +736,13 @@ export async function runCodexJob(
     workspacePlan,
     changedPaths
   });
+  const semanticImport = await createCodexSemanticImportSidecar({
+    job,
+    workspace,
+    changedPaths,
+    evidenceDir: paths.evidenceDir,
+    options: options.semanticImport
+  });
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });
   const evidencePaths = uniqueStrings([
     paths.evidenceDir,
@@ -692,6 +750,7 @@ export async function runCodexJob(
     paths.workspaceProofPath,
     paths.mergeBundlePath,
     ...(patchPath ? [patchPath] : []),
+    ...(semanticImport ? [semanticImport.path] : []),
     ...handoffArtifacts.map((artifact) => artifact.path)
   ]);
   const result: FrontierSwarmJobResultInput = {
@@ -713,6 +772,7 @@ export async function runCodexJob(
     metadata: {
       ...(lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : {}),
       resourceAllocation,
+      ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {}),
       codexHandoffArtifacts: handoffArtifacts
     }
   };
@@ -721,11 +781,107 @@ export async function runCodexJob(
     job,
     result,
     ...(patchPath ? { patchPath } : {}),
-    evidencePaths: uniqueStrings([paths.evidenceDir, paths.resourceAllocationPath, paths.workspaceProofPath, ...handoffArtifacts.map((artifact) => artifact.path)]),
-    queueItemIds: [job.taskId]
+    evidencePaths: uniqueStrings([
+      paths.evidenceDir,
+      paths.resourceAllocationPath,
+      paths.workspaceProofPath,
+      ...(semanticImport ? [semanticImport.path] : []),
+      ...handoffArtifacts.map((artifact) => artifact.path)
+    ]),
+    queueItemIds: [job.taskId],
+    ...(semanticImport ? { metadata: { semanticImport: semanticImport.sidecar.summary } } : {})
   });
   await fs.writeFile(paths.mergeBundlePath, JSON.stringify(mergeBundle, null, 2) + '\n');
   return result;
+}
+
+async function createCodexSemanticImportSidecar(input: {
+  job: FrontierSwarmJob;
+  workspace: string;
+  changedPaths: readonly string[];
+  evidenceDir: string;
+  options?: boolean | FrontierCodexSemanticImportOptions;
+}): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
+  const options = normalizeSemanticImportOptions(input.options);
+  if (!options) return undefined;
+  const selected = selectSemanticImportPaths(input.changedPaths, options);
+  const records: FrontierCodexSemanticImportRecord[] = [];
+  const importPath = path.join(input.evidenceDir, 'semantic-imports.json');
+  if (!selected.length) {
+    const sidecar = createSemanticImportSidecar(input.job, records);
+    await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
+    return { path: importPath, sidecar };
+  }
+  const api = await loadFrontierLangForSemanticImport();
+  if (!api.ok) {
+    for (const file of selected) {
+      records.push({
+        path: file.path,
+        language: file.language,
+        status: 'error',
+        reason: 'frontier-lang-unavailable',
+        error: api.error
+      });
+    }
+    const sidecar = createSemanticImportSidecar(input.job, records);
+    await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
+    return { path: importPath, sidecar };
+  }
+  for (const file of selected) {
+    const absolute = path.join(input.workspace, file.path);
+    const stat = await fs.stat(absolute).catch(() => undefined);
+    if (!stat?.isFile()) {
+      records.push({ path: file.path, language: file.language, status: 'skipped', reason: 'not-a-file' });
+      continue;
+    }
+    if (stat.size > options.maxBytes) {
+      records.push({ path: file.path, language: file.language, status: 'skipped', reason: 'too-large', bytes: stat.size });
+      continue;
+    }
+    try {
+      const sourceText = await fs.readFile(absolute, 'utf8');
+      const importResult = api.importNativeSource({
+        language: file.language,
+        sourcePath: file.path,
+        sourceText,
+        parser: 'source-text',
+        metadata: {
+          swarmJobId: input.job.id,
+          swarmTaskId: input.job.taskId,
+          swarmLane: input.job.lane
+        }
+      });
+      const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
+      records.push({
+        path: file.path,
+        language: file.language,
+        status: 'imported',
+        bytes: stat.size,
+        importId: importResult?.id,
+        universalAstHash: api.hashUniversalAstEnvelope && importResult?.universalAst
+          ? api.hashUniversalAstEnvelope(importResult.universalAst)
+          : undefined,
+        nativeAstId: importResult?.nativeAst?.id,
+        nativeSourceId: importResult?.nativeSource?.id,
+        evidenceCount: Array.isArray(importResult?.evidence) ? importResult.evidence.length : 0,
+        lossCount: Array.isArray(importResult?.losses) ? importResult.losses.length : 0,
+        losses: summarizeSemanticLosses(importResult?.losses),
+        semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
+        mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
+      });
+    } catch (error) {
+      records.push({
+        path: file.path,
+        language: file.language,
+        status: 'error',
+        bytes: stat.size,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+  const sidecar = createSemanticImportSidecar(input.job, records);
+  await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
+  return { path: importPath, sidecar };
 }
 
 export async function discoverCodexHandoffArtifacts(input: FrontierCodexHandoffDiscoveryInput): Promise<FrontierCodexHandoffArtifact[]> {
@@ -2013,6 +2169,148 @@ function resolveBrowserProfileDir(job: FrontierSwarmJob, profileDir: string | un
 
 function safePathSegment(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'job';
+}
+
+type SemanticImportSelectedPath = { path: string; language: string };
+
+type FrontierLangSemanticImportApi = {
+  ok: true;
+  importNativeSource(input: Record<string, unknown>): any;
+  createSemanticMergeCandidateFromImport(input: Record<string, unknown>): any;
+  hashUniversalAstEnvelope?(input: unknown): string;
+} | {
+  ok: false;
+  error: string;
+};
+
+function normalizeSemanticImportOptions(input: boolean | FrontierCodexSemanticImportOptions | undefined): Required<Pick<FrontierCodexSemanticImportOptions, 'maxFiles' | 'maxBytes'>> & FrontierCodexSemanticImportOptions | undefined {
+  if (input === false || input === undefined) return undefined;
+  const options = input === true ? {} : input;
+  if (options.enabled === false) return undefined;
+  return {
+    ...options,
+    enabled: true,
+    maxFiles: Math.max(0, Math.floor(options.maxFiles ?? 24)),
+    maxBytes: Math.max(0, Math.floor(options.maxBytes ?? 512 * 1024))
+  };
+}
+
+function selectSemanticImportPaths(
+  changedPaths: readonly string[],
+  options: Required<Pick<FrontierCodexSemanticImportOptions, 'maxFiles' | 'maxBytes'>> & FrontierCodexSemanticImportOptions
+): SemanticImportSelectedPath[] {
+  const selected: SemanticImportSelectedPath[] = [];
+  for (const file of uniqueWorkspacePaths(changedPaths)) {
+    if (selected.length >= options.maxFiles) break;
+    if (pathHasIgnoredSegment(file, ['node_modules', 'dist', 'coverage', 'agent-runs', '.frontier-framework'])) continue;
+    if (options.include?.length && !options.include.some((glob) => matchesGlob(file, glob))) continue;
+    if (options.exclude?.some((glob) => matchesGlob(file, glob))) continue;
+    const language = inferSemanticImportLanguage(file, options.languages);
+    if (!language) continue;
+    selected.push({ path: file, language });
+  }
+  return selected;
+}
+
+function inferSemanticImportLanguage(file: string, overrides?: Readonly<Record<string, string>>): string | undefined {
+  const ext = path.extname(file).toLowerCase();
+  return overrides?.[file] ?? overrides?.[ext] ?? ({
+    '.ts': 'typescript',
+    '.tsx': 'typescript',
+    '.js': 'javascript',
+    '.jsx': 'javascript',
+    '.mjs': 'javascript',
+    '.cjs': 'javascript',
+    '.rs': 'rust',
+    '.py': 'python',
+    '.c': 'c',
+    '.h': 'c',
+    '.cc': 'cpp',
+    '.cpp': 'cpp',
+    '.hpp': 'cpp',
+    '.hh': 'cpp',
+    '.go': 'go',
+    '.java': 'java',
+    '.kt': 'kotlin',
+    '.kts': 'kotlin',
+    '.swift': 'swift',
+    '.cs': 'csharp',
+    '.php': 'php',
+    '.rb': 'ruby',
+    '.rake': 'ruby'
+  } as Record<string, string | undefined>)[ext];
+}
+
+async function loadFrontierLangForSemanticImport(): Promise<FrontierLangSemanticImportApi> {
+  try {
+    const packageName = '@shapeshift-labs/frontier-lang';
+    const api = await import(packageName) as any;
+    if (typeof api.importNativeSource !== 'function' || typeof api.createSemanticMergeCandidateFromImport !== 'function') {
+      return { ok: false, error: 'frontier-lang missing importNativeSource/createSemanticMergeCandidateFromImport exports' };
+    }
+    return {
+      ok: true,
+      importNativeSource: api.importNativeSource,
+      createSemanticMergeCandidateFromImport: api.createSemanticMergeCandidateFromImport,
+      ...(typeof api.hashUniversalAstEnvelope === 'function' ? { hashUniversalAstEnvelope: api.hashUniversalAstEnvelope } : {})
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function createSemanticImportSidecar(job: FrontierSwarmJob, records: FrontierCodexSemanticImportRecord[]): FrontierCodexSemanticImportSidecar {
+  return {
+    kind: FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND,
+    version: FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION,
+    generatedAt: Date.now(),
+    jobId: job.id,
+    taskId: job.taskId,
+    records,
+    summary: {
+      total: records.length,
+      imported: records.filter((record) => record.status === 'imported').length,
+      skipped: records.filter((record) => record.status === 'skipped').length,
+      errors: records.filter((record) => record.status === 'error').length
+    }
+  };
+}
+
+function summarizeSemanticIndex(value: any): FrontierCodexSemanticImportRecord['semanticIndex'] {
+  if (!value || typeof value !== 'object') return undefined;
+  return {
+    documents: Array.isArray(value.documents) ? value.documents.length : 0,
+    symbols: Array.isArray(value.symbols) ? value.symbols.length : 0,
+    occurrences: Array.isArray(value.occurrences) ? value.occurrences.length : 0,
+    relations: Array.isArray(value.relations) ? value.relations.length : 0,
+    facts: Array.isArray(value.facts) ? value.facts.length : 0
+  };
+}
+
+function summarizeSemanticLosses(value: any): unknown {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  return value.slice(0, 12).map((loss) => ({
+    id: loss?.id,
+    severity: loss?.severity,
+    phase: loss?.phase,
+    kind: loss?.kind,
+    message: loss?.message,
+    nodeId: loss?.nodeId,
+    span: loss?.span
+  }));
+}
+
+function summarizeSemanticMergeCandidate(value: any): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  return {
+    kind: value.kind,
+    readiness: value.readiness,
+    touchedSymbols: Array.isArray(value.touchedSymbols) ? value.touchedSymbols.slice(0, 50) : [],
+    touchedSemanticNodes: Array.isArray(value.touchedSemanticNodes) ? value.touchedSemanticNodes.slice(0, 50) : [],
+    nativeSpans: Array.isArray(value.nativeSpans) ? value.nativeSpans.slice(0, 50) : [],
+    conflictKeys: Array.isArray(value.conflictKeys) ? value.conflictKeys.slice(0, 100) : [],
+    reasons: Array.isArray(value.reasons) ? value.reasons.slice(0, 50) : []
+  };
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

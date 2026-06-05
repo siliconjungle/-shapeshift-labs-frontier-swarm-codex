@@ -45,6 +45,7 @@ try {
       profile: stringArg(args.profile),
       dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
       runVerification: boolArg(args.verify, false),
+      semanticImport: semanticImportArg(args),
       workspace: {
         mode: readWorkspaceMode(args.workspace),
         root: stringArg(args.worktreeRoot ?? args['worktree-root']),
@@ -143,6 +144,7 @@ function printHelp() {
     '  --approval never|on-request|on-failure|untrusted',
     '  --workspace current|copy|snapshot|git-worktree',
     '  --include <path> --exclude <path> --link <path>',
+    '  --semantic-import --semantic-import-max-files <n> --semantic-import-max-bytes <n>',
     '  --focused-command <cmd> --global-command <cmd>',
     '',
     'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',
@@ -224,6 +226,18 @@ function bucketArg(value: CliValue | undefined) {
   if (bucket === undefined) return undefined;
   if (bucket === 'all' || bucket === 'ready-to-apply' || bucket === 'needs-human-port' || bucket === 'failed-evidence' || bucket === 'stale-against-head') return bucket;
   throw new Error(`unsupported --bucket ${bucket}`);
+}
+
+function semanticImportArg(args: CliArgs): boolean | { enabled: true; maxFiles?: number; maxBytes?: number; include?: string[]; exclude?: string[] } {
+  const enabled = boolArg(args.semanticImport ?? args['semantic-import'], false);
+  if (!enabled) return false;
+  return {
+    enabled: true,
+    maxFiles: numberArg(args.semanticImportMaxFiles ?? args['semantic-import-max-files'], undefined),
+    maxBytes: numberArg(args.semanticImportMaxBytes ?? args['semantic-import-max-bytes'], undefined),
+    include: listArg(args.semanticImportInclude ?? args['semantic-import-include']),
+    exclude: listArg(args.semanticImportExclude ?? args['semantic-import-exclude'])
+  };
 }
 
 function commandListArg(value: CliValue | undefined) {
