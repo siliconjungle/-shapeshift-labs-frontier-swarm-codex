@@ -107,11 +107,14 @@ export function matchesSemanticImportGlob(file: string, glob: string): boolean {
 
 
 export function semanticImportCandidatePaths(job: FrontierSwarmJob, changedPaths: readonly string[]): string[] {
-  const concreteRefs = job.task.sourceRefs.concat(job.task.targetRefs).filter((file) => {
+  const concreteRefs = [
+    ...job.task.sourceRefs,
+    ...job.task.targetRefs,
+    ...job.task.allowedWrites,
+    ...job.allowedWrites
+  ].filter((file) => {
     const normalized = normalizeWorkspacePath(file);
-    return normalized
-      && !normalized.includes('*')
-      && path.extname(normalized).length > 0;
+    return normalized && path.extname(normalized).length > 0;
   });
   return uniqueWorkspacePaths([...changedPaths, ...concreteRefs]);
 }

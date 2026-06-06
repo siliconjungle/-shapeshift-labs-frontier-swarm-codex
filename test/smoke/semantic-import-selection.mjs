@@ -1,7 +1,8 @@
 import assert from 'node:assert';
 import {
   matchesSemanticImportGlob,
-  selectSemanticImportPaths
+  selectSemanticImportPaths,
+  semanticImportCandidatePaths
 } from '../../dist/semantic-import-select.js';
 
 export async function testSemanticImportSelection() {
@@ -39,4 +40,24 @@ export async function testSemanticImportSelection() {
   });
   assert.equal(unsupported.unsupportedLanguageCount, 1);
   assert.equal(unsupported.selected.length, 0);
+
+  const candidates = semanticImportCandidatePaths({
+    task: {
+      sourceRefs: ['legacy/runtime.ts', '/absolute/legacy.ts'],
+      targetRefs: ['src/runtime/action.ts'],
+      allowedWrites: ['src/runtime/owned.ts', 'src/runtime/*.ts', 'README']
+    },
+    allowedWrites: ['src/lane/concrete.js', 'src/lane/*.js']
+  }, [
+    'src/runtime/changed.ts',
+    'src/runtime/action.ts',
+    '../outside.ts'
+  ]);
+  assert.deepEqual(candidates, [
+    'src/runtime/changed.ts',
+    'src/runtime/action.ts',
+    'legacy/runtime.ts',
+    'src/runtime/owned.ts',
+    'src/lane/concrete.js'
+  ]);
 }

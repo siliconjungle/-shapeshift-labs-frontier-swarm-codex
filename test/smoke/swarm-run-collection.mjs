@@ -92,10 +92,37 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.ok(Array.isArray(mergeBundle.metadata.semanticImport.universalAstLayers.names));
   assert.strictEqual(mergeBundle.metadata.semanticImport.proofSpec.failed, 0);
 
+  await testSemanticImportFallbackFromTaskRefs(plan, tmp);
   await testCollectedRun(tmp);
   await testNoIndexCollection(tmp, mergeBundle);
   await testBrowserRun(tmp);
   return { mergeBundle };
+}
+
+async function testSemanticImportFallbackFromTaskRefs(plan, tmp) {
+  const fallbackRun = await runCodexSwarm(plan, {
+    outDir: path.join(tmp, 'task-ref-run'),
+    cwd: tmp,
+    maxConcurrency: 1,
+    semanticImport: true,
+    semanticImportExpected: true,
+    dryRun: false,
+    executor: async (input) => {
+      await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
+      await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function action() { return 2; }\n');
+      await fs.writeFile(input.paths.lastMessagePath, 'task refs only\n');
+      return { exitCode: 0, changedPaths: [], lastMessage: 'task refs only' };
+    }
+  });
+  assert.strictEqual(fallbackRun.ok, true);
+  const semanticImportsPath = fallbackRun.run.results[0].evidencePaths.find((entry) => entry.endsWith('semantic-imports.json'));
+  assert.ok(semanticImportsPath);
+  const semanticImports = JSON.parse(await fs.readFile(semanticImportsPath, 'utf8'));
+  assert.strictEqual(semanticImports.summary.selected, 1);
+  assert.strictEqual(semanticImports.summary.eligible, 1);
+  assert.strictEqual(semanticImports.summary.imported + semanticImports.summary.errors, 1);
+  assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
+  assert.strictEqual(fallbackRun.run.results[0].mergeReadiness, 'discovery-only');
 }
 
 async function testCollectedRun(tmp) {
