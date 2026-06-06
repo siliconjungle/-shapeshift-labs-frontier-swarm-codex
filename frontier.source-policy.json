@@ -1,0 +1,61 @@
+{
+  "sourcePolicy": {
+    "enabled": true,
+    "preset": "strict-app",
+    "enforcement": "error",
+    "failOnViolation": true,
+    "maxFrontierComponentsPerFile": 1,
+    "maxLinesPerFile": 320,
+    "maxCharsPerFile": 24000,
+    "localImportExtensions": "source",
+    "allowedLocalImportExtensions": [
+      ".js",
+      ".mjs",
+      ".cjs",
+      ".json",
+      ".node",
+      ".ts",
+      ".tsx",
+      ".jsx"
+    ],
+    "sourceExtensions": [
+      ".js",
+      ".mjs",
+      ".cjs",
+      ".ts",
+      ".tsx",
+      ".jsx"
+    ],
+    "excludedSegments": [
+      "node_modules",
+      "dist",
+      "build",
+      "coverage",
+      "results",
+      "reports",
+      "agent-runs",
+      "agent-worktrees",
+      ".cache",
+      ".next",
+      ".turbo",
+      "out"
+    ],
+    "allowedOversizedFiles": {
+      "benchmarks/package-readme-sections.mjs": {
+        "maxLines": 797,
+        "maxChars": 50245,
+        "reason": "existing baseline above strict-app limits; split or shrink before increasing"
+      },
+      "src/index.ts": {
+        "maxLines": 4785,
+        "maxChars": 197570,
+        "reason": "existing baseline above strict-app limits; split or shrink before increasing"
+      },
+      "test/smoke.mjs": {
+        "maxLines": 794,
+        "maxChars": 36880,
+        "reason": "existing baseline above strict-app limits; split or shrink before increasing"
+      }
+    }
+  }
+}

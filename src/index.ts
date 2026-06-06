@@ -365,8 +365,20 @@ export interface FrontierCodexJobEvidenceSummary {
   patchHunks: FrontierCodexPatchHunkSummary[];
   readyToPortHunkCount: number;
   semanticImport?: FrontierCodexSemanticImportSidecar['summary'];
+  traceSummary?: FrontierCodexTraceSummary;
   sourceCitations: Array<{ path: string; kind: string; language?: string; hash?: string }>;
   metadata?: Record<string, unknown>;
+}
+
+export interface FrontierCodexTraceSummary {
+  shardCount: number;
+  rowWindowCount: number;
+  hypothesisCount: number;
+  executableOwnershipRegionCount: number;
+  focusedTestCount: number;
+  referenceEvidenceCount: number;
+  divergenceCount: number;
+  openDivergenceCount: number;
 }
 
 export interface FrontierCodexPatchIntent {
@@ -449,6 +461,17 @@ export interface FrontierCodexCompactDashboard {
     paradigmSemanticsGroups: number;
     paradigmSemanticsLoweringRecords: number;
   };
+  trace: {
+    shardCount: number;
+    jobsWithTraceShards: number;
+    rowWindowCount: number;
+    hypothesisCount: number;
+    executableOwnershipRegionCount: number;
+    focusedTestCount: number;
+    referenceEvidenceCount: number;
+    divergenceCount: number;
+    openDivergenceCount: number;
+  };
   evidence: {
     readyToApply: number;
     needsHumanPort: number;
@@ -462,6 +485,7 @@ export interface FrontierCodexCompactDashboard {
     mergeScore: number;
     changedPaths: string[];
     semanticImportQuality?: FrontierCodexSemanticImportQuality;
+    traceSummary?: FrontierCodexTraceSummary;
     staleAgainstHead: boolean;
     duplicateGroupId?: string;
     evidencePaths: string[];
@@ -2339,10 +2363,14 @@ async function copyOrWriteCollectedEvidenceSummary(input: {
   staleReasons?: readonly string[];
 }): Promise<void> {
   const existing = input.bundle.evidencePaths.find((entry) => path.basename(entry) === 'evidence.json' && entry !== input.file);
+  const traceSummary = codexBundleTraceSummary(input.bundle);
   await fs.mkdir(path.dirname(input.file), { recursive: true });
   if (existing && await pathExists(existing)) {
     await fs.copyFile(existing, input.file).catch(() => {});
-    if (await pathExists(input.file)) return;
+    if (await pathExists(input.file)) {
+      if (traceSummary.shardCount) await augmentCollectedEvidenceTraceSummary(input.file, traceSummary);
+      return;
+    }
   }
   const patchHunks = input.patchPath ? await readPatchHunks(input.patchPath) : [];
   const evidence: FrontierCodexJobEvidenceSummary = {
@@ -2370,6 +2398,7 @@ async function copyOrWriteCollectedEvidenceSummary(input: {
     patchHunks,
     readyToPortHunkCount: input.bucket === 'needs-human-port' || input.bucket === 'ready-to-apply' ? patchHunks.length : 0,
     ...(input.bundle.semanticImport ? { semanticImport: input.bundle.semanticImport as FrontierCodexSemanticImportSidecar['summary'] } : {}),
+    ...(traceSummary.shardCount ? { traceSummary } : {}),
     sourceCitations: createCodexEvidenceSourceCitations(input.bundle),
     metadata: {
       bucket: input.bucket,
@@ -2383,6 +2412,17 @@ async function copyOrWriteCollectedEvidenceSummary(input: {
   await fs.writeFile(input.file, JSON.stringify(evidence, null, 2) + '\n');
 }
 
+async function augmentCollectedEvidenceTraceSummary(file: string, traceSummary: FrontierCodexTraceSummary): Promise<void> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+    if (!isObject(parsed)) return;
+    parsed.traceSummary = traceSummary;
+    await fs.writeFile(file, JSON.stringify(parsed, null, 2) + '\n');
+  } catch {
+    // Keep collection best-effort when a worker evidence file is not JSON.
+  }
+}
+
 function createCollectedEvidenceEntries(
   bundle: FrontierSwarmMergeBundle,
   collectedEvidencePath: string,
@@ -2390,6 +2430,7 @@ function createCollectedEvidenceEntries(
 ): FrontierSwarmEvidenceIndexEntryInput[] {
   const confidence = bucket === 'ready-to-apply' ? 0.95 : bucket === 'needs-human-port' ? 0.7 : bucket === 'failed-evidence' ? 0.25 : 0.2;
   const universalAstLayers = semanticImportUniversalAstLayerSummary(bundle.semanticImport);
+  const traceSummary = codexBundleTraceSummary(bundle);
   const entries: FrontierSwarmEvidenceIndexEntryInput[] = [{
     jobId: bundle.jobId,
     queueItemId: bundle.queueItemIds[0],
@@ -2414,7 +2455,15 @@ function createCollectedEvidenceEntries(
       proofSpecFailedObligations: semanticImportProofSpecSummary(bundle.semanticImport).failed,
       paradigmSemanticsRecords: semanticImportParadigmSemanticsSummary(bundle.semanticImport).total,
       paradigmSemanticsGroups: semanticImportParadigmSemanticsSummary(bundle.semanticImport).groups.length,
-      paradigmSemanticsLoweringRecords: semanticImportParadigmSemanticsSummary(bundle.semanticImport).loweringRecords
+      paradigmSemanticsLoweringRecords: semanticImportParadigmSemanticsSummary(bundle.semanticImport).loweringRecords,
+      traceShards: traceSummary.shardCount,
+      traceDivergences: traceSummary.divergenceCount,
+      traceOpenDivergences: traceSummary.openDivergenceCount,
+      traceRowWindows: traceSummary.rowWindowCount,
+      traceHypotheses: traceSummary.hypothesisCount,
+      traceExecutableOwnershipRegions: traceSummary.executableOwnershipRegionCount,
+      traceFocusedTests: traceSummary.focusedTestCount,
+      traceReferenceEvidence: traceSummary.referenceEvidenceCount
     }
   }];
   for (const file of bundle.evidencePaths) {
@@ -2446,6 +2495,10 @@ function createCodexCompactDashboard(input: {
     summarizeCodexSemanticImportQuality(job.semanticImport, input.semanticImportExpected)
   ]));
   const semanticQualities = Array.from(qualities.values());
+  const traceSummaries = input.dashboard.jobs
+    .map((job) => codexJobTraceSummary(job))
+    .filter((entry): entry is FrontierCodexTraceSummary => Boolean(entry));
+  const traceSummary = summarizeCodexTraceSummaries(traceSummaries);
   const usefulPatchJobs = input.dashboard.jobs.filter((job) => (
     (job.disposition === 'auto-mergeable' || job.disposition === 'needs-port')
     && job.changedPaths.length > 0
@@ -2462,6 +2515,7 @@ function createCodexCompactDashboard(input: {
       mergeScore: job.mergeScore,
       changedPaths: job.changedPaths.slice(0, 12),
       semanticImportQuality: qualities.get(job.jobId),
+      ...(codexJobTraceSummary(job) ? { traceSummary: codexJobTraceSummary(job) } : {}),
       staleAgainstHead: job.staleAgainstHead,
       ...(job.duplicateGroupId ? { duplicateGroupId: job.duplicateGroupId } : {}),
       evidencePaths: job.evidencePaths.slice(0, 12)
@@ -2491,6 +2545,17 @@ function createCodexCompactDashboard(input: {
       paradigmSemanticsRecords: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsRecords, 0),
       paradigmSemanticsGroups: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsGroups, 0),
       paradigmSemanticsLoweringRecords: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsLoweringRecords, 0)
+    },
+    trace: {
+      shardCount: traceSummary.shardCount,
+      jobsWithTraceShards: traceSummaries.filter((entry) => entry.shardCount > 0).length,
+      rowWindowCount: traceSummary.rowWindowCount,
+      hypothesisCount: traceSummary.hypothesisCount,
+      executableOwnershipRegionCount: traceSummary.executableOwnershipRegionCount,
+      focusedTestCount: traceSummary.focusedTestCount,
+      referenceEvidenceCount: traceSummary.referenceEvidenceCount,
+      divergenceCount: traceSummary.divergenceCount,
+      openDivergenceCount: traceSummary.openDivergenceCount
     },
     evidence: {
       readyToApply: input.dashboard.summary.readyToApplyCount,
@@ -2920,6 +2985,70 @@ function summarizeCodexSemanticImportQuality(
     paradigmSemanticsLoweringRecords: paradigmSemantics.loweringRecords,
     warnings: uniqueStrings(warnings)
   };
+}
+
+function codexJobTraceSummary(job: unknown): FrontierCodexTraceSummary | undefined {
+  if (!isObject(job) || !isObject(job.traceSummary)) return undefined;
+  return normalizeCodexTraceSummary(job.traceSummary);
+}
+
+function codexBundleTraceSummary(bundle: FrontierSwarmMergeBundle): FrontierCodexTraceSummary {
+  const traceShards = isObject(bundle) && Array.isArray((bundle as Record<string, unknown>).traceShards)
+    ? (bundle as Record<string, unknown>).traceShards as unknown[]
+    : [];
+  return summarizeCodexTraceShards(traceShards);
+}
+
+function summarizeCodexTraceSummaries(summaries: readonly FrontierCodexTraceSummary[]): FrontierCodexTraceSummary {
+  return {
+    shardCount: summaries.reduce((sum, entry) => sum + entry.shardCount, 0),
+    rowWindowCount: summaries.reduce((sum, entry) => sum + entry.rowWindowCount, 0),
+    hypothesisCount: summaries.reduce((sum, entry) => sum + entry.hypothesisCount, 0),
+    executableOwnershipRegionCount: summaries.reduce((sum, entry) => sum + entry.executableOwnershipRegionCount, 0),
+    focusedTestCount: summaries.reduce((sum, entry) => sum + entry.focusedTestCount, 0),
+    referenceEvidenceCount: summaries.reduce((sum, entry) => sum + entry.referenceEvidenceCount, 0),
+    divergenceCount: summaries.reduce((sum, entry) => sum + entry.divergenceCount, 0),
+    openDivergenceCount: summaries.reduce((sum, entry) => sum + entry.openDivergenceCount, 0)
+  };
+}
+
+function normalizeCodexTraceSummary(input: Record<string, unknown>): FrontierCodexTraceSummary {
+  return {
+    shardCount: nonNegativeNumber(input.shardCount),
+    rowWindowCount: nonNegativeNumber(input.rowWindowCount),
+    hypothesisCount: nonNegativeNumber(input.hypothesisCount),
+    executableOwnershipRegionCount: nonNegativeNumber(input.executableOwnershipRegionCount),
+    focusedTestCount: nonNegativeNumber(input.focusedTestCount),
+    referenceEvidenceCount: nonNegativeNumber(input.referenceEvidenceCount),
+    divergenceCount: nonNegativeNumber(input.divergenceCount),
+    openDivergenceCount: nonNegativeNumber(input.openDivergenceCount)
+  };
+}
+
+function summarizeCodexTraceShards(shards: readonly unknown[]): FrontierCodexTraceSummary {
+  return {
+    shardCount: shards.length,
+    rowWindowCount: shards.reduce<number>((sum, shard) => sum + traceArrayLength(shard, 'rowWindows'), 0),
+    hypothesisCount: shards.reduce<number>((sum, shard) => sum + traceArrayLength(shard, 'hypotheses'), 0),
+    executableOwnershipRegionCount: shards.reduce<number>((sum, shard) => sum + traceArrayLength(shard, 'executableOwnershipRegions'), 0),
+    focusedTestCount: shards.reduce<number>((sum, shard) => sum + traceArrayLength(shard, 'focusedTests'), 0),
+    referenceEvidenceCount: shards.reduce<number>((sum, shard) => sum + traceArrayLength(shard, 'referenceEvidence'), 0),
+    divergenceCount: shards.filter((shard) => isObject(shard) && Boolean(shard.divergence)).length,
+    openDivergenceCount: shards.filter(traceShardHasOpenDivergence).length
+  };
+}
+
+function traceArrayLength(shard: unknown, key: string): number {
+  return isObject(shard) && Array.isArray(shard[key]) ? (shard[key] as unknown[]).length : 0;
+}
+
+function traceShardHasOpenDivergence(shard: unknown): boolean {
+  if (!isObject(shard)) return false;
+  const divergence = isObject(shard.divergence) ? shard.divergence : undefined;
+  return shard.status === 'failed'
+    || divergence?.status === 'failed'
+    || divergence?.severity === 'error'
+    || divergence?.severity === 'critical';
 }
 
 function semanticImportProofSpecSummary(summary: unknown): FrontierCodexProofSpecSummary {
@@ -4520,7 +4649,7 @@ function normalizeCollectedMergeBundle(value: unknown, mergePath: string): Front
   const disposition = typeof input.disposition === 'string'
     ? input.disposition as FrontierSwarmMergeBundle['disposition']
     : autoMergeable ? 'auto-mergeable' : status === 'failed' ? 'rejected' : 'needs-port';
-  return {
+  const bundle = {
     kind: typeof input.kind === 'string' ? input.kind as FrontierSwarmMergeBundle['kind'] : FRONTIER_SWARM_MERGE_BUNDLE_KIND,
     version: typeof input.version === 'number' ? input.version as FrontierSwarmMergeBundle['version'] : FRONTIER_SWARM_MERGE_BUNDLE_VERSION,
     id: typeof input.id === 'string' && input.id ? input.id : `swarm-merge-bundle:${jobId}`,
@@ -4555,7 +4684,11 @@ function normalizeCollectedMergeBundle(value: unknown, mergePath: string): Front
     reasons: stringArray(input.reasons),
     ...(isObject(input.semanticImport) ? { semanticImport: input.semanticImport as unknown as FrontierSwarmMergeBundle['semanticImport'] } : {}),
     ...(isObject(input.metadata) ? { metadata: input.metadata as FrontierSwarmMergeBundle['metadata'] } : {})
-  };
+  } as FrontierSwarmMergeBundle;
+  if (Array.isArray(input.traceShards)) {
+    (bundle as FrontierSwarmMergeBundle & { traceShards?: unknown[] }).traceShards = input.traceShards;
+  }
+  return bundle;
 }
 
 function mergeRecordScore(record: { mergePath: string; bundle: FrontierSwarmMergeBundle }): number {
