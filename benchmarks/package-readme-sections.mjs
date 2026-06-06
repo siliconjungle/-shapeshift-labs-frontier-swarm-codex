@@ -242,7 +242,7 @@ if (!delegated) {
   {
     "id": "frontier-swarm",
     "name": "@shapeshift-labs/frontier-swarm",
-    "role": "Hierarchical swarm plans, lanes, compute profiles, ownership policy, semantic ownership regions, task queues, event streams, run records, merge bundles, merge indexes, queue overlays, merge admission, changed-path checks, and proof artifacts for Frontier agent work.",
+    "role": "Hierarchical swarm plans, lanes, compute profiles, ownership policy, semantic ownership regions, task queues, event streams, run records, merge bundles, merge indexes, queue overlays, merge admission, coordinator dashboards, changed-path checks, and proof artifacts for Frontier agent work.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-swarm",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm"
@@ -250,7 +250,7 @@ if (!delegated) {
   {
     "id": "frontier-swarm-codex",
     "name": "@shapeshift-labs/frontier-swarm-codex",
-    "role": "Node Codex CLI adapter for Frontier swarm plans, including prompt rendering, worktree and snapshot workspaces, Codex argument compatibility, browser resource allocation, JSONL capture, verification commands, pid-backed stop, collect/apply workflows, merge indexes, queue overlays, merge bundles, and result artifacts.",
+    "role": "Node Codex CLI adapter for Frontier swarm plans, including prompt rendering, worktree and snapshot workspaces, Codex argument compatibility, browser resource allocation, JSONL capture, verification commands, pid-backed stop, collect/apply workflows, merge indexes, queue overlays, merge bundles, normalized job evidence, coordinator query artifacts, and result artifacts.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm-codex",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-swarm-codex",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm-codex"
@@ -322,10 +322,58 @@ if (!delegated) {
   {
     "id": "frontier-lang-compiler",
     "name": "@shapeshift-labs/frontier-lang-compiler",
-    "role": "Compiler facade for Frontier Lang source documents, including parse, check, hash, diagnostics, and projection to TypeScript, JavaScript, Rust, Python, and C.",
+    "role": "Compiler facade for Frontier Lang source documents, including parse, check, hash, diagnostics, universal AST envelopes, proof/paradigm semantic summaries, projection to TypeScript, JavaScript, Rust, Python, and C, and native source-import adapters for semantic merge evidence.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-compiler",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-compiler",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-compiler"
+  },
+  {
+    "id": "frontier-lang-swift",
+    "name": "@shapeshift-labs/frontier-lang-swift",
+    "role": "Swift source-language importer package for Frontier Lang semantic documents, including package-level metadata, SwiftSyntax adapter helpers, native import results, and semantic sidecar generation for SwiftSyntax/SwiftParser-shaped syntax trees.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-swift",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-swift",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-swift"
+  },
+  {
+    "id": "frontier-lang-kotlin",
+    "name": "@shapeshift-labs/frontier-lang-kotlin",
+    "role": "Kotlin PSI source-language importer package for Frontier Lang semantic documents, including package-level metadata, Kotlin PSI adapter helpers, native import results, and semantic sidecar generation for Kotlin PSI/KtFile-shaped syntax trees.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-kotlin",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-kotlin",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-kotlin"
+  },
+  {
+    "id": "frontier-lang-java",
+    "name": "@shapeshift-labs/frontier-lang-java",
+    "role": "Java source-language importer package for Frontier Lang semantic documents, including package-level metadata, Java AST adapter helpers, native import results, and semantic sidecar generation for javac/JDT/JavaParser-shaped ASTs.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-java",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-java",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-java"
+  },
+  {
+    "id": "frontier-lang-go",
+    "name": "@shapeshift-labs/frontier-lang-go",
+    "role": "Go source-language importer package for Frontier Lang semantic documents, including package-level metadata, Go AST adapter helpers, native import results, and semantic sidecar generation for go/ast File or Package trees.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-go",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-go",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-go"
+  },
+  {
+    "id": "frontier-lang-csharp",
+    "name": "@shapeshift-labs/frontier-lang-csharp",
+    "role": "C# Roslyn source-language importer package for Frontier Lang semantic documents, including package-level metadata, Roslyn adapter helpers, native import results, and semantic sidecar generation for SyntaxTree/SyntaxNode-shaped ASTs.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-csharp",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-csharp",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-csharp"
+  },
+  {
+    "id": "frontier-lang-clang",
+    "name": "@shapeshift-labs/frontier-lang-clang",
+    "role": "Clang AST source-language importer package for Frontier Lang semantic documents, including package-level metadata, Clang AST JSON adapter helpers, native import results, and semantic sidecar generation for C/C++ translation units.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-clang",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-clang",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-clang"
   },
   {
     "id": "frontier-lang-cli",
@@ -338,7 +386,7 @@ if (!delegated) {
   {
     "id": "frontier-lang",
     "name": "@shapeshift-labs/frontier-lang",
-    "role": "Umbrella package for Frontier Lang kernel, parser, checker, and projection adapters.",
+    "role": "Umbrella package for Frontier Lang kernel, parser, checker, compiler facade, universal AST helpers, and projection adapters.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-lang",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang"
