@@ -1,0 +1,152 @@
+import type {
+  FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND,
+  FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_VERSION,
+  FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND,
+  FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION,
+  FRONTIER_SWARM_CODEX_PATCH_INTENT_KIND,
+  FRONTIER_SWARM_CODEX_PATCH_INTENT_VERSION
+} from './constants.js';
+import type { FrontierCodexHandoffArtifact } from './types-collection.js';
+import type { FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './types-semantic.js';
+
+export interface FrontierCodexPatchHunkSummary {
+  file?: string;
+  header: string;
+  oldStart?: number;
+  oldLines?: number;
+  newStart?: number;
+  newLines?: number;
+}
+
+export interface FrontierCodexTraceSummary {
+  shardCount: number;
+  rowWindowCount: number;
+  hypothesisCount: number;
+  executableOwnershipRegionCount: number;
+  focusedTestCount: number;
+  referenceEvidenceCount: number;
+  divergenceCount: number;
+  openDivergenceCount: number;
+}
+
+export interface FrontierCodexJobEvidenceSummary {
+  kind: typeof FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION;
+  generatedAt: number;
+  jobId: string;
+  taskId: string;
+  lane: string;
+  status: string;
+  mergeReadiness: string;
+  disposition: string;
+  riskLevel: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  ownershipViolations: string[];
+  patchPath?: string;
+  mergeBundlePath: string;
+  patchIntentPath?: string;
+  semanticImportPath?: string;
+  evidencePaths: string[];
+  handoffArtifacts: FrontierCodexHandoffArtifact[];
+  commands: {
+    passed: Array<{ name: string; command: string[]; status?: number }>;
+    failed: Array<{ name: string; command: string[]; status?: number }>;
+  };
+  patchHunks: FrontierCodexPatchHunkSummary[];
+  readyToPortHunkCount: number;
+  semanticImport?: FrontierCodexSemanticImportSidecar['summary'];
+  traceSummary?: FrontierCodexTraceSummary;
+  sourceCitations: Array<{ path: string; kind: string; language?: string; hash?: string }>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface FrontierCodexPatchIntent {
+  kind: typeof FRONTIER_SWARM_CODEX_PATCH_INTENT_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_PATCH_INTENT_VERSION;
+  generatedAt: number;
+  jobId: string;
+  taskId: string;
+  lane: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  intent: string;
+  why: string;
+  riskLevel: string;
+  mergeReadiness: string;
+  disposition: string;
+  safeToPortManually: boolean;
+  verification: Array<{ name: string; command: string[]; status?: number; required: boolean }>;
+  evidencePaths: string[];
+  semanticImportQuality: FrontierCodexSemanticImportQuality;
+  patchHunks: FrontierCodexPatchHunkSummary[];
+  warnings: string[];
+}
+
+export interface FrontierCodexLogSummary {
+  eventsPath: string;
+  stderrPath: string;
+  eventBytes: number;
+  stderrBytes: number;
+  eventBytesWritten: number;
+  stderrBytesWritten: number;
+  eventBytesTruncated: number;
+  stderrBytesTruncated: number;
+}
+
+export interface FrontierCodexCompactDashboard {
+  kind: typeof FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_VERSION;
+  generatedAt: number;
+  runDir: string;
+  total: number;
+  activeJobs: number;
+  usefulPatchCount: number;
+  stalePatchCount: number;
+  duplicateDiscoveryCount: number;
+  semanticImport: {
+    expected: boolean;
+    presentCount: number;
+    emptyCount: number;
+    weakCount: number;
+    symbolCount: number;
+    ownershipRegionCount: number;
+    patchHintCount: number;
+    universalAstLayerCount: number;
+    universalAstLayerNames: string[];
+    proofSpecObligations: number;
+    proofSpecFailedObligations: number;
+    paradigmSemanticsRecords: number;
+    paradigmSemanticsGroups: number;
+    paradigmSemanticsLoweringRecords: number;
+  };
+  trace: {
+    shardCount: number;
+    jobsWithTraceShards: number;
+    rowWindowCount: number;
+    hypothesisCount: number;
+    executableOwnershipRegionCount: number;
+    focusedTestCount: number;
+    referenceEvidenceCount: number;
+    divergenceCount: number;
+    openDivergenceCount: number;
+  };
+  evidence: {
+    readyToApply: number;
+    needsHumanPort: number;
+    failedEvidence: number;
+    averageMergeScore: number;
+  };
+  topJobs: Array<{
+    jobId: string;
+    lane?: string;
+    disposition: string;
+    mergeScore: number;
+    changedPaths: string[];
+    semanticImportQuality?: FrontierCodexSemanticImportQuality;
+    traceSummary?: FrontierCodexTraceSummary;
+    staleAgainstHead: boolean;
+    duplicateGroupId?: string;
+    evidencePaths: string[];
+  }>;
+}

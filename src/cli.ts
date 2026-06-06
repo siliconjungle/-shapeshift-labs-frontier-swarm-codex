@@ -54,7 +54,7 @@ try {
         mode: readWorkspaceMode(args.workspace),
         root: stringArg(args.worktreeRoot ?? args['worktree-root']),
         create: boolArg(args.createWorktrees ?? args['create-worktrees'], false),
-        replace: boolArg(args.replaceWorkspace ?? args['replace-workspace'], false),
+        replace: optionalBoolArg(args.replaceWorkspace ?? args['replace-workspace']),
         includes: listArg(args.include),
         excludes: listArg(args.exclude),
         artifactIncludes: listArg(args.artifact ?? args['artifact-include']),
@@ -162,6 +162,7 @@ function printHelp() {
     '  --model-policy config-default|plan|explicit',
     '  --approval never|on-request|on-failure|untrusted',
     '  --workspace current|copy|snapshot|git-worktree',
+    '  --replace-workspace false|true',
     '  --include <path> --exclude <path> --link <path>',
     '  --semantic-import --semantic-import-include <glob> --semantic-import-exclude <glob>',
     '  --semantic-import-max-files <n> --semantic-import-max-bytes <n>',
@@ -295,6 +296,11 @@ function boolArg(value: CliValue | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
   if (value === true) return true;
   return /^(1|true|yes|on)$/i.test(String(value));
+}
+
+function optionalBoolArg(value: CliValue | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  return boolArg(value, false);
 }
 
 function stamp() {

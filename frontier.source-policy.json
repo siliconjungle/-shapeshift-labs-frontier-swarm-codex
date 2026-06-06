@@ -40,22 +40,6 @@
       ".turbo",
       "out"
     ],
-    "allowedOversizedFiles": {
-      "benchmarks/package-readme-sections.mjs": {
-        "maxLines": 797,
-        "maxChars": 50245,
-        "reason": "existing baseline above strict-app limits; split or shrink before increasing"
-      },
-      "src/index.ts": {
-        "maxLines": 4785,
-        "maxChars": 197570,
-        "reason": "existing baseline above strict-app limits; split or shrink before increasing"
-      },
-      "test/smoke.mjs": {
-        "maxLines": 794,
-        "maxChars": 36880,
-        "reason": "existing baseline above strict-app limits; split or shrink before increasing"
-      }
-    }
+    "allowedOversizedFiles": {}
   }
 }

@@ -5,3 +5,6 @@ coverage/
 *.log
 *.tgz
 benchmarks/results/
+agent-runs/
+agent-worktrees/
+agent-tasks/
