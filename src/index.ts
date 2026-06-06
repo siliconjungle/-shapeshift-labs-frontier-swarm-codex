@@ -194,6 +194,7 @@ export interface FrontierCodexSemanticImportRecord {
   semanticSidecar?: unknown;
   universalAstLayers?: FrontierCodexUniversalAstLayerSummary;
   proofSpec?: FrontierCodexProofSpecSummary;
+  paradigmSemantics?: FrontierCodexParadigmSemanticsSummary;
   sourceProjection?: unknown;
   nativeCompile?: unknown;
   mergeCandidate?: unknown;
@@ -234,6 +235,42 @@ export interface FrontierCodexProofSpecSummary {
   empty: boolean;
 }
 
+export interface FrontierCodexParadigmSemanticsSummary {
+  total: number;
+  ids: string[];
+  groups: string[];
+  kinds: string[];
+  evidence: number;
+  bindingScopes: number;
+  bindings: number;
+  patterns: number;
+  typeConstraints: number;
+  evaluationModels: number;
+  memoryLocations: number;
+  effectRegions: number;
+  controlRegions: number;
+  logicPrograms: number;
+  actorSystems: number;
+  stackEffects: number;
+  arrayShapes: number;
+  numericKernels: number;
+  dataflowNetworks: number;
+  clockModels: number;
+  objectModels: number;
+  macroExpansions: number;
+  reflectionBoundaries: number;
+  loweringRecords: number;
+  byGroup: Record<string, number>;
+  byKind: Record<string, number>;
+  hasRuntimeSemantics: boolean;
+  hasLogicSemantics: boolean;
+  hasStackSemantics: boolean;
+  hasArraySemantics: boolean;
+  hasMacroOrReflection: boolean;
+  hasLowering: boolean;
+  empty: boolean;
+}
+
 export interface FrontierCodexSemanticImportSidecar {
   kind: typeof FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND;
   version: typeof FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION;
@@ -270,6 +307,7 @@ export interface FrontierCodexSemanticImportSidecar {
     };
     universalAstLayers: FrontierCodexUniversalAstLayerSummary;
     proofSpec: FrontierCodexProofSpecSummary;
+    paradigmSemantics: FrontierCodexParadigmSemanticsSummary;
     sourceProjections: {
       total: number;
       preserved: number;
@@ -368,6 +406,9 @@ export interface FrontierCodexSemanticImportQuality {
   universalAstLayerNames: string[];
   proofSpecObligations: number;
   proofSpecFailedObligations: number;
+  paradigmSemanticsRecords: number;
+  paradigmSemanticsGroups: number;
+  paradigmSemanticsLoweringRecords: number;
   warnings: string[];
 }
 
@@ -404,6 +445,9 @@ export interface FrontierCodexCompactDashboard {
     universalAstLayerNames: string[];
     proofSpecObligations: number;
     proofSpecFailedObligations: number;
+    paradigmSemanticsRecords: number;
+    paradigmSemanticsGroups: number;
+    paradigmSemanticsLoweringRecords: number;
   };
   evidence: {
     readyToApply: number;
@@ -597,6 +641,9 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   universalAstLayerNames: string[];
   proofSpecObligations: number;
   proofSpecFailedObligations: number;
+  paradigmSemanticsRecords: number;
+  paradigmSemanticsGroups: number;
+  paradigmSemanticsLoweringRecords: number;
   readiness: Record<string, number>;
   lossesBySeverity: Record<string, number>;
   scoreAdjustment: number;
@@ -1506,6 +1553,7 @@ async function createCodexSemanticImportSidecar(input: {
         semanticSidecar: summarizeLangSemanticImportSidecar(semanticSidecar),
         universalAstLayers: summarizeUniversalAstLayers(importResult?.universalAst, semanticSidecar),
         proofSpec: summarizeProofSpec(importResult?.universalAst?.proof, semanticSidecar),
+        paradigmSemantics: summarizeParadigmSemantics(importResult?.universalAst?.paradigmSemantics, semanticSidecar),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),
         mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
@@ -2363,7 +2411,10 @@ function createCollectedEvidenceEntries(
       universalAstLayers: universalAstLayers.total,
       universalAstLayerNames: universalAstLayers.names.join(','),
       proofSpecObligations: semanticImportProofSpecSummary(bundle.semanticImport).obligations,
-      proofSpecFailedObligations: semanticImportProofSpecSummary(bundle.semanticImport).failed
+      proofSpecFailedObligations: semanticImportProofSpecSummary(bundle.semanticImport).failed,
+      paradigmSemanticsRecords: semanticImportParadigmSemanticsSummary(bundle.semanticImport).total,
+      paradigmSemanticsGroups: semanticImportParadigmSemanticsSummary(bundle.semanticImport).groups.length,
+      paradigmSemanticsLoweringRecords: semanticImportParadigmSemanticsSummary(bundle.semanticImport).loweringRecords
     }
   }];
   for (const file of bundle.evidencePaths) {
@@ -2436,7 +2487,10 @@ function createCodexCompactDashboard(input: {
       universalAstLayerCount: semanticQualities.reduce((sum, entry) => sum + entry.universalAstLayers, 0),
       universalAstLayerNames: uniqueStrings(semanticQualities.flatMap((entry) => entry.universalAstLayerNames)),
       proofSpecObligations: semanticQualities.reduce((sum, entry) => sum + entry.proofSpecObligations, 0),
-      proofSpecFailedObligations: semanticQualities.reduce((sum, entry) => sum + entry.proofSpecFailedObligations, 0)
+      proofSpecFailedObligations: semanticQualities.reduce((sum, entry) => sum + entry.proofSpecFailedObligations, 0),
+      paradigmSemanticsRecords: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsRecords, 0),
+      paradigmSemanticsGroups: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsGroups, 0),
+      paradigmSemanticsLoweringRecords: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsLoweringRecords, 0)
     },
     evidence: {
       readyToApply: input.dashboard.summary.readyToApplyCount,
@@ -2692,6 +2746,9 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
       universalAstLayerNames: [],
       proofSpecObligations: 0,
       proofSpecFailedObligations: 0,
+      paradigmSemanticsRecords: 0,
+      paradigmSemanticsGroups: 0,
+      paradigmSemanticsLoweringRecords: 0,
       readiness: {},
       lossesBySeverity: {},
       scoreAdjustment,
@@ -2714,6 +2771,7 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
   const universalAstLayers = universalAstLayerSummary.total;
   const universalAstLayerNames = universalAstLayerSummary.names;
   const proofSpec = semanticImportProofSpecSummary(summary);
+  const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const errorLosses = nonNegativeNumber(lossesBySeverity.error);
   const warningLosses = nonNegativeNumber(lossesBySeverity.warning);
   const blocked = nonNegativeNumber(readiness.blocked);
@@ -2786,6 +2844,9 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
   if (proofSpec.discharged > 0 && proofSpec.failed === 0 && proofSpec.stale === 0 && proofSpec.open === 0 && proofSpec.unknown === 0) {
     scoreAdjustment += 5;
   }
+  if (paradigmSemantics.total > 0) {
+    scoreAdjustment += 3;
+  }
 
   return {
     present: true,
@@ -2800,6 +2861,9 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
     universalAstLayerNames,
     proofSpecObligations: proofSpec.obligations,
     proofSpecFailedObligations: proofSpec.failed,
+    paradigmSemanticsRecords: paradigmSemantics.total,
+    paradigmSemanticsGroups: paradigmSemantics.groups.length,
+    paradigmSemanticsLoweringRecords: paradigmSemantics.loweringRecords,
     readiness,
     lossesBySeverity,
     scoreAdjustment: Math.max(-60, Math.min(15, scoreAdjustment)),
@@ -2823,6 +2887,7 @@ function summarizeCodexSemanticImportQuality(
   const universalAstLayers = universalAstLayerSummary.total;
   const universalAstLayerNames = universalAstLayerSummary.names;
   const proofSpec = semanticImportProofSpecSummary(summary);
+  const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const present = !!summary;
   const empty = present && (nonNegativeNumber(summary?.total) === 0 || selected === 0 && eligible === 0 && imported === 0 && symbols === 0);
   const warnings: string[] = [];
@@ -2850,6 +2915,9 @@ function summarizeCodexSemanticImportQuality(
     universalAstLayerNames,
     proofSpecObligations: proofSpec.obligations,
     proofSpecFailedObligations: proofSpec.failed,
+    paradigmSemanticsRecords: paradigmSemantics.total,
+    paradigmSemanticsGroups: paradigmSemantics.groups.length,
+    paradigmSemanticsLoweringRecords: paradigmSemantics.loweringRecords,
     warnings: uniqueStrings(warnings)
   };
 }
@@ -2878,6 +2946,13 @@ function semanticImportUniversalAstLayerSummary(summary: unknown): FrontierCodex
   };
 }
 
+function semanticImportParadigmSemanticsSummary(summary: unknown): FrontierCodexParadigmSemanticsSummary {
+  const input = isObject(summary) && isObject((summary as { paradigmSemantics?: unknown }).paradigmSemantics)
+    ? (summary as { paradigmSemantics?: unknown }).paradigmSemantics
+    : undefined;
+  return input ? normalizeParadigmSemanticsSummary(input) : emptyParadigmSemanticsSummary();
+}
+
 function semanticImportSummaryFromBundle(bundle: FrontierSwarmMergeBundle): FrontierSwarmMergeBundle['semanticImport'] | undefined {
   const metadata = bundle.metadata as { semanticImport?: FrontierSwarmMergeBundle['semanticImport'] } | undefined;
   return richerSemanticImportSummary(bundle.semanticImport, metadata?.semanticImport);
@@ -2903,7 +2978,8 @@ function semanticImportSummaryRichness(summary: FrontierSwarmMergeBundle['semant
     summary.semanticSidecars?.ownershipRegions,
     summary.semanticSidecars?.patchHints,
     semanticImportUniversalAstLayerSummary(summary).total,
-    semanticImportProofSpecSummary(summary).total
+    semanticImportProofSpecSummary(summary).total,
+    semanticImportParadigmSemanticsSummary(summary).total
   ].reduce((sum, value) => sum + nonNegativeNumber(value), 0);
 }
 
@@ -3647,6 +3723,7 @@ function createSemanticImportSidecar(
     return totals;
   }, { total: 0, symbols: 0, ownershipRegions: 0, patchHints: 0, empty: 0 });
   const universalAstLayers = summarizeSemanticImportUniversalAstLayers(records);
+  const paradigmSemantics = summarizeSemanticImportParadigmSemantics(records);
   const sourceProjections = records.reduce((totals, record) => {
     const summary = record.sourceProjection as { mode?: string; readiness?: string } | undefined;
     if (!summary) return totals;
@@ -3708,6 +3785,7 @@ function createSemanticImportSidecar(
       semanticSidecars,
       universalAstLayers,
       proofSpec,
+      paradigmSemantics,
       sourceProjections,
       nativeCompiles,
       readiness
@@ -3742,6 +3820,7 @@ function summarizeLangSemanticImportSidecar(value: any): unknown {
         ? value.universalAstLayers.names
         : [],
     proofSpec: summarizeProofSpec(undefined, value),
+    paradigmSemantics: summarizeParadigmSemantics(undefined, value),
     readiness: value.summary?.readiness,
     emptySemanticIndex: value.summary?.emptySemanticIndex,
     patchHints: Array.isArray(value.patchHints) ? value.patchHints.length : 0,
@@ -3757,6 +3836,161 @@ function summarizeLangSemanticImportSidecar(value: any): unknown {
       }))
       : []
   };
+}
+
+const paradigmSemanticsSummaryGroups = [
+  'bindingScopes',
+  'bindings',
+  'patterns',
+  'typeConstraints',
+  'evaluationModels',
+  'memoryLocations',
+  'effectRegions',
+  'controlRegions',
+  'logicPrograms',
+  'actorSystems',
+  'stackEffects',
+  'arrayShapes',
+  'numericKernels',
+  'dataflowNetworks',
+  'clockModels',
+  'objectModels',
+  'macroExpansions',
+  'reflectionBoundaries',
+  'loweringRecords'
+] as const;
+
+function summarizeSemanticImportParadigmSemantics(records: FrontierCodexSemanticImportRecord[]): FrontierCodexParadigmSemanticsSummary {
+  const summary = emptyParadigmSemanticsSummary();
+  for (const record of records) {
+    mergeParadigmSemanticsSummary(summary, record.paradigmSemantics);
+  }
+  summary.empty = summary.total === 0;
+  return summary;
+}
+
+function summarizeParadigmSemantics(paradigmSemantics?: any, semanticSidecar?: any): FrontierCodexParadigmSemanticsSummary {
+  const sidecarSummary = semanticSidecar?.paradigmSemantics ?? semanticSidecar?.summary?.paradigmSemantics;
+  if (sidecarSummary && typeof sidecarSummary === 'object' && hasParadigmSemanticsSummaryShape(sidecarSummary)) {
+    return normalizeParadigmSemanticsSummary(sidecarSummary);
+  }
+  const raw = paradigmSemantics && typeof paradigmSemantics === 'object' ? paradigmSemantics : {};
+  const summary = emptyParadigmSemanticsSummary();
+  summary.ids = uniqueStrings([raw.id].filter(Boolean).map(String));
+  for (const group of paradigmSemanticsSummaryGroups) {
+    const records = Array.isArray(raw[group]) ? raw[group] : [];
+    summary[group] += records.length;
+    summary.total += records.length;
+    if (records.length > 0) summary.byGroup[group] = (summary.byGroup[group] ?? 0) + records.length;
+    for (const record of records) {
+      if (record?.id) summary.ids.push(String(record.id));
+      if (record?.kind) {
+        const kind = String(record.kind);
+        summary.kinds.push(kind);
+        summary.byKind[kind] = (summary.byKind[kind] ?? 0) + 1;
+      }
+    }
+  }
+  summary.evidence = Array.isArray(raw.evidence) ? raw.evidence.length : 0;
+  summary.ids = uniqueStrings([
+    ...summary.ids,
+    ...(Array.isArray(raw.evidence) ? raw.evidence.map((record: any) => record?.id).filter(Boolean).map(String) : [])
+  ]);
+  summary.groups = uniqueStrings(Object.keys(summary.byGroup));
+  summary.kinds = uniqueStrings(summary.kinds);
+  fillParadigmSemanticsBooleans(summary);
+  summary.empty = summary.total === 0;
+  return summary;
+}
+
+function normalizeParadigmSemanticsSummary(input: any): FrontierCodexParadigmSemanticsSummary {
+  const summary = emptyParadigmSemanticsSummary();
+  mergeParadigmSemanticsSummary(summary, input);
+  summary.empty = summary.total === 0;
+  return summary;
+}
+
+function hasParadigmSemanticsSummaryShape(value: Record<string, unknown>): boolean {
+  return typeof value.total === 'number' ||
+    typeof value.loweringRecords === 'number' ||
+    typeof value.logicPrograms === 'number' ||
+    typeof value.stackEffects === 'number';
+}
+
+function emptyParadigmSemanticsSummary(): FrontierCodexParadigmSemanticsSummary {
+  return {
+    total: 0,
+    ids: [],
+    groups: [],
+    kinds: [],
+    evidence: 0,
+    bindingScopes: 0,
+    bindings: 0,
+    patterns: 0,
+    typeConstraints: 0,
+    evaluationModels: 0,
+    memoryLocations: 0,
+    effectRegions: 0,
+    controlRegions: 0,
+    logicPrograms: 0,
+    actorSystems: 0,
+    stackEffects: 0,
+    arrayShapes: 0,
+    numericKernels: 0,
+    dataflowNetworks: 0,
+    clockModels: 0,
+    objectModels: 0,
+    macroExpansions: 0,
+    reflectionBoundaries: 0,
+    loweringRecords: 0,
+    byGroup: {},
+    byKind: {},
+    hasRuntimeSemantics: false,
+    hasLogicSemantics: false,
+    hasStackSemantics: false,
+    hasArraySemantics: false,
+    hasMacroOrReflection: false,
+    hasLowering: false,
+    empty: true
+  };
+}
+
+function mergeParadigmSemanticsSummary(target: FrontierCodexParadigmSemanticsSummary, input: any): void {
+  if (!input || typeof input !== 'object') return;
+  const declaredTotal = nonNegativeNumber(input.total);
+  let groupedTotal = 0;
+  target.evidence += nonNegativeNumber(input.evidence);
+  for (const group of paradigmSemanticsSummaryGroups) {
+    const count = nonNegativeNumber(input[group]);
+    target[group] += count;
+    groupedTotal += count;
+  }
+  target.total += declaredTotal || groupedTotal;
+  target.ids = uniqueStrings([...target.ids, ...proofStringList(input.ids)]);
+  target.groups = uniqueStrings([...target.groups, ...proofStringList(input.groups)]);
+  target.kinds = uniqueStrings([...target.kinds, ...proofStringList(input.kinds)]);
+  for (const [group, count] of Object.entries(numberRecord(input.byGroup))) {
+    target.byGroup[group] = (target.byGroup[group] ?? 0) + count;
+  }
+  for (const [kind, count] of Object.entries(numberRecord(input.byKind))) {
+    target.byKind[kind] = (target.byKind[kind] ?? 0) + count;
+  }
+  target.hasRuntimeSemantics ||= input.hasRuntimeSemantics === true;
+  target.hasLogicSemantics ||= input.hasLogicSemantics === true;
+  target.hasStackSemantics ||= input.hasStackSemantics === true;
+  target.hasArraySemantics ||= input.hasArraySemantics === true;
+  target.hasMacroOrReflection ||= input.hasMacroOrReflection === true;
+  target.hasLowering ||= input.hasLowering === true;
+  fillParadigmSemanticsBooleans(target);
+}
+
+function fillParadigmSemanticsBooleans(summary: FrontierCodexParadigmSemanticsSummary): void {
+  summary.hasRuntimeSemantics ||= summary.evaluationModels > 0 || summary.memoryLocations > 0 || summary.effectRegions > 0 || summary.controlRegions > 0 || summary.actorSystems > 0 || summary.clockModels > 0;
+  summary.hasLogicSemantics ||= summary.logicPrograms > 0;
+  summary.hasStackSemantics ||= summary.stackEffects > 0;
+  summary.hasArraySemantics ||= summary.arrayShapes > 0 || summary.numericKernels > 0;
+  summary.hasMacroOrReflection ||= summary.macroExpansions > 0 || summary.reflectionBoundaries > 0;
+  summary.hasLowering ||= summary.loweringRecords > 0;
 }
 
 function summarizeSemanticImportProofSpec(records: FrontierCodexSemanticImportRecord[]): FrontierCodexProofSpecSummary {

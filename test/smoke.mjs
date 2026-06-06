@@ -444,6 +444,41 @@ const readySemanticImport = {
     byArtifactKind: {},
     empty: false
   },
+  paradigmSemantics: {
+    total: 3,
+    ids: ['paradigm:apply', 'logic:apply', 'lower:apply'],
+    groups: ['logicPrograms', 'stackEffects', 'loweringRecords'],
+    kinds: ['hornClause', 'concatenativeStackEffect', 'frontierToTarget'],
+    evidence: 1,
+    bindingScopes: 0,
+    bindings: 0,
+    patterns: 0,
+    typeConstraints: 0,
+    evaluationModels: 0,
+    memoryLocations: 0,
+    effectRegions: 0,
+    controlRegions: 0,
+    logicPrograms: 1,
+    actorSystems: 0,
+    stackEffects: 1,
+    arrayShapes: 0,
+    numericKernels: 0,
+    dataflowNetworks: 0,
+    clockModels: 0,
+    objectModels: 0,
+    macroExpansions: 0,
+    reflectionBoundaries: 0,
+    loweringRecords: 1,
+    byGroup: { logicPrograms: 1, stackEffects: 1, loweringRecords: 1 },
+    byKind: { hornClause: 1, concatenativeStackEffect: 1, frontierToTarget: 1 },
+    hasRuntimeSemantics: false,
+    hasLogicSemantics: true,
+    hasStackSemantics: true,
+    hasArraySemantics: false,
+    hasMacroOrReflection: false,
+    hasLowering: true,
+    empty: false
+  },
   sourceProjections: { total: 1, preserved: 1, stubs: 0, ready: 1, needsReview: 0, blocked: 0 },
   nativeCompiles: { total: 1, emitted: 1, preserved: 1, targetStubs: 0, ready: 1, needsReview: 0, blocked: 0 },
   readiness: { ready: 1 }
@@ -489,6 +524,8 @@ assert.strictEqual(patchScore.entries[0].semanticEvidence.sourceMapMappings, 1);
 assert.strictEqual(patchScore.entries[0].semanticEvidence.universalAstLayers, 2);
 assert.strictEqual(patchScore.entries[0].semanticEvidence.proofSpecObligations, 1);
 assert.strictEqual(patchScore.entries[0].semanticEvidence.proofSpecFailedObligations, 0);
+assert.strictEqual(patchScore.entries[0].semanticEvidence.paradigmSemanticsRecords, 3);
+assert.strictEqual(patchScore.entries[0].semanticEvidence.paradigmSemanticsLoweringRecords, 1);
 assert.ok(patchScore.entries[0].semanticEvidence.universalAstLayerNames.includes('semanticSymbols'));
 assert.strictEqual(await fs.readFile(path.join(applyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 const cliScore = await execFileP(process.execPath, [
