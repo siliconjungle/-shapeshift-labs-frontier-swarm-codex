@@ -83,3 +83,7 @@ collectPromise satisfies Promise<FrontierCodexCollectResult>;
 applyPromise satisfies Promise<FrontierCodexApplyResult>;
 scorePromise satisfies Promise<FrontierCodexPatchScoreResult>;
 handoffArtifactsPromise satisfies Promise<readonly { kind: string; path: string }[]>;
+scorePromise.then((score) => {
+  const proofFailures: number | undefined = score.entries[0]?.semanticEvidence.proofSpecFailedObligations;
+  return proofFailures;
+});

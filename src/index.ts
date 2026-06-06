@@ -193,6 +193,7 @@ export interface FrontierCodexSemanticImportRecord {
   };
   semanticSidecar?: unknown;
   universalAstLayers?: FrontierCodexUniversalAstLayerSummary;
+  proofSpec?: FrontierCodexProofSpecSummary;
   sourceProjection?: unknown;
   nativeCompile?: unknown;
   mergeCandidate?: unknown;
@@ -204,6 +205,32 @@ export interface FrontierCodexUniversalAstLayerSummary {
   names: string[];
   ids: string[];
   byName: Record<string, number>;
+  empty: boolean;
+}
+
+export interface FrontierCodexProofSpecSummary {
+  total: number;
+  ids: string[];
+  contracts: number;
+  refinements: number;
+  invariants: number;
+  termination: number;
+  temporal: number;
+  obligations: number;
+  artifacts: number;
+  assumptions: number;
+  evidence: number;
+  discharged: number;
+  failed: number;
+  open: number;
+  unknown: number;
+  stale: number;
+  assumed: number;
+  contractKinds: string[];
+  artifactKinds: string[];
+  byStatus: Record<string, number>;
+  byContractKind: Record<string, number>;
+  byArtifactKind: Record<string, number>;
   empty: boolean;
 }
 
@@ -242,6 +269,7 @@ export interface FrontierCodexSemanticImportSidecar {
       empty: number;
     };
     universalAstLayers: FrontierCodexUniversalAstLayerSummary;
+    proofSpec: FrontierCodexProofSpecSummary;
     sourceProjections: {
       total: number;
       preserved: number;
@@ -338,6 +366,8 @@ export interface FrontierCodexSemanticImportQuality {
   sourceMapMappings: number;
   universalAstLayers: number;
   universalAstLayerNames: string[];
+  proofSpecObligations: number;
+  proofSpecFailedObligations: number;
   warnings: string[];
 }
 
@@ -372,6 +402,8 @@ export interface FrontierCodexCompactDashboard {
     patchHintCount: number;
     universalAstLayerCount: number;
     universalAstLayerNames: string[];
+    proofSpecObligations: number;
+    proofSpecFailedObligations: number;
   };
   evidence: {
     readyToApply: number;
@@ -563,6 +595,8 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   patchHints: number;
   universalAstLayers: number;
   universalAstLayerNames: string[];
+  proofSpecObligations: number;
+  proofSpecFailedObligations: number;
   readiness: Record<string, number>;
   lossesBySeverity: Record<string, number>;
   scoreAdjustment: number;
@@ -1471,6 +1505,7 @@ async function createCodexSemanticImportSidecar(input: {
         semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
         semanticSidecar: summarizeLangSemanticImportSidecar(semanticSidecar),
         universalAstLayers: summarizeUniversalAstLayers(importResult?.universalAst, semanticSidecar),
+        proofSpec: summarizeProofSpec(importResult?.universalAst?.proof, semanticSidecar),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),
         mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
@@ -2326,7 +2361,9 @@ function createCollectedEvidenceEntries(
       semanticSymbols: bundle.semanticImport?.semanticIndex.symbols ?? 0,
       semanticRegions: bundle.semanticImport?.semanticSidecars.ownershipRegions ?? 0,
       universalAstLayers: universalAstLayers.total,
-      universalAstLayerNames: universalAstLayers.names.join(',')
+      universalAstLayerNames: universalAstLayers.names.join(','),
+      proofSpecObligations: semanticImportProofSpecSummary(bundle.semanticImport).obligations,
+      proofSpecFailedObligations: semanticImportProofSpecSummary(bundle.semanticImport).failed
     }
   }];
   for (const file of bundle.evidencePaths) {
@@ -2397,7 +2434,9 @@ function createCodexCompactDashboard(input: {
       ownershipRegionCount: semanticQualities.reduce((sum, entry) => sum + entry.ownershipRegions, 0),
       patchHintCount: semanticQualities.reduce((sum, entry) => sum + entry.patchHints, 0),
       universalAstLayerCount: semanticQualities.reduce((sum, entry) => sum + entry.universalAstLayers, 0),
-      universalAstLayerNames: uniqueStrings(semanticQualities.flatMap((entry) => entry.universalAstLayerNames))
+      universalAstLayerNames: uniqueStrings(semanticQualities.flatMap((entry) => entry.universalAstLayerNames)),
+      proofSpecObligations: semanticQualities.reduce((sum, entry) => sum + entry.proofSpecObligations, 0),
+      proofSpecFailedObligations: semanticQualities.reduce((sum, entry) => sum + entry.proofSpecFailedObligations, 0)
     },
     evidence: {
       readyToApply: input.dashboard.summary.readyToApplyCount,
@@ -2651,6 +2690,8 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
       patchHints: 0,
       universalAstLayers: 0,
       universalAstLayerNames: [],
+      proofSpecObligations: 0,
+      proofSpecFailedObligations: 0,
       readiness: {},
       lossesBySeverity: {},
       scoreAdjustment,
@@ -2672,6 +2713,7 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
   const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
   const universalAstLayers = universalAstLayerSummary.total;
   const universalAstLayerNames = universalAstLayerSummary.names;
+  const proofSpec = semanticImportProofSpecSummary(summary);
   const errorLosses = nonNegativeNumber(lossesBySeverity.error);
   const warningLosses = nonNegativeNumber(lossesBySeverity.warning);
   const blocked = nonNegativeNumber(readiness.blocked);
@@ -2722,10 +2764,28 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
     scoreAdjustment -= Math.min(10, warningLosses + needsReview);
     cleanEligible = false;
   }
+  if (proofSpec.failed > 0) {
+    reasons.push(`failed proof obligations: ${proofSpec.failed}`);
+    scoreAdjustment -= 30;
+    cleanEligible = false;
+  }
+  if (proofSpec.stale > 0) {
+    reasons.push(`stale proof obligations: ${proofSpec.stale}`);
+    scoreAdjustment -= 20;
+    cleanEligible = false;
+  }
+  if (proofSpec.open > 0 || proofSpec.unknown > 0) {
+    reasons.push('proof evidence needs review');
+    scoreAdjustment -= Math.min(10, proofSpec.open + proofSpec.unknown);
+    cleanEligible = false;
+  }
   if (sourceMapMappings > 0 && semanticSymbols > 0 && ownershipRegions > 0 && universalAstLayers > 0) {
     scoreAdjustment += 10;
   }
   if (patchHints > 0) scoreAdjustment += 5;
+  if (proofSpec.discharged > 0 && proofSpec.failed === 0 && proofSpec.stale === 0 && proofSpec.open === 0 && proofSpec.unknown === 0) {
+    scoreAdjustment += 5;
+  }
 
   return {
     present: true,
@@ -2738,6 +2798,8 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
     patchHints,
     universalAstLayers,
     universalAstLayerNames,
+    proofSpecObligations: proofSpec.obligations,
+    proofSpecFailedObligations: proofSpec.failed,
     readiness,
     lossesBySeverity,
     scoreAdjustment: Math.max(-60, Math.min(15, scoreAdjustment)),
@@ -2760,6 +2822,7 @@ function summarizeCodexSemanticImportQuality(
   const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
   const universalAstLayers = universalAstLayerSummary.total;
   const universalAstLayerNames = universalAstLayerSummary.names;
+  const proofSpec = semanticImportProofSpecSummary(summary);
   const present = !!summary;
   const empty = present && (nonNegativeNumber(summary?.total) === 0 || selected === 0 && eligible === 0 && imported === 0 && symbols === 0);
   const warnings: string[] = [];
@@ -2770,6 +2833,8 @@ function summarizeCodexSemanticImportQuality(
   if (present && selected > 0 && ownershipRegions === 0) warnings.push('semantic import has no ownership regions');
   if (present && selected > 0 && sourceMapMappings === 0) warnings.push('semantic import has no source-map mappings');
   if (present && selected > 0 && universalAstLayers === 0) warnings.push('semantic import has no universal AST layers');
+  if (present && proofSpec.failed > 0) warnings.push('semantic import has failed proof obligations');
+  if (present && proofSpec.stale > 0) warnings.push('semantic import has stale proof obligations');
   return {
     expected,
     present,
@@ -2783,8 +2848,15 @@ function summarizeCodexSemanticImportQuality(
     sourceMapMappings,
     universalAstLayers,
     universalAstLayerNames,
+    proofSpecObligations: proofSpec.obligations,
+    proofSpecFailedObligations: proofSpec.failed,
     warnings: uniqueStrings(warnings)
   };
+}
+
+function semanticImportProofSpecSummary(summary: unknown): FrontierCodexProofSpecSummary {
+  const input = isObject(summary) && isObject(summary.proofSpec) ? summary.proofSpec : undefined;
+  return input ? normalizeProofSpecSummary(input) : emptyProofSpecSummary();
 }
 
 function semanticImportUniversalAstLayerSummary(summary: unknown): FrontierCodexUniversalAstLayerSummary {
@@ -2830,7 +2902,8 @@ function semanticImportSummaryRichness(summary: FrontierSwarmMergeBundle['semant
     summary.semanticIndex?.symbols,
     summary.semanticSidecars?.ownershipRegions,
     summary.semanticSidecars?.patchHints,
-    semanticImportUniversalAstLayerSummary(summary).total
+    semanticImportUniversalAstLayerSummary(summary).total,
+    semanticImportProofSpecSummary(summary).total
   ].reduce((sum, value) => sum + nonNegativeNumber(value), 0);
 }
 
@@ -3597,6 +3670,7 @@ function createSemanticImportSidecar(
     else totals.needsReview += 1;
     return totals;
   }, { total: 0, emitted: 0, preserved: 0, targetStubs: 0, ready: 0, needsReview: 0, blocked: 0 });
+  const proofSpec = summarizeSemanticImportProofSpec(records);
   const lossesBySeverity: Record<string, number> = {};
   const readiness: Record<string, number> = {};
   for (const record of records) {
@@ -3633,6 +3707,7 @@ function createSemanticImportSidecar(
       semanticIndex,
       semanticSidecars,
       universalAstLayers,
+      proofSpec,
       sourceProjections,
       nativeCompiles,
       readiness
@@ -3666,6 +3741,7 @@ function summarizeLangSemanticImportSidecar(value: any): unknown {
       : Array.isArray(value.universalAstLayers?.names)
         ? value.universalAstLayers.names
         : [],
+    proofSpec: summarizeProofSpec(undefined, value),
     readiness: value.summary?.readiness,
     emptySemanticIndex: value.summary?.emptySemanticIndex,
     patchHints: Array.isArray(value.patchHints) ? value.patchHints.length : 0,
@@ -3681,6 +3757,147 @@ function summarizeLangSemanticImportSidecar(value: any): unknown {
       }))
       : []
   };
+}
+
+function summarizeSemanticImportProofSpec(records: FrontierCodexSemanticImportRecord[]): FrontierCodexProofSpecSummary {
+  const summary = emptyProofSpecSummary();
+  for (const record of records) {
+    mergeProofSpecSummary(summary, record.proofSpec);
+  }
+  summary.empty = summary.total === 0;
+  return summary;
+}
+
+function summarizeProofSpec(proof?: any, semanticSidecar?: any): FrontierCodexProofSpecSummary {
+  const sidecarProof = semanticSidecar?.proofSpec ?? semanticSidecar?.summary?.proofSpec;
+  if (sidecarProof && typeof sidecarProof === 'object' && hasProofSpecSummaryShape(sidecarProof)) {
+    return normalizeProofSpecSummary(sidecarProof);
+  }
+  const raw = proof && typeof proof === 'object' ? proof : {};
+  const contracts: any[] = Array.isArray(raw.contracts) ? raw.contracts : [];
+  const refinements: any[] = Array.isArray(raw.refinements) ? raw.refinements : [];
+  const invariants: any[] = Array.isArray(raw.invariants) ? raw.invariants : [];
+  const termination: any[] = Array.isArray(raw.termination) ? raw.termination : [];
+  const temporal: any[] = Array.isArray(raw.temporal) ? raw.temporal : [];
+  const obligations: any[] = Array.isArray(raw.obligations) ? raw.obligations : [];
+  const artifacts: any[] = Array.isArray(raw.artifacts) ? raw.artifacts : [];
+  const assumptions: any[] = Array.isArray(raw.assumptions) ? raw.assumptions : [];
+  const evidence: any[] = Array.isArray(raw.evidence) ? raw.evidence : [];
+  const allContracts = [...contracts, ...refinements, ...invariants, ...termination, ...temporal];
+  const byStatus: Record<string, number> = {};
+  const byContractKind: Record<string, number> = {};
+  const byArtifactKind: Record<string, number> = {};
+  for (const obligation of obligations) {
+    const status = String(obligation?.status ?? 'unknown');
+    byStatus[status] = (byStatus[status] ?? 0) + 1;
+  }
+  for (const contract of allContracts) {
+    const kind = String(contract?.kind ?? 'unknown');
+    byContractKind[kind] = (byContractKind[kind] ?? 0) + 1;
+  }
+  for (const artifact of artifacts) {
+    const kind = String(artifact?.kind ?? 'unknown');
+    byArtifactKind[kind] = (byArtifactKind[kind] ?? 0) + 1;
+  }
+  const total = allContracts.length + obligations.length + artifacts.length + assumptions.length;
+  return {
+    total,
+    ids: uniqueStrings([
+      raw.id,
+      ...allContracts.map((record) => record?.id),
+      ...obligations.map((record) => record?.id),
+      ...artifacts.map((record) => record?.id),
+      ...assumptions.map((record) => record?.id),
+      ...evidence.map((record) => record?.id)
+    ].filter(Boolean).map(String)),
+    contracts: contracts.length,
+    refinements: refinements.length,
+    invariants: invariants.length,
+    termination: termination.length,
+    temporal: temporal.length,
+    obligations: obligations.length,
+    artifacts: artifacts.length,
+    assumptions: assumptions.length,
+    evidence: evidence.length,
+    discharged: byStatus.discharged ?? 0,
+    failed: byStatus.failed ?? 0,
+    open: byStatus.open ?? 0,
+    unknown: byStatus.unknown ?? 0,
+    stale: byStatus.stale ?? 0,
+    assumed: byStatus.assumed ?? 0,
+    contractKinds: uniqueStrings(Object.keys(byContractKind)),
+    artifactKinds: uniqueStrings(Object.keys(byArtifactKind)),
+    byStatus,
+    byContractKind,
+    byArtifactKind,
+    empty: total === 0
+  };
+}
+
+function hasProofSpecSummaryShape(value: Record<string, unknown>): boolean {
+  return typeof value.total === 'number' ||
+    typeof value.obligations === 'number' ||
+    typeof value.contracts === 'number' ||
+    typeof value.failed === 'number';
+}
+
+function normalizeProofSpecSummary(value: Record<string, unknown>): FrontierCodexProofSpecSummary {
+  const summary = emptyProofSpecSummary();
+  mergeProofSpecSummary(summary, value);
+  summary.empty = summary.total === 0;
+  return summary;
+}
+
+function emptyProofSpecSummary(): FrontierCodexProofSpecSummary {
+  return {
+    total: 0,
+    ids: [],
+    contracts: 0,
+    refinements: 0,
+    invariants: 0,
+    termination: 0,
+    temporal: 0,
+    obligations: 0,
+    artifacts: 0,
+    assumptions: 0,
+    evidence: 0,
+    discharged: 0,
+    failed: 0,
+    open: 0,
+    unknown: 0,
+    stale: 0,
+    assumed: 0,
+    contractKinds: [],
+    artifactKinds: [],
+    byStatus: {},
+    byContractKind: {},
+    byArtifactKind: {},
+    empty: true
+  };
+}
+
+function mergeProofSpecSummary(target: FrontierCodexProofSpecSummary, input: any): void {
+  if (!input || typeof input !== 'object') return;
+  for (const key of ['total', 'contracts', 'refinements', 'invariants', 'termination', 'temporal', 'obligations', 'artifacts', 'assumptions', 'evidence', 'discharged', 'failed', 'open', 'unknown', 'stale', 'assumed'] as const) {
+    target[key] += nonNegativeNumber(input[key]);
+  }
+  target.ids = uniqueStrings([...target.ids, ...proofStringList(input.ids)]);
+  target.contractKinds = uniqueStrings([...target.contractKinds, ...proofStringList(input.contractKinds)]);
+  target.artifactKinds = uniqueStrings([...target.artifactKinds, ...proofStringList(input.artifactKinds)]);
+  for (const [status, count] of Object.entries(numberRecord(input.byStatus))) {
+    target.byStatus[status] = (target.byStatus[status] ?? 0) + count;
+  }
+  for (const [kind, count] of Object.entries(numberRecord(input.byContractKind))) {
+    target.byContractKind[kind] = (target.byContractKind[kind] ?? 0) + count;
+  }
+  for (const [kind, count] of Object.entries(numberRecord(input.byArtifactKind))) {
+    target.byArtifactKind[kind] = (target.byArtifactKind[kind] ?? 0) + count;
+  }
+}
+
+function proofStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => String(entry)).filter(Boolean);
 }
 
 function summarizeSemanticImportUniversalAstLayers(records: FrontierCodexSemanticImportRecord[]): FrontierCodexUniversalAstLayerSummary {
