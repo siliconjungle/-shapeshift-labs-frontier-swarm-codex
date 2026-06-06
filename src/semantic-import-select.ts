@@ -27,6 +27,9 @@ export type FrontierLangSemanticImportApi = {
   importNativeSource(input: Record<string, unknown>): any;
   createSemanticMergeCandidateFromImport(input: Record<string, unknown>): any;
   createSemanticImportSidecar?(importResult: unknown, options?: Record<string, unknown>): any;
+  createSemanticSlice?(importResult: unknown, options?: Record<string, unknown>): any;
+  createSemanticSliceAdmissionRecord?(slice: unknown, options?: Record<string, unknown>): any;
+  testSemanticSlice?(slice: unknown, options?: Record<string, unknown>): any;
   projectNativeImportToSource?(importResult: unknown, options?: Record<string, unknown>): any;
   compileNativeSource?(importResult: unknown, options?: Record<string, unknown>): any;
   hashUniversalAstEnvelope?(input: unknown): string;
@@ -166,6 +169,9 @@ export async function loadFrontierLangForSemanticImport(): Promise<FrontierLangS
       importNativeSource: api.importNativeSource,
       createSemanticMergeCandidateFromImport: api.createSemanticMergeCandidateFromImport,
       ...(typeof api.createSemanticImportSidecar === 'function' ? { createSemanticImportSidecar: api.createSemanticImportSidecar } : {}),
+      ...(typeof api.createSemanticSlice === 'function' ? { createSemanticSlice: api.createSemanticSlice } : {}),
+      ...(typeof api.createSemanticSliceAdmissionRecord === 'function' ? { createSemanticSliceAdmissionRecord: api.createSemanticSliceAdmissionRecord } : {}),
+      ...(typeof api.testSemanticSlice === 'function' ? { testSemanticSlice: api.testSemanticSlice } : {}),
       ...(typeof api.projectNativeImportToSource === 'function' ? { projectNativeImportToSource: api.projectNativeImportToSource } : {}),
       ...(typeof api.compileNativeSource === 'function' ? { compileNativeSource: api.compileNativeSource } : {}),
       ...(typeof api.hashUniversalAstEnvelope === 'function' ? { hashUniversalAstEnvelope: api.hashUniversalAstEnvelope } : {})

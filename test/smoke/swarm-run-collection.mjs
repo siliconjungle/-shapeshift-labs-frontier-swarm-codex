@@ -74,6 +74,12 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.ok(semanticImports.summary.readiness['ready-with-losses'] >= 1 || semanticImports.summary.readiness.ready >= 1);
   assert.strictEqual(semanticImports.summary.nativeCompiles.total, 1);
   assert.strictEqual(semanticImports.summary.nativeCompiles.preserved, 1);
+  assert.strictEqual(semanticImports.summary.semanticSliceAdmissions.total, 1);
+  assert.strictEqual(semanticImports.summary.semanticSliceAdmissions.rejected, 0);
+  assert.ok(semanticImports.summary.semanticSliceAdmissions.averageScore > 0);
+  assert.ok(semanticImports.records[0].semanticSlice);
+  assert.strictEqual(semanticImports.records[0].semanticSliceAdmission.autoMergeClaim, false);
+  assert.strictEqual(semanticImports.records[0].semanticSliceAdmission.mergeScore.schema, 'frontier.lang.semanticMergeScore.v1');
   assert.strictEqual(result.run.results[0].mergeReadiness, 'patch-candidate');
   assert.strictEqual(result.run.results[0].metadata.semanticImport.total, 1);
   assert.ok(result.run.results[0].metadata.semanticImport.semanticSidecars.ownershipRegions >= 1);

@@ -41,6 +41,8 @@ export interface FrontierCodexSemanticImportRecord {
   sourceProjection?: unknown;
   nativeCompile?: unknown;
   mergeCandidate?: unknown;
+  semanticSlice?: unknown;
+  semanticSliceAdmission?: unknown;
   error?: string;
 }
 
@@ -174,6 +176,15 @@ export interface FrontierCodexSemanticImportSidecar {
       ready: number;
       needsReview: number;
       blocked: number;
+    };
+    semanticSliceAdmissions: {
+      total: number;
+      admitted: number;
+      prioritized: number;
+      rejected: number;
+      averageScore: number;
+      byAction: Record<string, number>;
+      byRisk: Record<string, number>;
     };
     readiness: Record<string, number>;
   };

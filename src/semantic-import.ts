@@ -5,7 +5,13 @@ import type { FrontierCodexSemanticImportOptions, FrontierCodexSemanticImportRec
 import { summarizeUniversalAstLayers, summarizeNativeSourceProjection, summarizeNativeSourceCompile, summarizeSemanticLosses, summarizeSemanticMergeCandidate } from './semantic-import-layers.js';
 import { summarizeParadigmSemantics } from './semantic-import-paradigm.js';
 import { summarizeProofSpec } from './semantic-import-proof.js';
-import { createSemanticImportSidecar, summarizeLangSemanticImportSidecar, summarizeSemanticIndex } from './semantic-import-sidecar.js';
+import {
+  createSemanticImportSidecar,
+  summarizeLangSemanticImportSidecar,
+  summarizeSemanticIndex,
+  summarizeSemanticSlice,
+  summarizeSemanticSliceAdmission
+} from './semantic-import-sidecar.js';
 import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths } from './semantic-import-select.js';
 
 export async function createCodexSemanticImportSidecar(input: {
@@ -82,6 +88,23 @@ export async function createCodexSemanticImportSidecar(input: {
       const nativeCompile = api.compileNativeSource
         ? api.compileNativeSource(importResult, { target: file.language, sourceText, sourcePath: file.path, emitOnBlocked: true })
         : undefined;
+      const semanticSlice = api.createSemanticSlice
+        ? api.createSemanticSlice(importResult, {
+          includeDependencies: true,
+          focusedCommands: (input.job.verification ?? []).map((entry) => entry.command).filter(Boolean),
+          metadata: {
+            swarmJobId: input.job.id,
+            swarmTaskId: input.job.taskId,
+            swarmLane: input.job.lane
+          }
+        })
+        : undefined;
+      const semanticSliceGate = semanticSlice && api.testSemanticSlice
+        ? api.testSemanticSlice(semanticSlice, { currentSources: { [file.path]: sourceText } })
+        : undefined;
+      const semanticSliceAdmission = semanticSlice && api.createSemanticSliceAdmissionRecord
+        ? api.createSemanticSliceAdmissionRecord(semanticSlice, { testResult: semanticSliceGate })
+        : undefined;
       const sourceMaps = Array.isArray(importResult?.sourceMaps)
         ? importResult.sourceMaps
         : Array.isArray(importResult?.universalAst?.sourceMaps)
@@ -110,7 +133,9 @@ export async function createCodexSemanticImportSidecar(input: {
         paradigmSemantics: summarizeParadigmSemantics(importResult?.universalAst?.paradigmSemantics, semanticSidecar),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),
-        mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
+        mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate),
+        semanticSlice: summarizeSemanticSlice(semanticSlice),
+        semanticSliceAdmission: summarizeSemanticSliceAdmission(semanticSliceAdmission)
       });
     } catch (error) {
       records.push({

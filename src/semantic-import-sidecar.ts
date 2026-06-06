@@ -56,6 +56,20 @@ export function createSemanticImportSidecar(
     else totals.needsReview += 1;
     return totals;
   }, { total: 0, emitted: 0, preserved: 0, targetStubs: 0, ready: 0, needsReview: 0, blocked: 0 });
+  const semanticSliceAdmissions = records.reduce((totals, record) => {
+    const admission = record.semanticSliceAdmission as { action?: string; risk?: string; mergeScore?: { value?: number } } | undefined;
+    if (!admission) return totals;
+    totals.total += 1;
+    totals.scoreTotal += typeof admission.mergeScore?.value === 'number' ? admission.mergeScore.value : 0;
+    const action = admission.action ?? 'unknown';
+    const risk = admission.risk ?? 'unknown';
+    totals.byAction[action] = (totals.byAction[action] ?? 0) + 1;
+    totals.byRisk[risk] = (totals.byRisk[risk] ?? 0) + 1;
+    if (action === 'admit') totals.admitted += 1;
+    else if (action === 'reject') totals.rejected += 1;
+    else if (action === 'prioritize') totals.prioritized += 1;
+    return totals;
+  }, { total: 0, admitted: 0, prioritized: 0, rejected: 0, scoreTotal: 0, byAction: {} as Record<string, number>, byRisk: {} as Record<string, number> });
   const proofSpec = summarizeSemanticImportProofSpec(records);
   const lossesBySeverity: Record<string, number> = {};
   const readiness: Record<string, number> = {};
@@ -112,6 +126,15 @@ export function createSemanticImportSidecar(
       paradigmSemantics,
       sourceProjections,
       nativeCompiles,
+      semanticSliceAdmissions: {
+        total: semanticSliceAdmissions.total,
+        admitted: semanticSliceAdmissions.admitted,
+        prioritized: semanticSliceAdmissions.prioritized,
+        rejected: semanticSliceAdmissions.rejected,
+        averageScore: semanticSliceAdmissions.total ? Math.round(semanticSliceAdmissions.scoreTotal / semanticSliceAdmissions.total) : 0,
+        byAction: semanticSliceAdmissions.byAction,
+        byRisk: semanticSliceAdmissions.byRisk
+      },
       readiness
     }
   };
@@ -163,5 +186,42 @@ export function summarizeLangSemanticImportSidecar(value: any): unknown {
         precision: region?.precision
       }))
       : []
+  };
+}
+
+export function summarizeSemanticSlice(value: any): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  return {
+    kind: value.kind,
+    id: value.id,
+    readiness: value.summary?.readiness ?? value.mergeAdmission?.readiness,
+    symbols: value.summary?.symbols,
+    ownershipRegions: value.summary?.ownershipRegions,
+    sourceMapLinks: value.summary?.sourceMapLinks,
+    sourceFiles: value.summary?.sourceFiles,
+    conflictKeys: Array.isArray(value.mergeAdmission?.conflictKeys) ? value.mergeAdmission.conflictKeys.slice(0, 24) : [],
+    autoMergeClaim: value.mergeAdmission?.autoMergeClaim === true
+  };
+}
+
+export function summarizeSemanticSliceAdmission(value: any): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  return {
+    kind: value.kind,
+    id: value.id,
+    action: value.action,
+    priority: value.priority,
+    risk: value.risk,
+    readiness: value.readiness,
+    reviewRequired: value.reviewRequired,
+    autoMergeClaim: value.autoMergeClaim === true,
+    mergeScore: value.mergeScore
+      ? {
+        schema: value.mergeScore.schema,
+        value: value.mergeScore.value,
+        sortKey: value.mergeScore.sortKey,
+        penalties: Array.isArray(value.mergeScore.penalties) ? value.mergeScore.penalties.slice(0, 12) : []
+      }
+      : undefined
   };
 }
