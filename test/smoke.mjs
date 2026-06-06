@@ -273,12 +273,15 @@ assert.ok(semanticImports.summary.sourceMapCount >= 1);
 assert.ok(semanticImports.summary.sourceMapMappingCount >= 1);
 assert.ok(semanticImports.summary.lossCount >= 1);
 assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
+assert.ok(semanticImports.summary.universalAstLayers);
+assert.ok(Array.isArray(semanticImports.summary.universalAstLayers.names));
 assert.ok(semanticImports.summary.readiness['ready-with-losses'] >= 1 || semanticImports.summary.readiness['ready'] >= 1);
 assert.strictEqual(semanticImports.summary.nativeCompiles.total, 1);
 assert.strictEqual(semanticImports.summary.nativeCompiles.preserved, 1);
 assert.strictEqual(result.run.results[0].mergeReadiness, 'patch-candidate');
-assert.strictEqual(result.run.results[0].semanticImport.total, 1);
-assert.ok(result.run.results[0].semanticImport.semanticSidecars.ownershipRegions >= 1);
+assert.strictEqual(result.run.results[0].metadata.semanticImport.total, 1);
+assert.ok(result.run.results[0].metadata.semanticImport.semanticSidecars.ownershipRegions >= 1);
+assert.ok(result.run.results[0].metadata.semanticImport.universalAstLayers.total >= 0);
 const mergeBundlePath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('merge.json'));
 const mergeBundle = JSON.parse(await fs.readFile(mergeBundlePath, 'utf8'));
 assert.strictEqual(mergeBundle.disposition, 'needs-port');
@@ -288,6 +291,7 @@ assert.ok(mergeBundle.semanticImport.sourceProjections.total >= 1);
 assert.ok(mergeBundle.semanticImport.nativeCompiles.total >= 1);
 assert.strictEqual(mergeBundle.metadata.semanticImport.total, 1);
 assert.ok(mergeBundle.metadata.semanticImport.sourceMapCount >= 1);
+assert.ok(Array.isArray(mergeBundle.metadata.semanticImport.universalAstLayers.names));
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, semanticImportExpected: true, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);
@@ -306,6 +310,8 @@ assert.ok(await exists(path.join(collection.outDir, 'coordinator-query.json')));
 assert.ok(await exists(path.join(collection.outDir, 'compact-dashboard.json')));
 assert.strictEqual(collection.compactDashboard.kind, 'frontier.swarm-codex.compact-dashboard');
 assert.strictEqual(collection.compactDashboard.semanticImport.presentCount, 1);
+assert.ok(collection.compactDashboard.semanticImport.universalAstLayerCount >= 0);
+assert.ok(Array.isArray(collection.compactDashboard.semanticImport.universalAstLayerNames));
 const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
 assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
 const coordinatorQuery = JSON.parse(await fs.readFile(path.join(collection.outDir, 'coordinator-query.json'), 'utf8'));
@@ -418,6 +424,13 @@ await fs.writeFile(path.join(readyDir, 'merge.json'), JSON.stringify({
     lossesBySeverity: {},
     semanticIndex: { documents: 1, symbols: 1, occurrences: 1, relations: 0, facts: 0 },
     semanticSidecars: { total: 1, symbols: 1, ownershipRegions: 1, patchHints: 1, empty: 0 },
+    universalAstLayers: {
+      total: 2,
+      names: ['semanticSymbols', 'projectionEvidence'],
+      ids: ['layer:semanticSymbols', 'layer:projectionEvidence'],
+      byName: { semanticSymbols: 1, projectionEvidence: 1 },
+      empty: false
+    },
     sourceProjections: { total: 1, preserved: 1, stubs: 0, ready: 1, needsReview: 0, blocked: 0 },
     nativeCompiles: { total: 1, emitted: 1, preserved: 1, targetStubs: 0, ready: 1, needsReview: 0, blocked: 0 },
     readiness: { ready: 1 }
@@ -441,6 +454,8 @@ assert.strictEqual(patchScore.summary['accepted-clean'], 1);
 assert.strictEqual(patchScore.entries[0].semanticEvidence.present, true);
 assert.strictEqual(patchScore.entries[0].semanticEvidence.cleanEligible, true);
 assert.strictEqual(patchScore.entries[0].semanticEvidence.sourceMapMappings, 1);
+assert.strictEqual(patchScore.entries[0].semanticEvidence.universalAstLayers, 2);
+assert.ok(patchScore.entries[0].semanticEvidence.universalAstLayerNames.includes('semanticSymbols'));
 assert.strictEqual(await fs.readFile(path.join(applyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 const cliScore = await execFileP(process.execPath, [
   new URL('../dist/cli.js', import.meta.url).pathname,

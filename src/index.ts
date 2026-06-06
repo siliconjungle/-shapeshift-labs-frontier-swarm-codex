@@ -192,10 +192,19 @@ export interface FrontierCodexSemanticImportRecord {
     facts: number;
   };
   semanticSidecar?: unknown;
+  universalAstLayers?: FrontierCodexUniversalAstLayerSummary;
   sourceProjection?: unknown;
   nativeCompile?: unknown;
   mergeCandidate?: unknown;
   error?: string;
+}
+
+export interface FrontierCodexUniversalAstLayerSummary {
+  total: number;
+  names: string[];
+  ids: string[];
+  byName: Record<string, number>;
+  empty: boolean;
 }
 
 export interface FrontierCodexSemanticImportSidecar {
@@ -232,6 +241,7 @@ export interface FrontierCodexSemanticImportSidecar {
       patchHints: number;
       empty: number;
     };
+    universalAstLayers: FrontierCodexUniversalAstLayerSummary;
     sourceProjections: {
       total: number;
       preserved: number;
@@ -326,6 +336,8 @@ export interface FrontierCodexSemanticImportQuality {
   ownershipRegions: number;
   patchHints: number;
   sourceMapMappings: number;
+  universalAstLayers: number;
+  universalAstLayerNames: string[];
   warnings: string[];
 }
 
@@ -358,6 +370,8 @@ export interface FrontierCodexCompactDashboard {
     symbolCount: number;
     ownershipRegionCount: number;
     patchHintCount: number;
+    universalAstLayerCount: number;
+    universalAstLayerNames: string[];
   };
   evidence: {
     readyToApply: number;
@@ -547,6 +561,8 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   semanticSymbols: number;
   ownershipRegions: number;
   patchHints: number;
+  universalAstLayers: number;
+  universalAstLayerNames: string[];
   readiness: Record<string, number>;
   lossesBySeverity: Record<string, number>;
   scoreAdjustment: number;
@@ -1101,6 +1117,7 @@ export async function runCodexJob(
     evidenceDir: paths.evidenceDir,
     options: options.semanticImport
   });
+  const semanticImportSummary = semanticImport?.sidecar.summary;
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });
   const evidenceSummaryPath = path.join(paths.evidenceDir, 'evidence.json');
   const evidencePaths = uniqueStrings([
@@ -1129,14 +1146,14 @@ export async function runCodexJob(
     ...(patchPath ? { patchPath } : {}),
     queueItemIds: [job.taskId],
     verification,
-    ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {}),
+    ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {}),
     lastMessage: execution.lastMessage,
     error: execution.error,
     metadata: {
       ...(lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : {}),
       resourceAllocation,
       logSummary,
-      ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {}),
+      ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {}),
       codexHandoffArtifacts: handoffArtifacts
     }
   };
@@ -1156,9 +1173,16 @@ export async function runCodexJob(
       ...handoffArtifacts.map((artifact) => artifact.path)
     ]),
     queueItemIds: [job.taskId],
-    ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {}),
-    ...(semanticImport ? { metadata: { semanticImport: semanticImport.sidecar.summary } } : {})
+    ...(semanticImportSummary ? { semanticImport: semanticImportSummary as unknown as FrontierSwarmMergeBundle['semanticImport'] } : {}),
+    ...(semanticImportSummary ? { metadata: { semanticImport: semanticImportSummary } } : {})
   });
+  if (semanticImportSummary) {
+    (mergeBundle as unknown as { semanticImport: FrontierCodexSemanticImportSidecar['summary'] }).semanticImport = semanticImportSummary;
+    mergeBundle.metadata = {
+      ...(isObject(mergeBundle.metadata) ? mergeBundle.metadata : {}),
+      semanticImport: semanticImportSummary
+    } as unknown as FrontierSwarmMergeBundle['metadata'];
+  }
   await fs.writeFile(paths.mergeBundlePath, JSON.stringify(mergeBundle, null, 2) + '\n');
   await writeCodexPatchIntent({
     file: paths.patchIntentPath,
@@ -1446,6 +1470,7 @@ async function createCodexSemanticImportSidecar(input: {
         losses: summarizeSemanticLosses(importResult?.losses),
         semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
         semanticSidecar: summarizeLangSemanticImportSidecar(semanticSidecar),
+        universalAstLayers: summarizeUniversalAstLayers(importResult?.universalAst, semanticSidecar),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),
         mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
@@ -2281,6 +2306,7 @@ function createCollectedEvidenceEntries(
   bucket: FrontierCodexCollectBucket
 ): FrontierSwarmEvidenceIndexEntryInput[] {
   const confidence = bucket === 'ready-to-apply' ? 0.95 : bucket === 'needs-human-port' ? 0.7 : bucket === 'failed-evidence' ? 0.25 : 0.2;
+  const universalAstLayers = semanticImportUniversalAstLayerSummary(bundle.semanticImport);
   const entries: FrontierSwarmEvidenceIndexEntryInput[] = [{
     jobId: bundle.jobId,
     queueItemId: bundle.queueItemIds[0],
@@ -2298,7 +2324,9 @@ function createCollectedEvidenceEntries(
       autoMergeable: bundle.autoMergeable,
       staleAgainstHead: bundle.staleAgainstHead,
       semanticSymbols: bundle.semanticImport?.semanticIndex.symbols ?? 0,
-      semanticRegions: bundle.semanticImport?.semanticSidecars.ownershipRegions ?? 0
+      semanticRegions: bundle.semanticImport?.semanticSidecars.ownershipRegions ?? 0,
+      universalAstLayers: universalAstLayers.total,
+      universalAstLayerNames: universalAstLayers.names.join(',')
     }
   }];
   for (const file of bundle.evidencePaths) {
@@ -2367,7 +2395,9 @@ function createCodexCompactDashboard(input: {
       weakCount: semanticQualities.filter((entry) => entry.present && entry.warnings.length > 0).length,
       symbolCount: semanticQualities.reduce((sum, entry) => sum + entry.symbols, 0),
       ownershipRegionCount: semanticQualities.reduce((sum, entry) => sum + entry.ownershipRegions, 0),
-      patchHintCount: semanticQualities.reduce((sum, entry) => sum + entry.patchHints, 0)
+      patchHintCount: semanticQualities.reduce((sum, entry) => sum + entry.patchHints, 0),
+      universalAstLayerCount: semanticQualities.reduce((sum, entry) => sum + entry.universalAstLayers, 0),
+      universalAstLayerNames: uniqueStrings(semanticQualities.flatMap((entry) => entry.universalAstLayerNames))
     },
     evidence: {
       readyToApply: input.dashboard.summary.readyToApplyCount,
@@ -2619,6 +2649,8 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
       semanticSymbols: 0,
       ownershipRegions: 0,
       patchHints: 0,
+      universalAstLayers: 0,
+      universalAstLayerNames: [],
       readiness: {},
       lossesBySeverity: {},
       scoreAdjustment,
@@ -2637,6 +2669,9 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
   const semanticSymbols = nonNegativeNumber(summary.semanticIndex?.symbols);
   const ownershipRegions = nonNegativeNumber(summary.semanticSidecars?.ownershipRegions);
   const patchHints = nonNegativeNumber(summary.semanticSidecars?.patchHints);
+  const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
+  const universalAstLayers = universalAstLayerSummary.total;
+  const universalAstLayerNames = universalAstLayerSummary.names;
   const errorLosses = nonNegativeNumber(lossesBySeverity.error);
   const warningLosses = nonNegativeNumber(lossesBySeverity.warning);
   const blocked = nonNegativeNumber(readiness.blocked);
@@ -2677,12 +2712,17 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
     scoreAdjustment -= 5;
     cleanEligible = false;
   }
+  if (selected > 0 && universalAstLayers === 0) {
+    reasons.push('semantic sidecar has no universal AST layers');
+    scoreAdjustment -= 5;
+    cleanEligible = false;
+  }
   if (warningLosses > 0 || needsReview > 0) {
     reasons.push('semantic evidence needs review');
     scoreAdjustment -= Math.min(10, warningLosses + needsReview);
     cleanEligible = false;
   }
-  if (sourceMapMappings > 0 && semanticSymbols > 0 && ownershipRegions > 0) {
+  if (sourceMapMappings > 0 && semanticSymbols > 0 && ownershipRegions > 0 && universalAstLayers > 0) {
     scoreAdjustment += 10;
   }
   if (patchHints > 0) scoreAdjustment += 5;
@@ -2696,6 +2736,8 @@ function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): 
     semanticSymbols,
     ownershipRegions,
     patchHints,
+    universalAstLayers,
+    universalAstLayerNames,
     readiness,
     lossesBySeverity,
     scoreAdjustment: Math.max(-60, Math.min(15, scoreAdjustment)),
@@ -2715,6 +2757,9 @@ function summarizeCodexSemanticImportQuality(
   const ownershipRegions = nonNegativeNumber(summary?.semanticSidecars?.ownershipRegions);
   const patchHints = nonNegativeNumber(summary?.semanticSidecars?.patchHints);
   const sourceMapMappings = nonNegativeNumber(summary?.sourceMapMappingCount);
+  const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
+  const universalAstLayers = universalAstLayerSummary.total;
+  const universalAstLayerNames = universalAstLayerSummary.names;
   const present = !!summary;
   const empty = present && (nonNegativeNumber(summary?.total) === 0 || selected === 0 && eligible === 0 && imported === 0 && symbols === 0);
   const warnings: string[] = [];
@@ -2724,6 +2769,7 @@ function summarizeCodexSemanticImportQuality(
   if (present && selected > 0 && symbols === 0) warnings.push('semantic import has no symbols');
   if (present && selected > 0 && ownershipRegions === 0) warnings.push('semantic import has no ownership regions');
   if (present && selected > 0 && sourceMapMappings === 0) warnings.push('semantic import has no source-map mappings');
+  if (present && selected > 0 && universalAstLayers === 0) warnings.push('semantic import has no universal AST layers');
   return {
     expected,
     present,
@@ -2735,14 +2781,57 @@ function summarizeCodexSemanticImportQuality(
     ownershipRegions,
     patchHints,
     sourceMapMappings,
+    universalAstLayers,
+    universalAstLayerNames,
     warnings: uniqueStrings(warnings)
   };
 }
 
+function semanticImportUniversalAstLayerSummary(summary: unknown): FrontierCodexUniversalAstLayerSummary {
+  const input = isObject(summary) && isObject(summary.universalAstLayers) ? summary.universalAstLayers : undefined;
+  const names = Array.isArray(input?.names)
+    ? uniqueStrings(input.names.map((entry) => String(entry)).filter(Boolean))
+    : [];
+  const ids = Array.isArray(input?.ids)
+    ? uniqueStrings(input.ids.map((entry) => String(entry)).filter(Boolean))
+    : [];
+  const byName = isObject(input?.byName) ? numberRecord(input.byName) : {};
+  const total = nonNegativeNumber(input?.total ?? ids.length);
+  return {
+    total,
+    names,
+    ids,
+    byName,
+    empty: input?.empty === true || total === 0
+  };
+}
+
 function semanticImportSummaryFromBundle(bundle: FrontierSwarmMergeBundle): FrontierSwarmMergeBundle['semanticImport'] | undefined {
-  if (bundle.semanticImport) return bundle.semanticImport;
   const metadata = bundle.metadata as { semanticImport?: FrontierSwarmMergeBundle['semanticImport'] } | undefined;
-  return metadata?.semanticImport;
+  return richerSemanticImportSummary(bundle.semanticImport, metadata?.semanticImport);
+}
+
+function richerSemanticImportSummary(
+  first: FrontierSwarmMergeBundle['semanticImport'] | undefined,
+  second: FrontierSwarmMergeBundle['semanticImport'] | undefined
+): FrontierSwarmMergeBundle['semanticImport'] | undefined {
+  if (!first) return second;
+  if (!second) return first;
+  return semanticImportSummaryRichness(second) > semanticImportSummaryRichness(first) ? second : first;
+}
+
+function semanticImportSummaryRichness(summary: FrontierSwarmMergeBundle['semanticImport'] | undefined): number {
+  if (!summary) return 0;
+  return [
+    summary.total,
+    summary.selected,
+    summary.imported,
+    summary.sourceMapMappingCount,
+    summary.semanticIndex?.symbols,
+    summary.semanticSidecars?.ownershipRegions,
+    summary.semanticSidecars?.patchHints,
+    semanticImportUniversalAstLayerSummary(summary).total
+  ].reduce((sum, value) => sum + nonNegativeNumber(value), 0);
 }
 
 function semanticImportEnabled(input: boolean | FrontierCodexSemanticImportOptions | undefined): boolean {
@@ -3484,6 +3573,7 @@ function createSemanticImportSidecar(
     if (summary.emptySemanticIndex) totals.empty += 1;
     return totals;
   }, { total: 0, symbols: 0, ownershipRegions: 0, patchHints: 0, empty: 0 });
+  const universalAstLayers = summarizeSemanticImportUniversalAstLayers(records);
   const sourceProjections = records.reduce((totals, record) => {
     const summary = record.sourceProjection as { mode?: string; readiness?: string } | undefined;
     if (!summary) return totals;
@@ -3542,6 +3632,7 @@ function createSemanticImportSidecar(
       lossesBySeverity,
       semanticIndex,
       semanticSidecars,
+      universalAstLayers,
       sourceProjections,
       nativeCompiles,
       readiness
@@ -3569,6 +3660,12 @@ function summarizeLangSemanticImportSidecar(value: any): unknown {
     symbols: value.summary?.symbols,
     ownershipRegions: value.summary?.ownershipRegions,
     sourceMapMappings: value.summary?.sourceMapMappings,
+    universalAstLayers: value.summary?.universalAstLayers ?? value.universalAstLayers?.total,
+    universalAstLayerNames: Array.isArray(value.summary?.universalAstLayerNames)
+      ? value.summary.universalAstLayerNames
+      : Array.isArray(value.universalAstLayers?.names)
+        ? value.universalAstLayers.names
+        : [],
     readiness: value.summary?.readiness,
     emptySemanticIndex: value.summary?.emptySemanticIndex,
     patchHints: Array.isArray(value.patchHints) ? value.patchHints.length : 0,
@@ -3584,6 +3681,63 @@ function summarizeLangSemanticImportSidecar(value: any): unknown {
       }))
       : []
   };
+}
+
+function summarizeSemanticImportUniversalAstLayers(records: FrontierCodexSemanticImportRecord[]): FrontierCodexUniversalAstLayerSummary {
+  const byName: Record<string, number> = {};
+  const names: string[] = [];
+  const ids: string[] = [];
+  for (const record of records) {
+    for (const name of record.universalAstLayers?.names ?? []) {
+      names.push(name);
+      byName[name] = (byName[name] ?? 0) + 1;
+    }
+    ids.push(...(record.universalAstLayers?.ids ?? []));
+  }
+  const uniqueNames = uniqueStrings(names);
+  const uniqueIds = uniqueStrings(ids);
+  return {
+    total: records.reduce((sum, record) => sum + (record.universalAstLayers?.total ?? 0), 0),
+    names: uniqueNames,
+    ids: uniqueIds,
+    byName,
+    empty: uniqueIds.length === 0
+  };
+}
+
+function summarizeUniversalAstLayers(universalAst: any, semanticSidecar: any): FrontierCodexUniversalAstLayerSummary {
+  const layers = collectUniversalAstLayerRecords(universalAst?.layers);
+  const sidecarNames = Array.isArray(semanticSidecar?.summary?.universalAstLayerNames)
+    ? semanticSidecar.summary.universalAstLayerNames
+    : Array.isArray(semanticSidecar?.universalAstLayers?.names)
+      ? semanticSidecar.universalAstLayers.names
+      : [];
+  const sidecarIds = Array.isArray(semanticSidecar?.universalAstLayers?.ids) ? semanticSidecar.universalAstLayers.ids : [];
+  const byName: Record<string, number> = {};
+  for (const layer of layers) {
+    if (!layer?.layer) continue;
+    byName[String(layer.layer)] = (byName[String(layer.layer)] ?? 0) + 1;
+  }
+  for (const [name, count] of Object.entries(semanticSidecar?.universalAstLayers?.byName ?? {})) {
+    byName[name] = Math.max(byName[name] ?? 0, Number(count) || 0);
+  }
+  const names = uniqueStrings([
+    ...layers.map((layer) => String(layer?.layer ?? '')).filter(Boolean),
+    ...sidecarNames.map((name: unknown) => String(name)).filter(Boolean)
+  ]);
+  const ids = uniqueStrings([
+    ...layers.map((layer) => String(layer?.id ?? '')).filter(Boolean),
+    ...sidecarIds.map((id: unknown) => String(id)).filter(Boolean)
+  ]);
+  const total = Math.max(layers.length, Number(semanticSidecar?.universalAstLayers?.total ?? 0) || 0, ids.length);
+  return { total, names, ids, byName, empty: total === 0 };
+}
+
+function collectUniversalAstLayerRecords(layers: any): any[] {
+  if (!layers) return [];
+  if (Array.isArray(layers)) return layers.filter(Boolean);
+  if (typeof layers !== 'object') return [];
+  return Object.values(layers).flatMap((value) => Array.isArray(value) ? value : [value]).filter(Boolean);
 }
 
 function summarizeNativeSourceProjection(value: any): unknown {
