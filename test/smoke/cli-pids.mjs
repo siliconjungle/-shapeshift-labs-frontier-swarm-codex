@@ -13,11 +13,13 @@ export async function testCliAndPidManifest({ tmp }) {
   assert.ok(cliSource.includes("from './index.js'"));
   assert.ok(cliSource.includes('stopCodexSwarmRun'));
   assert.ok(helpSource.includes('frontier-swarm <command> [options]'));
+  assert.ok(helpSource.includes('resume    Resume unfinished jobs from a prior run directory'));
   assert.ok(helpSource.includes('doctor    Check package resolution before launching workers'));
   assert.ok(helpSource.includes('--semantic-import-include <glob>'));
   assert.ok(helpSource.includes('--semantic-import-exclude <glob>'));
   assert.ok(helpSource.includes('--semantic-import-max-files <n>'));
   assert.ok(helpSource.includes('dependency-health.json'));
+  assert.ok(helpSource.includes('--resume-overlay <file>'));
 
   const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
   await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: 'pid-test', startedAt: Date.now() }, 'pid-test');

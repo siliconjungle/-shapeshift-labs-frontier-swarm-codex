@@ -9,20 +9,19 @@ import {
   collectCodexSwarmRun,
   createCodexSwarmPlan,
   repairCodexWorkspacePackageLinks,
+  resumeCodexSwarmRun,
   runCodexSwarm,
   scoreCodexSwarmPatches,
   stopCodexSwarmRun,
   writeCodexDependencyHealthReport,
-  type FrontierCodexModelPolicy
+  type FrontierCodexModelPolicy,
+  type FrontierCodexSwarmRunOptions
 } from './index.js';
 import { printHelp } from './cli-help.js';
-
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
-
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'plan';
-
 try {
   if (command === 'help' || args.help === true || args.h === true) {
     printHelp();
@@ -35,37 +34,20 @@ try {
   } else if (command === 'run') {
     const plan = args.plan ? JSON.parse(await fs.readFile(String(args.plan), 'utf8')) : await loadPlan(args);
     const outDir = path.resolve(String(args.outDir ?? args.out ?? `agent-runs/frontier-swarm-codex/${stamp()}`));
-    const result = await runCodexSwarm(plan, {
-      outDir,
-      codexPath: stringArg(args.codex),
-      maxConcurrency: numberArg(args.maxConcurrency ?? args['max-concurrency'], 1),
-      adaptiveConcurrency: adaptiveConcurrencyArg(args),
-      compactLogs: compactLogsArg(args),
-      dependencyHealth: dependencyHealthArg(args),
-      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
-      sandbox: stringArg(args.sandbox),
-      approval: stringArg(args.approval ?? args['ask-for-approval'] ?? args['approval-policy']),
-      model: stringArg(args.model),
-      modelPolicy: modelPolicyArg(args.modelPolicy ?? args['model-policy']),
-      forwardPlanModel: boolArg(args.forwardPlanModel ?? args['forward-plan-model'], false),
-      forwardPlanReasoningEffort: boolArg(args.forwardPlanReasoningEffort ?? args['forward-plan-reasoning-effort'], false),
-      reasoningEffort: stringArg(args.reasoningEffort ?? args['reasoning-effort']),
-      profile: stringArg(args.profile),
-      dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
-      runVerification: boolArg(args.verify, false),
-      semanticImport: semanticImportArg(args),
-      workspace: {
-        mode: readWorkspaceMode(args.workspace),
-        root: stringArg(args.worktreeRoot ?? args['worktree-root']),
-        create: boolArg(args.createWorktrees ?? args['create-worktrees'], false),
-        replace: optionalBoolArg(args.replaceWorkspace ?? args['replace-workspace']),
-        includes: listArg(args.include),
-        excludes: listArg(args.exclude),
-        artifactIncludes: listArg(args.artifact ?? args['artifact-include']),
-        linkPaths: listArg(args.link ?? args['link-path']),
-        linkNodeModules: boolArg(args.linkNodeModules ?? args['link-node-modules'], true),
-        skipGitRepoCheck: boolArg(args.skipGitRepoCheck ?? args['skip-git-repo-check'], readWorkspaceMode(args.workspace) !== 'git-worktree')
-      }
+    const result = await runCodexSwarm(plan, runOptionsArg(args, outDir));
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'resume') {
+    const run = String(args.run ?? '');
+    if (!run) throw new Error('resume requires --run <prior-run-dir|swarm-results.json>');
+    const outDir = path.resolve(String(args.outDir ?? args.out ?? `agent-runs/frontier-swarm-codex/${stamp()}-resume`));
+    const result = await resumeCodexSwarmRun({
+      ...runOptionsArg(args, outDir),
+      run,
+      includeCompleted: boolArg(args.includeCompleted ?? args['include-completed'], false),
+      includeFailed: optionalBoolArg(args.includeFailed ?? args['include-failed']),
+      includeBlocked: optionalBoolArg(args.includeBlocked ?? args['include-blocked']),
+      outFile: stringArg(args.resumeOverlay ?? args['resume-overlay'])
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
@@ -159,7 +141,6 @@ try {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 }
-
 async function loadPlan(options: CliArgs) {
   const manifestPath = String(options.manifest ?? '');
   const tasksPath = String(options.tasks ?? '');
@@ -181,7 +162,6 @@ async function loadPlan(options: CliArgs) {
     }
   });
 }
-
 function parseArgs(argv: string[]): CliArgs {
   const out: CliArgs = { _: [] };
   for (let index = 0; index < argv.length; index += 1) {
@@ -265,6 +245,45 @@ function compactLogsArg(args: CliArgs): boolean | { enabled: boolean; maxEventBy
     enabled,
     maxEventBytes: numberArg(args.maxEventBytes ?? args['max-event-bytes'], undefined),
     maxStderrBytes: numberArg(args.maxStderrBytes ?? args['max-stderr-bytes'], undefined)
+  };
+}
+
+function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarmRunOptions {
+  return {
+    outDir,
+    codexPath: stringArg(args.codex),
+    maxConcurrency: numberArg(args.maxConcurrency ?? args['max-concurrency'], 1),
+    adaptiveConcurrency: adaptiveConcurrencyArg(args),
+    compactLogs: compactLogsArg(args),
+    dependencyHealth: dependencyHealthArg(args),
+    semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
+    sandbox: stringArg(args.sandbox),
+    approval: stringArg(args.approval ?? args['ask-for-approval'] ?? args['approval-policy']),
+    model: stringArg(args.model),
+    modelPolicy: modelPolicyArg(args.modelPolicy ?? args['model-policy']),
+    forwardPlanModel: boolArg(args.forwardPlanModel ?? args['forward-plan-model'], false),
+    forwardPlanReasoningEffort: boolArg(args.forwardPlanReasoningEffort ?? args['forward-plan-reasoning-effort'], false),
+    reasoningEffort: stringArg(args.reasoningEffort ?? args['reasoning-effort']),
+    profile: stringArg(args.profile),
+    dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
+    runVerification: boolArg(args.verify, false),
+    semanticImport: semanticImportArg(args),
+    workspace: workspaceArg(args)
+  };
+}
+
+function workspaceArg(args: CliArgs): FrontierCodexSwarmRunOptions['workspace'] {
+  return {
+    mode: readWorkspaceMode(args.workspace),
+    root: stringArg(args.worktreeRoot ?? args['worktree-root']),
+    create: boolArg(args.createWorktrees ?? args['create-worktrees'], false),
+    replace: optionalBoolArg(args.replaceWorkspace ?? args['replace-workspace']),
+    includes: listArg(args.include),
+    excludes: listArg(args.exclude),
+    artifactIncludes: listArg(args.artifact ?? args['artifact-include']),
+    linkPaths: listArg(args.link ?? args['link-path']),
+    linkNodeModules: boolArg(args.linkNodeModules ?? args['link-node-modules'], true),
+    skipGitRepoCheck: boolArg(args.skipGitRepoCheck ?? args['skip-git-repo-check'], readWorkspaceMode(args.workspace) !== 'git-worktree')
   };
 }
 

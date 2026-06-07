@@ -5,6 +5,7 @@ export function printHelp(): void {
     'Commands:',
     '  plan      Build a swarm plan from --manifest and --tasks',
     '  run       Run planned jobs through the Codex CLI',
+    '  resume    Resume unfinished jobs from a prior run directory',
     '  doctor    Check package resolution before launching workers',
     '  stop      Stop a run using pids.json',
     '  collect   Collect merge bundles into ready/needs-port/failed/stale buckets',
@@ -28,6 +29,7 @@ export function printHelp(): void {
     '  --compact-logs --max-event-bytes <n> --max-stderr-bytes <n>',
     '  --focused-command <cmd> --global-command <cmd>',
     '  --package-root <dir> --exclude-package <name> --write --replace',
+    '  --resume-overlay <file> --include-failed=false --include-blocked=false',
     '',
     'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',
     'merge.json, changes.patch, dependency-health.json, and discovered debug/replay/watchpoint/trace artifacts.'

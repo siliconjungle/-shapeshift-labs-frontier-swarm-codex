@@ -26,6 +26,8 @@ import {
   FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION,
   FRONTIER_SWARM_CODEX_PID_MANIFEST_KIND,
   FRONTIER_SWARM_CODEX_PID_MANIFEST_VERSION,
+  FRONTIER_SWARM_CODEX_RESUME_OVERLAY_KIND,
+  FRONTIER_SWARM_CODEX_RESUME_OVERLAY_VERSION,
   FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND,
   FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION,
   FRONTIER_SWARM_CODEX_WORKSPACE_MANIFEST_KIND,
@@ -61,6 +63,8 @@ export {
   FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION,
   FRONTIER_SWARM_CODEX_PID_MANIFEST_KIND,
   FRONTIER_SWARM_CODEX_PID_MANIFEST_VERSION,
+  FRONTIER_SWARM_CODEX_RESUME_OVERLAY_KIND,
+  FRONTIER_SWARM_CODEX_RESUME_OVERLAY_VERSION,
   FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND,
   FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION,
   FRONTIER_SWARM_CODEX_WORKSPACE_MANIFEST_KIND,
@@ -72,6 +76,12 @@ export { collectCodexSwarmRun } from './collect.js';
 export { applyCodexSwarmCollection } from './apply.js';
 export { scoreCodexSwarmPatches } from './score.js';
 export { checkCodexDependencyHealth, writeCodexDependencyHealthReport } from './dependency-health.js';
+export {
+  createCodexResumeOverlay,
+  createCodexResumePlan,
+  renderCodexResumePromptPrefix,
+  resumeCodexSwarmRun
+} from './codex-resume.js';
 export { runCodexSwarm, runCodexJob } from './codex-run.js';
 export {
   appendCodexPidManifest,

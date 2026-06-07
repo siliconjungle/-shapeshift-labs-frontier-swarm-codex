@@ -5,6 +5,7 @@ import { testCompactLogTruncation } from './smoke/compact-logs.mjs';
 import { testHooksAndWorkspaces } from './smoke/hooks-and-workspaces.mjs';
 import { testDependencyHealth } from './smoke/dependency-health.mjs';
 import { testPlanningAndLinks } from './smoke/planning-and-links.mjs';
+import { testResumeRun } from './smoke/resume.mjs';
 import { testSemanticImportSelection } from './smoke/semantic-import-selection.mjs';
 import { testSwarmRunCollection } from './smoke/swarm-run-collection.mjs';
 
@@ -17,4 +18,5 @@ const { mergeBundle } = await testSwarmRunCollection(context);
 await testApplyAndScore(context, mergeBundle);
 await testHooksAndWorkspaces(context);
 await testDependencyHealth(context);
+await testResumeRun(context);
 await testCliAndPidManifest(context);

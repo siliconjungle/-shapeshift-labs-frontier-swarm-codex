@@ -29,3 +29,5 @@ export const FRONTIER_SWARM_CODEX_LINK_REPAIR_KIND = 'frontier.swarm-codex.link-
 export const FRONTIER_SWARM_CODEX_LINK_REPAIR_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_KIND = 'frontier.swarm-codex.dependency-health';
 export const FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_RESUME_OVERLAY_KIND = 'frontier.swarm-codex.resume-overlay';
+export const FRONTIER_SWARM_CODEX_RESUME_OVERLAY_VERSION = 1;
