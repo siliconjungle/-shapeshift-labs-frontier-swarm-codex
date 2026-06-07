@@ -2,6 +2,7 @@ import { type FrontierSwarmJob } from '@shapeshift-labs/frontier-swarm';
 import { FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND, FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION } from './constants.js';
 import type { FrontierCodexSemanticImportRecord, FrontierCodexSemanticImportSidecar } from './index.js';
 import type { SemanticImportSelection } from './semantic-import-select.js';
+import { readStringArray, uniqueStrings } from './common.js';
 import { summarizeSemanticImportUniversalAstLayers } from './semantic-import-layers.js';
 import { summarizeSemanticImportParadigmSemantics, summarizeParadigmSemantics } from './semantic-import-paradigm.js';
 import { summarizeSemanticImportProofSpec, summarizeProofSpec } from './semantic-import-proof.js';
@@ -12,7 +13,8 @@ import { mergeDependencySummaries, summarizeSemanticDependencies } from './seman
 export function createSemanticImportSidecar(
   job: FrontierSwarmJob,
   records: FrontierCodexSemanticImportRecord[],
-  selection?: SemanticImportSelection
+  selection?: SemanticImportSelection,
+  expected = false
 ): FrontierCodexSemanticImportSidecar {
   const semanticIndex = records.reduce((totals, record) => {
     totals.documents += record.semanticIndex?.documents ?? 0;
@@ -75,6 +77,14 @@ export function createSemanticImportSidecar(
     return totals;
   }, { total: 0, admitted: 0, prioritized: 0, rejected: 0, scoreTotal: 0, byAction: {} as Record<string, number>, byRisk: {} as Record<string, number> });
   const proofSpec = summarizeSemanticImportProofSpec(records);
+  const imported = records.filter((record) => record.status === 'imported').length;
+  const expectedQuality = summarizeExpectedSemanticImport(records, selection, expected, {
+    imported,
+    symbols: semanticIndex.symbols,
+    ownershipRegions: semanticSidecars.ownershipRegions,
+    patchHints: semanticSidecars.patchHints,
+    evidence: records.reduce((sum, record) => sum + (record.evidenceCount ?? 0), 0)
+  });
   const lossesBySeverity: Record<string, number> = {};
   const readiness: Record<string, number> = {};
   for (const record of records) {
@@ -116,7 +126,7 @@ export function createSemanticImportSidecar(
       eligible: selection?.eligibleCount ?? records.length,
       omitted: selection?.omittedCount ?? 0,
       maxFiles: selection?.maxFiles ?? records.length,
-      imported: records.filter((record) => record.status === 'imported').length,
+      imported,
       skipped: records.filter((record) => record.status === 'skipped').length,
       errors: records.filter((record) => record.status === 'error').length,
       sourceMapCount: records.reduce((sum, record) => sum + (record.sourceMapCount ?? 0), 0),
@@ -140,9 +150,49 @@ export function createSemanticImportSidecar(
         byAction: semanticSliceAdmissions.byAction,
         byRisk: semanticSliceAdmissions.byRisk
       },
-      readiness
+      readiness,
+      semanticImportExpected: expectedQuality.expected,
+      semanticImportExpectedSatisfied: expectedQuality.satisfied,
+      semanticImportExpectedMissingReasonCodes: expectedQuality.missingReasonCodes
     }
   };
+}
+
+function summarizeExpectedSemanticImport(
+  records: FrontierCodexSemanticImportRecord[],
+  selection: SemanticImportSelection | undefined,
+  expected: boolean,
+  totals: { imported: number; symbols: number; ownershipRegions: number; patchHints: number; evidence: number }
+): { expected: boolean; satisfied: boolean; missingReasonCodes: string[] } {
+  const selected = selection?.selected.length ?? records.length;
+  const explicitCodes = records.flatMap((record) => {
+    const sidecar = record.semanticSidecar as { semanticImportExpectedMissingReasonCodes?: unknown } | undefined;
+    return readStringArray(sidecar?.semanticImportExpectedMissingReasonCodes);
+  });
+  const explicitUnsatisfied = records.some((record) => {
+    const sidecar = record.semanticSidecar as { semanticImportExpectedSatisfied?: unknown } | undefined;
+    return sidecar?.semanticImportExpectedSatisfied === false;
+  });
+  const inferredCodes: string[] = [];
+  if (expected && selected === 0) inferredCodes.push('expected-semantic-import-missing');
+  if (expected && selected > 0 && totals.imported === 0) inferredCodes.push('missing-imports');
+  if (expected && totals.imported > 0 && totals.symbols === 0) {
+    inferredCodes.push('expected-semantic-import-empty', 'empty-semantic-index');
+  }
+  if (expected && totals.imported > 0 && totals.ownershipRegions === 0) inferredCodes.push('missing-ownership-regions');
+  if (expected && totals.imported > 0 && totals.patchHints === 0) inferredCodes.push('missing-patch-hints');
+  if (expected && totals.imported > 0 && totals.evidence === 0) inferredCodes.push('empty-evidence');
+  const missingReasonCodes = uniqueStrings([...explicitCodes, ...inferredCodes]);
+  const satisfied = !expected || (
+    totals.imported > 0 &&
+    totals.symbols > 0 &&
+    totals.ownershipRegions > 0 &&
+    totals.patchHints > 0 &&
+    totals.evidence > 0 &&
+    missingReasonCodes.length === 0 &&
+    !explicitUnsatisfied
+  );
+  return { expected, satisfied, missingReasonCodes };
 }
 
 
@@ -163,6 +213,11 @@ export function summarizeSemanticIndex(value: any): FrontierCodexSemanticImportR
 export function summarizeLangSemanticImportSidecar(value: any): unknown {
   if (!value || typeof value !== 'object') return undefined;
   const dependencies = summarizeSemanticDependencies(undefined, value);
+  const expectedMissingReasonCodes = readStringArray(
+    value.summary?.semanticImportExpectedMissingReasonCodes ??
+    value.quality?.expectedMissingReasonCodes ??
+    value.admission?.expectedMissingReasonCodes
+  );
   return {
     kind: value.kind,
     id: value.id,
@@ -185,6 +240,9 @@ export function summarizeLangSemanticImportSidecar(value: any): unknown {
       : dependencies.predicates,
     readiness: value.summary?.readiness,
     emptySemanticIndex: value.summary?.emptySemanticIndex,
+    semanticImportExpected: value.summary?.semanticImportExpected ?? value.quality?.expected ?? value.admission?.expected,
+    semanticImportExpectedSatisfied: value.summary?.semanticImportExpectedSatisfied ?? value.quality?.expectedSatisfied ?? value.admission?.expectedSatisfied,
+    semanticImportExpectedMissingReasonCodes: expectedMissingReasonCodes,
     patchHints: Array.isArray(value.patchHints) ? value.patchHints.length : 0,
     sampleOwnershipRegions: Array.isArray(value.ownershipRegions)
       ? value.ownershipRegions.slice(0, 12).map((region: any) => ({

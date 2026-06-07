@@ -1,6 +1,6 @@
 import type { FrontierSwarmJobResultInput, FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
 import type { FrontierCodexSemanticImportOptions, FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './index.js';
-import { nonNegativeNumber, uniqueStrings } from './common.js';
+import { nonNegativeNumber, readStringArray, uniqueStrings } from './common.js';
 import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers.js';
 import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradigm.js';
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
@@ -29,9 +29,31 @@ export function summarizeCodexSemanticImportQuality(
   const selection = semanticSelectionSummary(summary);
   const present = !!summary;
   const empty = present && (nonNegativeNumber(summary?.total) === 0 || selected === 0 && eligible === 0 && imported === 0 && symbols === 0);
+  const effectiveExpected = semanticImportExpected(summary, expected);
+  const expectedMissingReasonCodes = semanticImportExpectedMissingReasonCodes(summary, {
+    expected: effectiveExpected,
+    present,
+    empty,
+    selected,
+    imported,
+    symbols,
+    ownershipRegions,
+    patchHints
+  });
+  const expectedSatisfied = semanticImportExpectedSatisfied(summary, {
+    expected: effectiveExpected,
+    present,
+    empty,
+    imported,
+    symbols,
+    ownershipRegions,
+    patchHints,
+    reasonCodes: expectedMissingReasonCodes
+  });
   const warnings: string[] = [];
-  if (expected && !present) warnings.push('semantic import expected but missing');
-  if (expected && empty) warnings.push('semantic import expected but empty');
+  if (effectiveExpected && !present) warnings.push('semantic import expected but missing');
+  if (effectiveExpected && empty) warnings.push('semantic import expected but empty');
+  if (effectiveExpected && !expectedSatisfied) warnings.push('semantic import expected evidence was not satisfied');
   if (present && imported === 0) warnings.push('semantic import imported no files');
   if (present && selected === 0 && selection.includeFiltered > 0) warnings.push('semantic import include filters selected no files');
   if (present && selected === 0 && selection.unsupportedLanguage > 0) warnings.push('semantic import candidates had unsupported languages');
@@ -43,7 +65,9 @@ export function summarizeCodexSemanticImportQuality(
   if (present && proofSpec.failed > 0) warnings.push('semantic import has failed proof obligations');
   if (present && proofSpec.stale > 0) warnings.push('semantic import has stale proof obligations');
   return {
-    expected,
+    expected: effectiveExpected,
+    expectedSatisfied,
+    expectedMissingReasonCodes,
     present,
     empty,
     selected,
@@ -64,6 +88,99 @@ export function summarizeCodexSemanticImportQuality(
     paradigmSemanticsLoweringRecords: paradigmSemantics.loweringRecords,
     warnings: uniqueStrings(warnings)
   };
+}
+
+function semanticImportExpected(summary: unknown, fallback: boolean): boolean {
+  if (fallback) return true;
+  const record = summaryRecord(summary);
+  if (!record) return false;
+  return record.semanticImportExpected === true ||
+    record.expected === true ||
+    (record.quality as { expected?: unknown } | undefined)?.expected === true ||
+    (record.admission as { expected?: unknown } | undefined)?.expected === true;
+}
+
+
+function semanticImportExpectedSatisfied(
+  summary: unknown,
+  input: {
+    expected: boolean;
+    present: boolean;
+    empty: boolean;
+    imported: number;
+    symbols: number;
+    ownershipRegions: number;
+    patchHints: number;
+    reasonCodes: readonly string[];
+  }
+): boolean {
+  if (!input.expected) return true;
+  const explicit = semanticImportExplicitExpectedSatisfied(summary);
+  if (explicit !== undefined) return explicit && input.reasonCodes.length === 0;
+  return input.present &&
+    !input.empty &&
+    input.imported > 0 &&
+    input.symbols > 0 &&
+    input.ownershipRegions > 0 &&
+    input.patchHints > 0 &&
+    input.reasonCodes.length === 0;
+}
+
+
+function semanticImportExpectedMissingReasonCodes(
+  summary: unknown,
+  input: {
+    expected: boolean;
+    present: boolean;
+    empty: boolean;
+    selected: number;
+    imported: number;
+    symbols: number;
+    ownershipRegions: number;
+    patchHints: number;
+  }
+): string[] {
+  const record = summaryRecord(summary);
+  const explicitCodes = uniqueStrings([
+    ...readStringArray(record?.semanticImportExpectedMissingReasonCodes),
+    ...readStringArray((record?.quality as { expectedMissingReasonCodes?: unknown } | undefined)?.expectedMissingReasonCodes),
+    ...readStringArray((record?.admission as { expectedMissingReasonCodes?: unknown } | undefined)?.expectedMissingReasonCodes)
+  ]);
+  if (!input.expected) return explicitCodes;
+  const inferredCodes: string[] = [];
+  if (!input.present) inferredCodes.push('expected-semantic-import-missing');
+  if (input.present && input.selected === 0) inferredCodes.push('expected-semantic-import-missing');
+  if (input.present && input.selected > 0 && input.imported === 0) inferredCodes.push('missing-imports');
+  if (input.present && input.imported > 0 && input.symbols === 0) {
+    inferredCodes.push('expected-semantic-import-empty', 'empty-semantic-index');
+  }
+  if (input.present && input.imported > 0 && input.ownershipRegions === 0) inferredCodes.push('missing-ownership-regions');
+  if (input.present && input.imported > 0 && input.patchHints === 0) inferredCodes.push('missing-patch-hints');
+  if (input.empty && !inferredCodes.includes('expected-semantic-import-empty')) {
+    inferredCodes.push('expected-semantic-import-empty');
+  }
+  return uniqueStrings([...explicitCodes, ...inferredCodes]);
+}
+
+
+function semanticImportExplicitExpectedSatisfied(summary: unknown): boolean | undefined {
+  const record = summaryRecord(summary);
+  const candidates = [
+    record?.semanticImportExpectedSatisfied,
+    (record?.quality as { expectedSatisfied?: unknown } | undefined)?.expectedSatisfied,
+    (record?.admission as { expectedSatisfied?: unknown } | undefined)?.expectedSatisfied
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'boolean') return value;
+  }
+  return undefined;
+}
+
+
+function summaryRecord(summary: unknown): Record<string, unknown> | undefined {
+  return summary && typeof summary === 'object' && !Array.isArray(summary)
+    ? summary as Record<string, unknown>
+    : undefined;
 }
 
 

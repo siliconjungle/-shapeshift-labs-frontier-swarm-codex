@@ -207,11 +207,16 @@ export interface FrontierCodexSemanticImportSidecar {
       byRisk: Record<string, number>;
     };
     readiness: Record<string, number>;
+    semanticImportExpected: boolean;
+    semanticImportExpectedSatisfied: boolean;
+    semanticImportExpectedMissingReasonCodes: string[];
   };
 }
 
 export interface FrontierCodexSemanticImportQuality {
   expected: boolean;
+  expectedSatisfied: boolean;
+  expectedMissingReasonCodes: string[];
   present: boolean;
   empty: boolean;
   selected: number;

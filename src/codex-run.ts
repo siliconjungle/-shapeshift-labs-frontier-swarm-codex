@@ -202,7 +202,8 @@ export async function runCodexJob(
     workspace,
     changedPaths,
     evidenceDir: paths.evidenceDir,
-    options: options.semanticImport
+    options: options.semanticImport,
+    semanticImportExpected: options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport)
   });
   const semanticImportSummary = semanticImport?.sidecar.summary;
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });

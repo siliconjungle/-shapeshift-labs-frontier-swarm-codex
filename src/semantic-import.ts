@@ -21,6 +21,7 @@ export async function createCodexSemanticImportSidecar(input: {
   changedPaths: readonly string[];
   evidenceDir: string;
   options?: boolean | FrontierCodexSemanticImportOptions;
+  semanticImportExpected?: boolean;
 }): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
   const options = normalizeSemanticImportOptions(input.options);
   if (!options) return undefined;
@@ -29,7 +30,7 @@ export async function createCodexSemanticImportSidecar(input: {
   const records: FrontierCodexSemanticImportRecord[] = [];
   const importPath = path.join(input.evidenceDir, 'semantic-imports.json');
   if (!selected.length) {
-    const sidecar = createSemanticImportSidecar(input.job, records, selection);
+    const sidecar = createSemanticImportSidecar(input.job, records, selection, input.semanticImportExpected === true);
     await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
     return { path: importPath, sidecar };
   }
@@ -76,6 +77,8 @@ export async function createCodexSemanticImportSidecar(input: {
       const semanticSidecar = api.createSemanticImportSidecar
         ? api.createSemanticImportSidecar(importResult, {
           targetPath: file.path,
+          expected: input.semanticImportExpected === true,
+          semanticImportExpected: input.semanticImportExpected === true,
           metadata: {
             swarmJobId: input.job.id,
             swarmTaskId: input.job.taskId,
@@ -149,7 +152,7 @@ export async function createCodexSemanticImportSidecar(input: {
       });
     }
   }
-  const sidecar = createSemanticImportSidecar(input.job, records, selection);
+  const sidecar = createSemanticImportSidecar(input.job, records, selection, input.semanticImportExpected === true);
   await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
   return { path: importPath, sidecar };
 }

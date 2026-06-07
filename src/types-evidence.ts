@@ -106,6 +106,9 @@ export interface FrontierCodexCompactDashboard {
   duplicateDiscoveryCount: number;
   semanticImport: {
     expected: boolean;
+    expectedSatisfiedCount: number;
+    expectedUnsatisfiedCount: number;
+    expectedMissingReasonCodes: string[];
     presentCount: number;
     emptyCount: number;
     weakCount: number;

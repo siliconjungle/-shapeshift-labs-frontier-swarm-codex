@@ -54,6 +54,9 @@ export function createCodexCompactDashboard(input: {
     duplicateDiscoveryCount: input.dashboard.duplicateGroups.length,
     semanticImport: {
       expected: input.semanticImportExpected,
+      expectedSatisfiedCount: semanticQualities.filter((entry) => entry.expected && entry.expectedSatisfied).length,
+      expectedUnsatisfiedCount: semanticQualities.filter((entry) => entry.expected && !entry.expectedSatisfied).length,
+      expectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes)),
       presentCount: semanticQualities.filter((entry) => entry.present).length,
       emptyCount: semanticQualities.filter((entry) => entry.empty).length,
       weakCount: semanticQualities.filter((entry) => entry.present && entry.warnings.length > 0).length,

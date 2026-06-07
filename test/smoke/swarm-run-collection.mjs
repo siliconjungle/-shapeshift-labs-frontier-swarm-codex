@@ -49,6 +49,8 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   const patchIntent = JSON.parse(await fs.readFile(patchIntentPath, 'utf8'));
   assert.strictEqual(patchIntent.kind, 'frontier.swarm-codex.patch-intent');
   assert.strictEqual(patchIntent.semanticImportQuality.expected, true);
+  assert.strictEqual(typeof patchIntent.semanticImportQuality.expectedSatisfied, 'boolean');
+  assert.ok(Array.isArray(patchIntent.semanticImportQuality.expectedMissingReasonCodes));
   assert.strictEqual(patchIntent.safeToPortManually, true);
   const logSummaryPath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('log-summary.json'));
   const logSummary = JSON.parse(await fs.readFile(logSummaryPath, 'utf8'));
@@ -80,6 +82,9 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.strictEqual(semanticImports.summary.semanticSliceAdmissions.total, 1);
   assert.strictEqual(semanticImports.summary.semanticSliceAdmissions.rejected, 0);
   assert.ok(semanticImports.summary.semanticSliceAdmissions.averageScore > 0);
+  assert.strictEqual(semanticImports.summary.semanticImportExpected, true);
+  assert.strictEqual(typeof semanticImports.summary.semanticImportExpectedSatisfied, 'boolean');
+  assert.ok(Array.isArray(semanticImports.summary.semanticImportExpectedMissingReasonCodes));
   assert.ok(semanticImports.records[0].semanticSlice);
   assert.strictEqual(semanticImports.records[0].semanticSliceAdmission.autoMergeClaim, false);
   assert.strictEqual(semanticImports.records[0].semanticSliceAdmission.mergeScore.schema, 'frontier.lang.semanticMergeScore.v1');
@@ -102,6 +107,8 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.ok(mergeBundle.metadata.semanticImport.dependencies.total >= 1);
   assert.ok(Array.isArray(mergeBundle.metadata.semanticImport.universalAstLayers.names));
   assert.strictEqual(mergeBundle.metadata.semanticImport.proofSpec.failed, 0);
+  assert.strictEqual(mergeBundle.metadata.semanticImport.semanticImportExpected, true);
+  assert.ok(Array.isArray(mergeBundle.metadata.semanticImport.semanticImportExpectedMissingReasonCodes));
 
   await testSemanticImportFallbackFromTaskRefs(plan, tmp);
   await testCollectedRun(tmp);
@@ -161,6 +168,8 @@ async function testCollectedRun(tmp) {
   assert.ok(await exists(path.join(collection.outDir, 'compact-dashboard.json')));
   assert.strictEqual(collection.compactDashboard.kind, 'frontier.swarm-codex.compact-dashboard');
   assert.strictEqual(collection.compactDashboard.semanticImport.presentCount, 1);
+  assert.strictEqual(collection.compactDashboard.semanticImport.expected, true);
+  assert.strictEqual(collection.compactDashboard.semanticImport.expectedUnsatisfiedCount, 0);
   assert.ok(collection.compactDashboard.semanticImport.universalAstLayerCount >= 0);
   assert.ok(collection.compactDashboard.semanticImport.dependencyRelationCount >= 1);
   assert.ok(collection.compactDashboard.semanticImport.dependencyPredicates.includes('calls'));
