@@ -6,6 +6,7 @@ import {
   appendCodexPidManifest,
   applyCodexSwarmCollection,
   buildCodexArgs,
+  checkCodexDependencyHealth,
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
   createCodexResourceAllocation,
@@ -22,13 +23,15 @@ import {
   runCodexSwarm,
   scoreCodexSwarmPatches,
   spawnCodexExecutor,
-  stopCodexSwarmRun
+  stopCodexSwarmRun,
+  writeCodexDependencyHealthReport
 } from '../../dist/index.js';
 
 export {
   appendCodexPidManifest,
   applyCodexSwarmCollection,
   buildCodexArgs,
+  checkCodexDependencyHealth,
   collectCodexSwarmRun,
   createCodexResourceAllocation,
   createCodexSwarmPlan,
@@ -45,7 +48,8 @@ export {
   runCodexSwarm,
   scoreCodexSwarmPatches,
   spawnCodexExecutor,
-  stopCodexSwarmRun
+  stopCodexSwarmRun,
+  writeCodexDependencyHealthReport
 };
 
 export const manifestInput = {

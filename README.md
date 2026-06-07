@@ -220,6 +220,10 @@ frontier-swarm-codex run \
   --semantic-import \
   --sandbox workspace-write
 
+frontier-swarm doctor \
+  --semantic-import \
+  --out agent-runs/codex-swarm/dependency-health.json
+
 frontier-swarm stop --run agent-runs/codex-swarm/run-1
 
 frontier-swarm collect \
@@ -268,6 +272,8 @@ Use `modelPolicy: 'config-default'` for portable swarms that should respect each
 
 Pass `--semantic-import` or `semanticImport: true` to write a `semantic-imports.json` sidecar for changed source files. The sidecar uses the optional `@shapeshift-labs/frontier-lang` dependency to import supported native sources into Frontier Lang universal ASTs, summarize source maps/losses/semantic indexes/dependency relations/universal AST layers/proof-spec records/paradigm semantics records, record native compile/projection readiness when available, and attach semantic merge-candidate metadata to each worker merge bundle. Use `--semantic-import-include`, `--semantic-import-exclude`, `--semantic-import-max-files`, and `--semantic-import-max-bytes` to keep the import pass scoped. In copied/snapshot workspaces, semantic import selects changed source paths plus concrete task source/target refs so a worker can still produce symbols, call/use dependency edges, ownership regions, universal AST layer quality, proof obligation status, paradigm/lowering hints, and patch hints when changed-path collection is filtered. Include globs support `**` and can match stripped copied-workspace suffixes, so a parent-root glob such as `snes/packages/domain/src/**/*.js` still matches a minimal workspace rooted at `packages/domain` or `src`. Use `--semantic-import-expected` when zero selected/imported files or zero universal AST layers should be called out in patch intent and collection dashboards.
 
+Every run writes `dependency-health.json` before launching workers unless `dependencyHealth: false` or `--dependency-health=false` is passed. The preflight checks the adapter-local package resolution path plus the caller root, verifies the installed `@shapeshift-labs/frontier-swarm` version, and fails fast when semantic import would resolve a stale or missing optional `@shapeshift-labs/frontier-lang`. Use `frontier-swarm doctor --semantic-import` to run the same check without starting workers. This catches nested optional dependency drift after npm updates before a swarm spends time producing empty semantic sidecars.
+
 ## Minimal Repro Workspaces
 
 Large monorepos do not need one full git worktree per worker. The adapter supports four workspace modes:
@@ -287,7 +293,7 @@ Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the
 
 After updating npm packages in a local multi-package checkout, use `frontier-swarm repair-links` to restore local workspace symlinks without replacing packages you intentionally want from npm. The command reads scoped dependencies from the target `package.json`, discovers matching local packages under one-level package roots, skips `--exclude-package` entries, and writes a JSON plan by default. Add `--write` to create or update symlinks. Existing real package directories are reported as conflicts unless `--replace` is passed, so npm-installed packages are preserved unless replacement is explicit.
 
-Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, per-job `evidence/evidence.json`, `patch-intent.json`, `log-summary.json`, and job results with merge-readiness classification. The normalized evidence file records changed paths, semantic regions, command pass/fail summaries, source citations, semantic sidecar stats, and ready-to-port patch hunk counts. `patch-intent.json` is the short review surface: what changed, why, risk, exact verification, semantic import quality, warnings, and whether the patch is safe to port manually. Raw Codex stdout/stderr capture is compacted by default; `log-summary.json` records original bytes, written bytes, and truncation counts, and `--max-event-bytes` / `--max-stderr-bytes` can tune the limits. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
+Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, `dependency-health.json`, workspace proofs, patch files, merge bundles, per-job `evidence/evidence.json`, `patch-intent.json`, `log-summary.json`, and job results with merge-readiness classification. The normalized evidence file records changed paths, semantic regions, command pass/fail summaries, source citations, semantic sidecar stats, and ready-to-port patch hunk counts. `patch-intent.json` is the short review surface: what changed, why, risk, exact verification, semantic import quality, warnings, and whether the patch is safe to port manually. Raw Codex stdout/stderr capture is compacted by default; `log-summary.json` records original bytes, written bytes, and truncation counts, and `--max-event-bytes` / `--max-stderr-bytes` can tune the limits. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
 
 `frontier-swarm collect --run <run-dir>` derives status from immutable worker overlays instead of asking workers to edit a central queue. It scans `merge.json` files and writes:
 
@@ -319,6 +325,7 @@ It also writes `merge-index.json`, `queue-overlay.json`, `evidence-index.json`, 
 - `initFileSwarmEventStream`, `appendFileSwarmEvent`, `writeSwarmCoordinatorSnapshot`
 - `appendCodexPidManifest`, `readCodexPidManifest`, `stopCodexSwarmRun`
 - `repairCodexWorkspacePackageLinks`
+- `checkCodexDependencyHealth`, `writeCodexDependencyHealthReport`
 - `collectCodexSwarmRun`
 - `applyCodexSwarmCollection`
 - `scoreCodexSwarmPatches`
@@ -327,6 +334,7 @@ It also writes `merge-index.json`, `queue-overlay.json`, `evidence-index.json`, 
 - `FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND`
 - `FRONTIER_SWARM_CODEX_PATCH_INTENT_KIND`
 - `FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND`
+- `FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_KIND`
 
 ## Benchmarks
 

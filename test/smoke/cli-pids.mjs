@@ -9,13 +9,15 @@ import {
 
 export async function testCliAndPidManifest({ tmp }) {
   const cliSource = await fs.readFile(new URL('../../dist/cli.js', import.meta.url), 'utf8');
+  const helpSource = await fs.readFile(new URL('../../dist/cli-help.js', import.meta.url), 'utf8');
   assert.ok(cliSource.includes("from './index.js'"));
   assert.ok(cliSource.includes('stopCodexSwarmRun'));
-  assert.ok(cliSource.includes('frontier-swarm <command> [options]'));
-  assert.ok(cliSource.includes('--semantic-import-include <glob>'));
-  assert.ok(cliSource.includes('--semantic-import-exclude <glob>'));
-  assert.ok(cliSource.includes('--semantic-import-max-files <n>'));
-  assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
+  assert.ok(helpSource.includes('frontier-swarm <command> [options]'));
+  assert.ok(helpSource.includes('doctor    Check package resolution before launching workers'));
+  assert.ok(helpSource.includes('--semantic-import-include <glob>'));
+  assert.ok(helpSource.includes('--semantic-import-exclude <glob>'));
+  assert.ok(helpSource.includes('--semantic-import-max-files <n>'));
+  assert.ok(helpSource.includes('dependency-health.json'));
 
   const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
   await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: 'pid-test', startedAt: Date.now() }, 'pid-test');

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   applyCodexSwarmCollection,
+  checkCodexDependencyHealth,
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
   collectCodexSwarmRun,
@@ -11,8 +12,10 @@ import {
   runCodexSwarm,
   scoreCodexSwarmPatches,
   stopCodexSwarmRun,
+  writeCodexDependencyHealthReport,
   type FrontierCodexModelPolicy
 } from './index.js';
+import { printHelp } from './cli-help.js';
 
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
@@ -38,6 +41,7 @@ try {
       maxConcurrency: numberArg(args.maxConcurrency ?? args['max-concurrency'], 1),
       adaptiveConcurrency: adaptiveConcurrencyArg(args),
       compactLogs: compactLogsArg(args),
+      dependencyHealth: dependencyHealthArg(args),
       semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
       sandbox: stringArg(args.sandbox),
       approval: stringArg(args.approval ?? args['ask-for-approval'] ?? args['approval-policy']),
@@ -63,6 +67,18 @@ try {
         skipGitRepoCheck: boolArg(args.skipGitRepoCheck ?? args['skip-git-repo-check'], readWorkspaceMode(args.workspace) !== 'git-worktree')
       }
     });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'doctor') {
+    const outFile = stringArg(args.out ?? args.outFile ?? args['out-file']);
+    const result = await checkCodexDependencyHealth({
+      root: stringArg(args.root),
+      packageRoot: stringArg(args.packageRoot ?? args['package-root']),
+      semanticImport: boolArg(args.semanticImport ?? args['semantic-import'], false),
+      outFile,
+      failOnWarnings: boolArg(args.failOnWarnings ?? args['fail-on-warnings'], false)
+    });
+    if (outFile) await writeCodexDependencyHealthReport(result, path.resolve(outFile));
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
   } else if (command === 'verify') {
@@ -142,40 +158,6 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
-}
-
-function printHelp() {
-  console.log([
-    'frontier-swarm <command> [options]',
-    '',
-    'Commands:',
-    '  plan      Build a swarm plan from --manifest and --tasks',
-    '  run       Run planned jobs through the Codex CLI',
-    '  stop      Stop a run using pids.json',
-    '  collect   Collect merge bundles into ready/needs-port/failed/stale buckets',
-    '  score     Score collected patches in throwaway workspaces',
-    '  apply     Dry-run or apply collected patch bundles',
-    '  repair-links Restore local workspace package symlinks after npm installs',
-    '  verify    Verify a swarm-results.json proof',
-    '',
-    'Useful options:',
-    '  --model-policy config-default|plan|explicit',
-    '  --approval never|on-request|on-failure|untrusted',
-    '  --workspace current|copy|snapshot|git-worktree',
-    '  --replace-workspace false|true',
-    '  --include <path> --exclude <path> --link <path>',
-    '  --semantic-import --semantic-import-include <glob> --semantic-import-exclude <glob>',
-    '  --semantic-import-max-files <n> --semantic-import-max-bytes <n>',
-    '  --semantic-import-expected',
-    '  --adaptive --adaptive-mode observe|conservative|balanced|aggressive',
-    '  --adaptive-min-concurrency <n> --adaptive-max-concurrency <n>',
-    '  --compact-logs --max-event-bytes <n> --max-stderr-bytes <n>',
-    '  --focused-command <cmd> --global-command <cmd>',
-    '  --package-root <dir> --exclude-package <name> --write --replace',
-    '',
-    'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',
-    'merge.json, changes.patch, and discovered debug/replay/watchpoint/trace artifacts.'
-  ].join('\n'));
 }
 
 async function loadPlan(options: CliArgs) {
@@ -283,6 +265,16 @@ function compactLogsArg(args: CliArgs): boolean | { enabled: boolean; maxEventBy
     enabled,
     maxEventBytes: numberArg(args.maxEventBytes ?? args['max-event-bytes'], undefined),
     maxStderrBytes: numberArg(args.maxStderrBytes ?? args['max-stderr-bytes'], undefined)
+  };
+}
+
+function dependencyHealthArg(args: CliArgs): boolean | { semanticImport?: boolean; outFile?: string; failOnWarnings?: boolean } | undefined {
+  const raw = args.dependencyHealth ?? args['dependency-health'];
+  if (raw !== undefined && !boolArg(raw, true)) return false;
+  return {
+    semanticImport: boolArg(args.semanticImport ?? args['semantic-import'] ?? args.semanticImportExpected ?? args['semantic-import-expected'], false),
+    outFile: stringArg(args.dependencyHealthOut ?? args['dependency-health-out']),
+    failOnWarnings: boolArg(args.failOnWarnings ?? args['fail-on-warnings'], false)
   };
 }
 

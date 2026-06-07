@@ -13,6 +13,7 @@ import type {
 import type { FrontierCodexSemanticImportOptions } from './types-semantic.js';
 import type { FrontierCodexLogSummary } from './types-evidence.js';
 import type { FrontierCodexWorkspacePlan } from './types-workspace.js';
+import type { FrontierCodexDependencyHealthOptions } from './types-dependency-health.js';
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 
@@ -152,6 +153,7 @@ export interface FrontierCodexSwarmRunOptions {
   maxConcurrency?: number;
   adaptiveConcurrency?: boolean | FrontierCodexAdaptiveConcurrencyOptions;
   compactLogs?: boolean | FrontierCodexCompactLogOptions;
+  dependencyHealth?: boolean | FrontierCodexDependencyHealthOptions;
   semanticImportExpected?: boolean;
   workspace?: FrontierCodexSwarmWorkspaceInput;
   sandbox?: string;

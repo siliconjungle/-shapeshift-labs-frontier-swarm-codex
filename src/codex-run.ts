@@ -27,6 +27,8 @@ import {
 } from './codex-events.js';
 import { createEmptyCodexLogSummary, normalizeCompactLogOptions, spawnCodexExecutor } from './codex-executor.js';
 import { buildCodexArgs, createCodexResourceAllocation, renderCodexPrompt } from './codex-prompt.js';
+import { createCodexJobPaths } from './codex-job-paths.js';
+import { runCodexDependencyHealthPreflight } from './codex-run-health.js';
 import { runScheduledJobPool } from './codex-run-scheduler.js';
 import {
   createCodexWorkspacePlan,
@@ -51,6 +53,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   const outDir = path.resolve(options.cwd ?? process.cwd(), options.outDir);
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'swarm-plan.json'), JSON.stringify(plan, null, 2) + '\n');
+  await runCodexDependencyHealthPreflight(plan, options, outDir);
   const eventStream = options.eventStream ?? createSwarmEventStream({
     runId: plan.runId,
     root: path.join(outDir, 'streams'),
@@ -113,7 +116,7 @@ export async function runCodexJob(
   outDir: string,
   lease?: FrontierSwarmLease
 ): Promise<FrontierSwarmJobResultInput> {
-  const paths = await createJobPaths(outDir, job, options);
+  const paths = await createCodexJobPaths(outDir, job, options);
   const workspace = await prepareCodexWorkspace(job, options);
   const workspacePlan = createCodexWorkspacePlan(job, options);
   const resourceAllocation = createCodexResourceAllocation(job, {
@@ -292,25 +295,4 @@ export async function runCodexJob(
     handoffArtifacts
   });
   return result;
-}
-
-async function createJobPaths(outDir: string, job: FrontierSwarmJob, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexJobPaths> {
-  const jobDir = path.join(outDir, job.id);
-  const paths = {
-    jobDir,
-    promptPath: path.join(jobDir, 'prompt.md'),
-    eventsPath: path.join(jobDir, 'codex-events.jsonl'),
-    stderrPath: path.join(jobDir, 'codex-stderr.log'),
-    lastMessagePath: path.join(jobDir, 'last-message.md'),
-    evidenceDir: path.join(jobDir, 'evidence'),
-    resourceAllocationPath: path.join(jobDir, 'evidence', 'resource-allocation.json'),
-    workspaceProofPath: path.join(jobDir, 'evidence', 'workspace-proof.json'),
-    patchPath: path.join(jobDir, 'evidence', 'changes.patch'),
-    mergeBundlePath: path.join(jobDir, 'evidence', 'merge.json'),
-    patchIntentPath: path.join(jobDir, 'evidence', 'patch-intent.json'),
-    logSummaryPath: path.join(jobDir, 'evidence', 'log-summary.json'),
-    pidManifestPath: path.resolve(options.cwd ?? process.cwd(), options.pidManifestPath ?? path.join(outDir, 'pids.json'))
-  };
-  await fs.mkdir(paths.evidenceDir, { recursive: true });
-  return paths;
 }
