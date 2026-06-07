@@ -9,6 +9,11 @@ export async function testSemanticImportSelection() {
   assert.equal(matchesSemanticImportGlob('src/index.js', 'src/**/*.js'), true);
   assert.equal(matchesSemanticImportGlob('src/internal/index.js', 'src/**/*.js'), true);
   assert.equal(matchesSemanticImportGlob('test/index.js', 'src/**/*.js'), false);
+  assert.equal(matchesSemanticImportGlob('snes/packages/domain/src/core.js', 'snes/packages/domain/src/**/*.js'), true);
+  assert.equal(matchesSemanticImportGlob('packages/domain/src/core.js', 'snes/packages/domain/src/**/*.js'), true);
+  assert.equal(matchesSemanticImportGlob('src/core.js', 'snes/packages/domain/src/**/*.js'), true);
+  assert.equal(matchesSemanticImportGlob('apps/web/src/core.js', 'snes/packages/domain/src/**/*.js'), false);
+  assert.equal(matchesSemanticImportGlob('src/core.ts', 'src/**/*.{js,ts}'), false);
 
   const selection = selectSemanticImportPaths([
     'src/index.js',
@@ -30,6 +35,23 @@ export async function testSemanticImportSelection() {
     'src/index.js',
     'src/internal/worker.js'
   ]);
+
+  const strippedCopySelection = selectSemanticImportPaths([
+    'packages/domain/src/snes-native-core.js',
+    'src/snes-native-apu.js',
+    'apps/web/src/App.tsx'
+  ], {
+    enabled: true,
+    maxFiles: 10,
+    maxBytes: 500000,
+    include: ['snes/packages/domain/src/**/*.js'],
+    exclude: []
+  });
+  assert.deepEqual(strippedCopySelection.selected.map((file) => file.path), [
+    'packages/domain/src/snes-native-core.js',
+    'src/snes-native-apu.js'
+  ]);
+  assert.equal(strippedCopySelection.includeFilteredCount, 1);
 
   const unsupported = selectSemanticImportPaths(['src/template.txt'], {
     enabled: true,

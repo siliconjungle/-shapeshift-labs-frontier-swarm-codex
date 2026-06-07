@@ -102,9 +102,13 @@ export function selectSemanticImportPaths(
 
 
 export function matchesSemanticImportGlob(file: string, glob: string): boolean {
-  if (matchesGlob(file, glob)) return true;
-  const zeroDepthGlob = glob.replace(/\/\*\*\//g, '/');
-  return zeroDepthGlob !== glob && matchesGlob(file, zeroDepthGlob);
+  const normalizedFile = normalizeWorkspacePath(file);
+  const normalizedGlob = normalizeSemanticImportGlob(glob);
+  if (!normalizedFile || !normalizedGlob) return false;
+  return semanticImportGlobVariants(normalizedGlob).some((candidate) => {
+    if (matchesGlob(normalizedFile, candidate)) return true;
+    return semanticGlobRegExp(candidate).test(normalizedFile);
+  });
 }
 
 
@@ -153,6 +157,62 @@ export function inferSemanticImportLanguage(file: string, overrides?: Readonly<R
     '.rb': 'ruby',
     '.rake': 'ruby'
   } as Record<string, string | undefined>)[ext];
+}
+
+
+
+function normalizeSemanticImportGlob(glob: string): string | undefined {
+  const clean = String(glob ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!clean || clean.includes('\0') || path.isAbsolute(clean) || clean.startsWith('..')) return undefined;
+  return path.normalize(clean).replace(/\\/g, '/');
+}
+
+
+
+function semanticImportGlobVariants(glob: string): string[] {
+  const variants = [glob];
+  const parts = glob.split('/').filter(Boolean);
+  const firstWildcard = parts.findIndex((part) => part.includes('*') || part.includes('?'));
+  const prefixLimit = firstWildcard < 0 ? parts.length - 1 : firstWildcard;
+  for (let index = 1; index < prefixLimit; index += 1) {
+    const suffix = parts.slice(index).join('/');
+    if (suffix && suffix.includes('/')) variants.push(suffix);
+  }
+  return Array.from(new Set(variants));
+}
+
+
+
+function semanticGlobRegExp(glob: string): RegExp {
+  let pattern = '^';
+  for (let index = 0; index < glob.length; index += 1) {
+    if (glob.startsWith('**/', index)) {
+      pattern += '(?:[^/]+/)*';
+      index += 2;
+      continue;
+    }
+    if (glob.startsWith('/**', index) && index + 3 === glob.length) {
+      pattern += '(?:/.*)?';
+      index += 2;
+      continue;
+    }
+    if (glob.startsWith('**', index)) {
+      pattern += '.*';
+      index += 1;
+      continue;
+    }
+    const char = glob[index];
+    if (char === '*') pattern += '[^/]*';
+    else if (char === '?') pattern += '[^/]';
+    else pattern += escapeRegExp(char);
+  }
+  return new RegExp(pattern + '$');
+}
+
+
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 }
 
 
