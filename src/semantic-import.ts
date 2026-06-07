@@ -12,6 +12,7 @@ import {
   summarizeSemanticSlice,
   summarizeSemanticSliceAdmission
 } from './semantic-import-sidecar.js';
+import { summarizeSemanticDependencies } from './semantic-import-dependencies.js';
 import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths } from './semantic-import-select.js';
 
 export async function createCodexSemanticImportSidecar(input: {
@@ -127,6 +128,7 @@ export async function createCodexSemanticImportSidecar(input: {
         lossCount: Array.isArray(importResult?.losses) ? importResult.losses.length : 0,
         losses: summarizeSemanticLosses(importResult?.losses),
         semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
+        dependencies: summarizeSemanticDependencies(importResult?.semanticIndex, semanticSidecar),
         semanticSidecar: summarizeLangSemanticImportSidecar(semanticSidecar),
         universalAstLayers: summarizeUniversalAstLayers(importResult?.universalAst, semanticSidecar),
         proofSpec: summarizeProofSpec(importResult?.universalAst?.proof, semanticSidecar),

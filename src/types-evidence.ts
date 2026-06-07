@@ -112,6 +112,8 @@ export interface FrontierCodexCompactDashboard {
     symbolCount: number;
     ownershipRegionCount: number;
     patchHintCount: number;
+    dependencyRelationCount: number;
+    dependencyPredicates: string[];
     universalAstLayerCount: number;
     universalAstLayerNames: string[];
     proofSpecObligations: number;

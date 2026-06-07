@@ -28,6 +28,8 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
       semanticSymbols: 0,
       ownershipRegions: 0,
       patchHints: 0,
+      dependencyRelations: 0,
+      dependencyPredicates: [],
       universalAstLayers: 0,
       universalAstLayerNames: [],
       proofSpecObligations: 0,
@@ -53,6 +55,8 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   const semanticSymbols = nonNegativeNumber(summary.semanticIndex?.symbols);
   const ownershipRegions = nonNegativeNumber(summary.semanticSidecars?.ownershipRegions);
   const patchHints = nonNegativeNumber(summary.semanticSidecars?.patchHints);
+  const dependencyRelations = nonNegativeNumber((summary as { dependencies?: { total?: number } }).dependencies?.total);
+  const dependencyPredicates = uniqueStrings(((summary as { dependencies?: { predicates?: readonly string[] } }).dependencies?.predicates ?? []).map(String));
   const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
   const universalAstLayers = universalAstLayerSummary.total;
   const universalAstLayerNames = universalAstLayerSummary.names;
@@ -103,6 +107,10 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     scoreAdjustment -= 5;
     cleanEligible = false;
   }
+  if (selected > 0 && semanticSymbols > 1 && dependencyRelations === 0) {
+    reasons.push('semantic sidecar has no dependency relations');
+    scoreAdjustment -= 3;
+  }
   if (warningLosses > 0 || needsReview > 0) {
     reasons.push('semantic evidence needs review');
     scoreAdjustment -= Math.min(10, warningLosses + needsReview);
@@ -127,6 +135,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     scoreAdjustment += 10;
   }
   if (patchHints > 0) scoreAdjustment += 5;
+  if (dependencyRelations > 0) scoreAdjustment += 3;
   if (proofSpec.discharged > 0 && proofSpec.failed === 0 && proofSpec.stale === 0 && proofSpec.open === 0 && proofSpec.unknown === 0) {
     scoreAdjustment += 5;
   }
@@ -143,6 +152,8 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     semanticSymbols,
     ownershipRegions,
     patchHints,
+    dependencyRelations,
+    dependencyPredicates,
     universalAstLayers,
     universalAstLayerNames,
     proofSpecObligations: proofSpec.obligations,

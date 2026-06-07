@@ -22,7 +22,7 @@ export async function testSwarmRunCollection({ plan, tmp }) {
       assert.strictEqual(input.resourceAllocation.env.FRONTIER_SWARM_JOB_ID, input.job.id);
       assert.strictEqual(input.env.FRONTIER_SWARM_TASK_ID, input.job.taskId);
       await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
-      await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function action() { return 1; }\n');
+      await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function helper() { return 1; }\nexport function action() { return helper(); }\n');
       await fs.writeFile(input.paths.lastMessagePath, 'done\n');
       return { exitCode: 0, changedPaths: ['src/runtime/action.ts'], lastMessage: 'done' };
     }
@@ -67,6 +67,9 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.ok(semanticImports.summary.sourceMapMappingCount >= 1);
   assert.ok(semanticImports.summary.lossCount >= 1);
   assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
+  assert.ok(semanticImports.summary.dependencies.total >= 1);
+  assert.ok(semanticImports.summary.dependencies.calls >= 1);
+  assert.ok(semanticImports.records[0].dependencies.total >= 1);
   assert.ok(semanticImports.summary.universalAstLayers);
   assert.ok(Array.isArray(semanticImports.summary.universalAstLayers.names));
   assert.ok(semanticImports.summary.proofSpec);
@@ -83,6 +86,7 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.strictEqual(result.run.results[0].mergeReadiness, 'patch-candidate');
   assert.strictEqual(result.run.results[0].metadata.semanticImport.total, 1);
   assert.ok(result.run.results[0].metadata.semanticImport.semanticSidecars.ownershipRegions >= 1);
+  assert.ok(result.run.results[0].metadata.semanticImport.dependencies.total >= 1);
   assert.ok(result.run.results[0].metadata.semanticImport.universalAstLayers.total >= 0);
   assert.strictEqual(result.run.results[0].metadata.semanticImport.proofSpec.failed, 0);
 
@@ -95,6 +99,7 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.ok(mergeBundle.semanticImport.nativeCompiles.total >= 1);
   assert.strictEqual(mergeBundle.metadata.semanticImport.total, 1);
   assert.ok(mergeBundle.metadata.semanticImport.sourceMapCount >= 1);
+  assert.ok(mergeBundle.metadata.semanticImport.dependencies.total >= 1);
   assert.ok(Array.isArray(mergeBundle.metadata.semanticImport.universalAstLayers.names));
   assert.strictEqual(mergeBundle.metadata.semanticImport.proofSpec.failed, 0);
 
@@ -115,7 +120,7 @@ async function testSemanticImportFallbackFromTaskRefs(plan, tmp) {
     dryRun: false,
     executor: async (input) => {
       await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
-      await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function action() { return 2; }\n');
+      await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function helper() { return 2; }\nexport function action() { return helper(); }\n');
       await fs.writeFile(input.paths.lastMessagePath, 'task refs only\n');
       return { exitCode: 0, changedPaths: [], lastMessage: 'task refs only' };
     }
@@ -128,6 +133,7 @@ async function testSemanticImportFallbackFromTaskRefs(plan, tmp) {
   assert.strictEqual(semanticImports.summary.eligible, 1);
   assert.strictEqual(semanticImports.summary.imported + semanticImports.summary.errors, 1);
   assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
+  assert.ok(semanticImports.summary.dependencies.total >= 1);
   assert.strictEqual(fallbackRun.run.results[0].mergeReadiness, 'discovery-only');
 }
 
@@ -156,12 +162,15 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(collection.compactDashboard.kind, 'frontier.swarm-codex.compact-dashboard');
   assert.strictEqual(collection.compactDashboard.semanticImport.presentCount, 1);
   assert.ok(collection.compactDashboard.semanticImport.universalAstLayerCount >= 0);
+  assert.ok(collection.compactDashboard.semanticImport.dependencyRelationCount >= 1);
+  assert.ok(collection.compactDashboard.semanticImport.dependencyPredicates.includes('calls'));
   assert.ok(Array.isArray(collection.compactDashboard.semanticImport.universalAstLayerNames));
   assert.strictEqual(collection.compactDashboard.semanticImport.proofSpecFailedObligations, 0);
   const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
   assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
   const coordinatorQuery = JSON.parse(await fs.readFile(path.join(collection.outDir, 'coordinator-query.json'), 'utf8'));
   assert.strictEqual(coordinatorQuery.kind, 'frontier.swarm.coordinator-dashboard');
+  assert.ok(coordinatorQuery.summary.semanticDependencyRelationCount >= 1);
   assert.ok(coordinatorQuery.jobs[0].primaryEvidencePath.endsWith('evidence.json'));
 }
 

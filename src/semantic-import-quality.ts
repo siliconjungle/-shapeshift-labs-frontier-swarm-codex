@@ -16,6 +16,10 @@ export function summarizeCodexSemanticImportQuality(
   const symbols = nonNegativeNumber(summary?.semanticIndex?.symbols);
   const ownershipRegions = nonNegativeNumber(summary?.semanticSidecars?.ownershipRegions);
   const patchHints = nonNegativeNumber(summary?.semanticSidecars?.patchHints);
+  const dependencyRelations = nonNegativeNumber((summary as { dependencies?: { total?: number } } | undefined)?.dependencies?.total);
+  const dependencyPredicates = Array.isArray((summary as { dependencies?: { predicates?: unknown } } | undefined)?.dependencies?.predicates)
+    ? uniqueStrings((summary as { dependencies: { predicates: string[] } }).dependencies.predicates)
+    : [];
   const sourceMapMappings = nonNegativeNumber(summary?.sourceMapMappingCount);
   const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
   const universalAstLayers = universalAstLayerSummary.total;
@@ -35,6 +39,7 @@ export function summarizeCodexSemanticImportQuality(
   if (present && selected > 0 && ownershipRegions === 0) warnings.push('semantic import has no ownership regions');
   if (present && selected > 0 && sourceMapMappings === 0) warnings.push('semantic import has no source-map mappings');
   if (present && selected > 0 && universalAstLayers === 0) warnings.push('semantic import has no universal AST layers');
+  if (present && selected > 0 && symbols > 1 && dependencyRelations === 0) warnings.push('semantic import has no dependency relations');
   if (present && proofSpec.failed > 0) warnings.push('semantic import has failed proof obligations');
   if (present && proofSpec.stale > 0) warnings.push('semantic import has stale proof obligations');
   return {
@@ -47,6 +52,8 @@ export function summarizeCodexSemanticImportQuality(
     symbols,
     ownershipRegions,
     patchHints,
+    dependencyRelations,
+    dependencyPredicates,
     sourceMapMappings,
     universalAstLayers,
     universalAstLayerNames,
@@ -92,18 +99,20 @@ function richerSemanticImportSummary(
 
 function semanticImportSummaryRichness(summary: FrontierSwarmMergeBundle['semanticImport'] | undefined): number {
   if (!summary) return 0;
-  return [
+  const values = [
     summary.total,
     summary.selected,
     summary.imported,
     summary.sourceMapMappingCount,
     summary.semanticIndex?.symbols,
+    (summary as { dependencies?: { total?: number } }).dependencies?.total,
     summary.semanticSidecars?.ownershipRegions,
     summary.semanticSidecars?.patchHints,
     semanticImportUniversalAstLayerSummary(summary).total,
     semanticImportProofSpecSummary(summary).total,
     semanticImportParadigmSemanticsSummary(summary).total
-  ].reduce((sum, value) => sum + nonNegativeNumber(value), 0);
+  ];
+  return values.reduce<number>((sum, value) => sum + nonNegativeNumber(value), 0);
 }
 
 

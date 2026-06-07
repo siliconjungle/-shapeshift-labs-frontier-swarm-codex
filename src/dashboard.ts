@@ -60,6 +60,8 @@ export function createCodexCompactDashboard(input: {
       symbolCount: semanticQualities.reduce((sum, entry) => sum + entry.symbols, 0),
       ownershipRegionCount: semanticQualities.reduce((sum, entry) => sum + entry.ownershipRegions, 0),
       patchHintCount: semanticQualities.reduce((sum, entry) => sum + entry.patchHints, 0),
+      dependencyRelationCount: semanticQualities.reduce((sum, entry) => sum + entry.dependencyRelations, 0),
+      dependencyPredicates: uniqueStrings(semanticQualities.flatMap((entry) => entry.dependencyPredicates)),
       universalAstLayerCount: semanticQualities.reduce((sum, entry) => sum + entry.universalAstLayers, 0),
       universalAstLayerNames: uniqueStrings(semanticQualities.flatMap((entry) => entry.universalAstLayerNames)),
       proofSpecObligations: semanticQualities.reduce((sum, entry) => sum + entry.proofSpecObligations, 0),

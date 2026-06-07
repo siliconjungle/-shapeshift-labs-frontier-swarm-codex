@@ -5,6 +5,7 @@ import type { SemanticImportSelection } from './semantic-import-select.js';
 import { summarizeSemanticImportUniversalAstLayers } from './semantic-import-layers.js';
 import { summarizeSemanticImportParadigmSemantics, summarizeParadigmSemantics } from './semantic-import-paradigm.js';
 import { summarizeSemanticImportProofSpec, summarizeProofSpec } from './semantic-import-proof.js';
+import { mergeDependencySummaries, summarizeSemanticDependencies } from './semantic-import-dependencies.js';
 
 
 
@@ -21,6 +22,9 @@ export function createSemanticImportSidecar(
     totals.facts += record.semanticIndex?.facts ?? 0;
     return totals;
   }, { documents: 0, symbols: 0, occurrences: 0, relations: 0, facts: 0 });
+  const dependencies = mergeDependencySummaries(records
+    .map((record) => record.dependencies)
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined));
   const semanticSidecars = records.reduce((totals, record) => {
     const summary = record.semanticSidecar as { symbols?: number; ownershipRegions?: number; patchHints?: number; emptySemanticIndex?: boolean } | undefined;
     if (!summary) return totals;
@@ -120,6 +124,7 @@ export function createSemanticImportSidecar(
       lossCount: records.reduce((sum, record) => sum + (record.lossCount ?? 0), 0),
       lossesBySeverity,
       semanticIndex,
+      dependencies,
       semanticSidecars,
       universalAstLayers,
       proofSpec,
@@ -157,6 +162,7 @@ export function summarizeSemanticIndex(value: any): FrontierCodexSemanticImportR
 
 export function summarizeLangSemanticImportSidecar(value: any): unknown {
   if (!value || typeof value !== 'object') return undefined;
+  const dependencies = summarizeSemanticDependencies(undefined, value);
   return {
     kind: value.kind,
     id: value.id,
@@ -172,6 +178,11 @@ export function summarizeLangSemanticImportSidecar(value: any): unknown {
         : [],
     proofSpec: summarizeProofSpec(undefined, value),
     paradigmSemantics: summarizeParadigmSemantics(undefined, value),
+    dependencies,
+    dependencyRelations: value.summary?.dependencyRelations ?? dependencies.total,
+    dependencyPredicates: Array.isArray(value.summary?.dependencyPredicates)
+      ? value.summary.dependencyPredicates
+      : dependencies.predicates,
     readiness: value.summary?.readiness,
     emptySemanticIndex: value.summary?.emptySemanticIndex,
     patchHints: Array.isArray(value.patchHints) ? value.patchHints.length : 0,

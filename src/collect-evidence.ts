@@ -110,6 +110,8 @@ export function createCollectedEvidenceEntries(
       staleAgainstHead: bundle.staleAgainstHead,
       semanticSymbols: bundle.semanticImport?.semanticIndex.symbols ?? 0,
       semanticRegions: bundle.semanticImport?.semanticSidecars.ownershipRegions ?? 0,
+      semanticDependencyRelations: (bundle.semanticImport as { dependencies?: { total?: number } } | undefined)?.dependencies?.total ?? 0,
+      semanticDependencyPredicates: (bundle.semanticImport as { dependencies?: { predicates?: string[] } } | undefined)?.dependencies?.predicates?.join(',') ?? '',
       universalAstLayers: universalAstLayers.total,
       universalAstLayerNames: universalAstLayers.names.join(','),
       proofSpecObligations: semanticImportProofSpecSummary(bundle.semanticImport).obligations,

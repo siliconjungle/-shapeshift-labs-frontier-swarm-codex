@@ -138,6 +138,8 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   semanticSymbols: number;
   ownershipRegions: number;
   patchHints: number;
+  dependencyRelations: number;
+  dependencyPredicates: string[];
   universalAstLayers: number;
   universalAstLayerNames: string[];
   proofSpecObligations: number;
