@@ -14,6 +14,7 @@ export interface FrontierCodexSemanticImportOptions {
 
 export interface FrontierCodexSemanticImportRecord {
   path: string;
+  requestedPath?: string;
   language?: string;
   status: 'imported' | 'skipped' | 'error';
   reason?: string;

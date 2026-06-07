@@ -128,6 +128,20 @@ export function semanticImportCandidatePaths(job: FrontierSwarmJob, changedPaths
 
 
 
+export function semanticImportPathVariants(file: string): string[] {
+  const normalized = normalizeWorkspacePath(file);
+  if (!normalized) return [];
+  const variants = [normalized];
+  const parts = normalized.split('/').filter(Boolean);
+  for (let index = 1; index < parts.length - 1; index += 1) {
+    const suffix = parts.slice(index).join('/');
+    if (suffix.includes('/')) variants.push(suffix);
+  }
+  return Array.from(new Set(variants));
+}
+
+
+
 export function inferSemanticImportLanguage(file: string, overrides?: Readonly<Record<string, string>>): string | undefined {
   const ext = path.extname(file).toLowerCase();
   return overrides?.[file] ?? overrides?.[ext] ?? ({

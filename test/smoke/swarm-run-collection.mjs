@@ -118,7 +118,13 @@ export async function testSwarmRunCollection({ plan, tmp }) {
 }
 
 async function testSemanticImportFallbackFromTaskRefs(plan, tmp) {
-  const fallbackRun = await runCodexSwarm(plan, {
+  const remapPlan = JSON.parse(JSON.stringify(plan));
+  for (const job of remapPlan.jobs) {
+    job.task.targetRefs = ['snes/packages/domain/src/runtime/action.ts'];
+    job.task.allowedWrites = [];
+    job.allowedWrites = [];
+  }
+  const fallbackRun = await runCodexSwarm(remapPlan, {
     outDir: path.join(tmp, 'task-ref-run'),
     cwd: tmp,
     maxConcurrency: 1,
@@ -139,6 +145,8 @@ async function testSemanticImportFallbackFromTaskRefs(plan, tmp) {
   assert.strictEqual(semanticImports.summary.selected, 1);
   assert.strictEqual(semanticImports.summary.eligible, 1);
   assert.strictEqual(semanticImports.summary.imported + semanticImports.summary.errors, 1);
+  assert.strictEqual(semanticImports.records[0].path, 'src/runtime/action.ts');
+  assert.strictEqual(semanticImports.records[0].requestedPath, 'snes/packages/domain/src/runtime/action.ts');
   assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
   assert.ok(semanticImports.summary.dependencies.total >= 1);
   assert.strictEqual(fallbackRun.run.results[0].mergeReadiness, 'discovery-only');

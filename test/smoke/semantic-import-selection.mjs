@@ -2,7 +2,8 @@ import assert from 'node:assert';
 import {
   matchesSemanticImportGlob,
   selectSemanticImportPaths,
-  semanticImportCandidatePaths
+  semanticImportCandidatePaths,
+  semanticImportPathVariants
 } from '../../dist/semantic-import-select.js';
 
 export async function testSemanticImportSelection() {
@@ -14,6 +15,12 @@ export async function testSemanticImportSelection() {
   assert.equal(matchesSemanticImportGlob('src/core.js', 'snes/packages/domain/src/**/*.js'), true);
   assert.equal(matchesSemanticImportGlob('apps/web/src/core.js', 'snes/packages/domain/src/**/*.js'), false);
   assert.equal(matchesSemanticImportGlob('src/core.ts', 'src/**/*.{js,ts}'), false);
+  assert.deepEqual(semanticImportPathVariants('snes/packages/domain/src/core.js'), [
+    'snes/packages/domain/src/core.js',
+    'packages/domain/src/core.js',
+    'domain/src/core.js',
+    'src/core.js'
+  ]);
 
   const selection = selectSemanticImportPaths([
     'src/index.js',

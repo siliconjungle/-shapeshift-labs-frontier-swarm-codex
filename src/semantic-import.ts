@@ -13,7 +13,7 @@ import {
   summarizeSemanticSliceAdmission
 } from './semantic-import-sidecar.js';
 import { summarizeSemanticDependencies } from './semantic-import-dependencies.js';
-import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths } from './semantic-import-select.js';
+import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths, semanticImportPathVariants } from './semantic-import-select.js';
 
 export async function createCodexSemanticImportSidecar(input: {
   job: FrontierSwarmJob;
@@ -50,7 +50,8 @@ export async function createCodexSemanticImportSidecar(input: {
     return { path: importPath, sidecar };
   }
   for (const file of selected) {
-    const absolute = path.join(input.workspace, file.path);
+    const resolved = await resolveSemanticImportWorkspacePath(input.workspace, file.path);
+    const absolute = resolved.absolute;
     const stat = await fs.stat(absolute).catch(() => undefined);
     if (!stat?.isFile()) {
       records.push({ path: file.path, language: file.language, status: 'skipped', reason: 'not-a-file' });
@@ -64,7 +65,7 @@ export async function createCodexSemanticImportSidecar(input: {
       const sourceText = await fs.readFile(absolute, 'utf8');
       const importResult = api.importNativeSource({
         language: file.language,
-        sourcePath: file.path,
+        sourcePath: resolved.path,
         sourceText,
         parser: 'source-text',
         metadata: {
@@ -76,7 +77,7 @@ export async function createCodexSemanticImportSidecar(input: {
       const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
       const semanticSidecar = api.createSemanticImportSidecar
         ? api.createSemanticImportSidecar(importResult, {
-          targetPath: file.path,
+          targetPath: resolved.path,
           expected: input.semanticImportExpected === true,
           semanticImportExpected: input.semanticImportExpected === true,
           metadata: {
@@ -87,10 +88,10 @@ export async function createCodexSemanticImportSidecar(input: {
         })
         : undefined;
       const sourceProjection = api.projectNativeImportToSource
-        ? api.projectNativeImportToSource(importResult, { sourceText, sourcePath: file.path })
+        ? api.projectNativeImportToSource(importResult, { sourceText, sourcePath: resolved.path })
         : undefined;
       const nativeCompile = api.compileNativeSource
-        ? api.compileNativeSource(importResult, { target: file.language, sourceText, sourcePath: file.path, emitOnBlocked: true })
+        ? api.compileNativeSource(importResult, { target: file.language, sourceText, sourcePath: resolved.path, emitOnBlocked: true })
         : undefined;
       const semanticSlice = api.createSemanticSlice
         ? api.createSemanticSlice(importResult, {
@@ -115,7 +116,8 @@ export async function createCodexSemanticImportSidecar(input: {
           ? importResult.universalAst.sourceMaps
           : [];
       records.push({
-        path: file.path,
+        path: resolved.path,
+        ...(resolved.path !== file.path ? { requestedPath: file.path } : {}),
         language: file.language,
         status: 'imported',
         bytes: stat.size,
@@ -155,4 +157,13 @@ export async function createCodexSemanticImportSidecar(input: {
   const sidecar = createSemanticImportSidecar(input.job, records, selection, input.semanticImportExpected === true);
   await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
   return { path: importPath, sidecar };
+}
+
+async function resolveSemanticImportWorkspacePath(workspace: string, file: string): Promise<{ path: string; absolute: string }> {
+  for (const candidate of semanticImportPathVariants(file)) {
+    const absolute = path.join(workspace, candidate);
+    const stat = await fs.stat(absolute).catch(() => undefined);
+    if (stat?.isFile()) return { path: candidate, absolute };
+  }
+  return { path: file, absolute: path.join(workspace, file) };
 }
