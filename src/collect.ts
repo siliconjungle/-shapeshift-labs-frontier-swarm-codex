@@ -5,6 +5,7 @@ import {
   createSwarmEvidenceIndex,
   createSwarmMergeAdmission,
   createSwarmMergeIndex,
+  createSwarmMergeTournament,
   createSwarmQueueOverlay,
   type FrontierSwarmCoordinatorProcessInput,
   type FrontierSwarmEvidenceIndexEntryInput,
@@ -103,6 +104,13 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     bundles: collectedBundles,
     patchStatuses
   });
+  const strategyTournament = createSwarmMergeTournament({
+    id: `codex-merge-tournament:${path.basename(runDir)}`,
+    title: 'Codex Merge Admission Tournament',
+    bundles: collectedBundles,
+    mergeIndex,
+    generatedAt
+  });
   const queueOverlay = createSwarmQueueOverlay({
     runId: path.basename(runDir),
     bundles: collectedBundles
@@ -131,6 +139,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const compactDashboard = createCodexCompactDashboard({
     runDir,
     dashboard,
+    strategyTournament,
     semanticImportExpected: input.semanticImportExpected ?? false,
     generatedAt
   });
@@ -151,6 +160,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     buckets,
     mergeIndex,
     queueOverlay,
+    strategyTournament,
     evidenceIndex,
     admission,
     dashboard,
@@ -161,6 +171,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   await fs.writeFile(path.join(outDir, 'collection.json'), JSON.stringify(result, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'merge-index.json'), JSON.stringify(mergeIndex, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'queue-overlay.json'), JSON.stringify(queueOverlay, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'strategy-tournament.json'), JSON.stringify(strategyTournament, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'evidence-index.json'), JSON.stringify(evidenceIndex, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'merge-admission.json'), JSON.stringify(admission, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'coordinator-query.json'), JSON.stringify(dashboard, null, 2) + '\n');

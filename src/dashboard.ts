@@ -1,4 +1,7 @@
-import type { FrontierSwarmCoordinatorDashboard } from '@shapeshift-labs/frontier-swarm';
+import type {
+  FrontierSwarmCoordinatorDashboard,
+  FrontierSwarmStrategyTournament
+} from '@shapeshift-labs/frontier-swarm';
 import { FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND, FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_VERSION } from './constants.js';
 import type { FrontierCodexCompactDashboard, FrontierCodexTraceSummary } from './index.js';
 import { uniqueStrings } from './common.js';
@@ -9,6 +12,7 @@ import { codexJobTraceSummary, summarizeCodexTraceSummaries } from './trace-summ
 export function createCodexCompactDashboard(input: {
   runDir: string;
   dashboard: FrontierSwarmCoordinatorDashboard;
+  strategyTournament: FrontierSwarmStrategyTournament;
   semanticImportExpected: boolean;
   generatedAt: number;
 }): FrontierCodexCompactDashboard {
@@ -52,6 +56,7 @@ export function createCodexCompactDashboard(input: {
     usefulPatchCount: usefulPatchJobs.length,
     stalePatchCount: input.dashboard.summary.staleAgainstHeadCount,
     duplicateDiscoveryCount: input.dashboard.duplicateGroups.length,
+    tournament: summarizeTournament(input.strategyTournament),
     semanticImport: {
       expected: input.semanticImportExpected,
       expectedSatisfiedCount: semanticQualities.filter((entry) => entry.expected && entry.expectedSatisfied).length,
@@ -91,5 +96,19 @@ export function createCodexCompactDashboard(input: {
       averageMergeScore: input.dashboard.summary.averageMergeScore
     },
     topJobs
+  };
+}
+
+function summarizeTournament(tournament: FrontierSwarmStrategyTournament) {
+  const totalScore = tournament.standings.reduce((sum, standing) => sum + standing.score, 0);
+  const averageScore = tournament.standings.length ? Math.round((totalScore / tournament.standings.length) * 100) / 100 : 0;
+  return {
+    strategyCount: tournament.summary.strategyCount,
+    gameCount: tournament.summary.gameCount,
+    matchCount: tournament.summary.matchCount,
+    averageScore,
+    ...(tournament.summary.topStrategyId ? { topStrategyId: tournament.summary.topStrategyId } : {}),
+    ...(tournament.summary.topScore !== undefined ? { topScore: tournament.summary.topScore } : {}),
+    outcomeCounts: tournament.summary.outcomeCounts
   };
 }

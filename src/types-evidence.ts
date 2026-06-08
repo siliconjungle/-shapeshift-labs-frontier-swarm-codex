@@ -104,6 +104,15 @@ export interface FrontierCodexCompactDashboard {
   usefulPatchCount: number;
   stalePatchCount: number;
   duplicateDiscoveryCount: number;
+  tournament: {
+    strategyCount: number;
+    gameCount: number;
+    matchCount: number;
+    averageScore: number;
+    topStrategyId?: string;
+    topScore?: number;
+    outcomeCounts: Record<string, number>;
+  };
   semanticImport: {
     expected: boolean;
     expectedSatisfiedCount: number;
