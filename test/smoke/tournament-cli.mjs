@@ -14,7 +14,7 @@ export async function testTournamentCli({ plan, tmp }) {
   const tournamentPath = path.join(collection, 'strategy-tournament.json');
   const apiQuery = await queryCodexSwarmTournament({
     collection,
-    strategyId: 'runtime-runtime-action',
+    strategyId: 'style:default-prompt:current:semantic-symbols',
     view: 'standings'
   });
   assert.strictEqual(apiQuery.kind, 'frontier.swarm-codex.tournament-query');
@@ -37,7 +37,7 @@ export async function testTournamentCli({ plan, tmp }) {
     '--collection',
     collection,
     '--strategy',
-    'runtime-runtime-action',
+    'style:default-prompt:current:semantic-symbols',
     '--view',
     'standings',
     '--limit',

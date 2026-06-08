@@ -165,7 +165,7 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(collection.queueOverlay.summary.entryCount, 1);
   assert.strictEqual(collection.strategyTournament.kind, 'frontier.swarm.strategy-tournament');
   assert.strictEqual(collection.strategyTournament.summary.matchCount, 1);
-  assert.strictEqual(collection.strategyTournament.summary.topStrategyId, 'runtime-runtime-action');
+  assert.strictEqual(collection.strategyTournament.summary.topStrategyId, 'style:default-prompt:current:semantic-symbols');
   assert.strictEqual(collection.strategyHistory.kind, 'frontier.swarm.strategy-tournament-history');
   assert.strictEqual(collection.tournamentAdaptiveFeedback.kind, 'frontier.swarm.tournament-adaptive-feedback');
   assert.strictEqual(collection.evidenceIndex.summary.jobCount, 1);
@@ -184,7 +184,7 @@ async function testCollectedRun(tmp) {
   assert.ok(await exists(path.join(collection.outDir, 'compact-dashboard.json')));
   assert.strictEqual(collection.compactDashboard.kind, 'frontier.swarm-codex.compact-dashboard');
   assert.strictEqual(collection.compactDashboard.tournament.matchCount, 1);
-  assert.strictEqual(collection.compactDashboard.tournament.topStrategyId, 'runtime-runtime-action');
+  assert.strictEqual(collection.compactDashboard.tournament.topStrategyId, 'style:default-prompt:current:semantic-symbols');
   assert.strictEqual(collection.compactDashboard.semanticImport.presentCount, 1);
   assert.strictEqual(collection.compactDashboard.semanticImport.expected, true);
   assert.strictEqual(collection.compactDashboard.semanticImport.expectedUnsatisfiedCount, 0);

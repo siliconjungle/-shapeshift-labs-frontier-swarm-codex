@@ -111,6 +111,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     title: 'Codex Merge Admission Tournament',
     bundles: collectedBundles,
     mergeIndex,
+    strategyMode: 'style',
     generatedAt
   });
   const strategyHistory = createSwarmStrategyTournamentHistory({

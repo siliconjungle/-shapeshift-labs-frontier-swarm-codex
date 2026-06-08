@@ -28,6 +28,7 @@ import {
 import { createEmptyCodexLogSummary, normalizeCompactLogOptions, spawnCodexExecutor } from './codex-executor.js';
 import { buildCodexArgs, createCodexResourceAllocation, renderCodexPrompt } from './codex-prompt.js';
 import { createCodexJobPaths } from './codex-job-paths.js';
+import { createCodexTournamentStrategyMetadata } from './codex-tournament-strategy.js';
 import { runCodexDependencyHealthPreflight } from './codex-run-health.js';
 import { runScheduledJobPool } from './codex-run-scheduler.js';
 import {
@@ -217,6 +218,9 @@ export async function runCodexJob(
   });
   const semanticImportSummary = semanticImport?.sidecar.summary;
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });
+  const tournamentStrategy = createCodexTournamentStrategyMetadata(
+    { job, workspaceMode: workspacePlan.mode, customPrompt: !!options.renderJobPrompt, semanticImportSummary, logSummary }
+  );
   const evidenceSummaryPath = path.join(paths.evidenceDir, 'evidence.json');
   const evidencePaths = uniqueStrings([
     paths.evidenceDir,
@@ -251,6 +255,7 @@ export async function runCodexJob(
       ...(lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : {}),
       resourceAllocation,
       logSummary,
+      tournamentStrategy,
       ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {}),
       codexHandoffArtifacts: handoffArtifacts
     }
@@ -272,7 +277,12 @@ export async function runCodexJob(
     ]),
     queueItemIds: [job.taskId],
     ...(semanticImportSummary ? { semanticImport: semanticImportSummary as unknown as FrontierSwarmMergeBundle['semanticImport'] } : {}),
-    ...(semanticImportSummary ? { metadata: { semanticImport: semanticImportSummary } } : {})
+    metadata: {
+      tournamentStrategy,
+      workspaceMode: workspacePlan.mode,
+      logSummary,
+      ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {})
+    }
   });
   if (semanticImportSummary) {
     (mergeBundle as unknown as { semanticImport: FrontierCodexSemanticImportSidecar['summary'] }).semanticImport = semanticImportSummary;
