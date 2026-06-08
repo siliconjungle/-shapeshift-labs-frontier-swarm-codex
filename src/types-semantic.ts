@@ -152,6 +152,8 @@ export interface FrontierCodexSemanticImportSidecar {
       includeFiltered: number;
       excludeFiltered: number;
       unsupportedLanguage: number;
+      fallback: number;
+      fallbackReason?: string;
     };
     eligible: number;
     omitted: number;

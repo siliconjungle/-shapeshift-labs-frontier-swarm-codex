@@ -6,6 +6,7 @@ import {
   path,
   scoreCodexSwarmPatches
 } from './context.mjs';
+import { testWeakSemanticAdmissionScore } from './apply-score-semantic.mjs';
 
 const readySemanticImport = {
   total: 1,
@@ -141,6 +142,7 @@ export async function testApplyAndScore({ tmp }, mergeBundle) {
   await testScore(applyRepo, tmp);
   await testScoreIndexOnlyCollection(applyRepo, tmp, readyDir);
   await testMissingSemanticScore(applyRepo, tmp, readyDir);
+  await testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir, readySemanticImport });
   await assert.rejects(
     () => applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo, dryRun: false }),
     /dirty worktree/

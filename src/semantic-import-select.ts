@@ -18,6 +18,8 @@ export type SemanticImportSelection = {
   excludeFilteredCount: number;
   unsupportedLanguageCount: number;
   maxFiles: number;
+  fallbackCount: number;
+  fallbackReason?: string;
 };
 
 
@@ -95,7 +97,8 @@ export function selectSemanticImportPaths(
     includeFilteredCount,
     excludeFilteredCount,
     unsupportedLanguageCount,
-    maxFiles
+    maxFiles,
+    fallbackCount: 0
   };
 }
 

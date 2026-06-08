@@ -67,6 +67,11 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   const blocked = nonNegativeNumber(readiness.blocked);
   const needsReview = nonNegativeNumber(readiness['needs-review']);
 
+  if (total === 0) {
+    reasons.push('empty semantic import sidecar');
+    scoreAdjustment -= 30;
+    cleanEligible = false;
+  }
   if (errors > 0) {
     reasons.push(`semantic import errors: ${errors}`);
     scoreAdjustment -= 25;
@@ -94,6 +99,11 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   }
   if (selected > 0 && ownershipRegions === 0) {
     reasons.push('semantic sidecar has no ownership regions');
+    scoreAdjustment -= 10;
+    cleanEligible = false;
+  }
+  if (imported > 0 && patchHints === 0) {
+    reasons.push('semantic sidecar has no patch hints');
     scoreAdjustment -= 10;
     cleanEligible = false;
   }

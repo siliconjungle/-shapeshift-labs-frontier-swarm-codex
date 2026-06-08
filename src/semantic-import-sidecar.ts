@@ -114,14 +114,17 @@ export function createSemanticImportSidecar(
           ignored: selection.ignoredCount,
           includeFiltered: selection.includeFilteredCount,
           excludeFiltered: selection.excludeFilteredCount,
-          unsupportedLanguage: selection.unsupportedLanguageCount
+          unsupportedLanguage: selection.unsupportedLanguageCount,
+          fallback: selection.fallbackCount,
+          ...(selection.fallbackReason ? { fallbackReason: selection.fallbackReason } : {})
         }
-        : {
+      : {
           candidates: records.length,
           ignored: 0,
           includeFiltered: 0,
           excludeFiltered: 0,
-          unsupportedLanguage: 0
+          unsupportedLanguage: 0,
+          fallback: 0
         },
       eligible: selection?.eligibleCount ?? records.length,
       omitted: selection?.omittedCount ?? 0,

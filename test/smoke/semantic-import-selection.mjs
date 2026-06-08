@@ -169,4 +169,55 @@ async function testCopiedWorkspacePackageSubdirSemanticImport(plan, tmp) {
   assert.strictEqual(semanticImports.summary.imported, 1);
   assert.strictEqual(semanticImports.records[0].path, 'packages/domain/src/runtime/action.ts');
   assert.strictEqual(semanticImports.records[0].language, 'typescript');
+  await testCopiedWorkspaceEmptyChangedPathsFallback(copyPlan, tmp);
+}
+
+async function testCopiedWorkspaceEmptyChangedPathsFallback(plan, tmp) {
+  const fallbackPlan = JSON.parse(JSON.stringify(plan));
+  const job = fallbackPlan.jobs[0];
+  job.allowedWrites = ['packages/domain/src/**'];
+  job.task.sourceRefs = [];
+  job.task.targetRefs = [];
+  job.task.allowedWrites = ['packages/domain/src/**'];
+  job.verification = [];
+  const fallbackRun = await runCodexSwarm(fallbackPlan, {
+    outDir: path.join(tmp, 'copy-semantic-fallback-run'),
+    cwd: tmp,
+    maxConcurrency: 1,
+    semanticImport: {
+      enabled: true,
+      include: ['snes/packages/domain/src/**/*.ts'],
+      maxFiles: 1,
+      maxBytes: 500000
+    },
+    semanticImportExpected: true,
+    workspace: {
+      mode: 'copy',
+      root: path.join(tmp, 'copy-fallback-workspaces'),
+      includes: [],
+      linkNodeModules: false
+    },
+    dryRun: false,
+    prepareJobWorkspace: async (input) => {
+      const runtimeDir = path.join(input.workspacePath, 'packages/domain/src/runtime');
+      await fs.mkdir(runtimeDir, { recursive: true });
+      await fs.writeFile(path.join(runtimeDir, 'fallback.ts'), 'export function fallback() { return 1; }\n');
+    },
+    executor: async (input) => {
+      await fs.writeFile(input.paths.lastMessagePath, 'copy semantic fallback done\n');
+      return { exitCode: 0, changedPaths: [], lastMessage: 'copy semantic fallback done' };
+    }
+  });
+  assert.strictEqual(fallbackRun.ok, true);
+  const result = fallbackRun.run.results[0];
+  assert.deepStrictEqual(result.changedPaths, []);
+  const semanticImportsPath = result.evidencePaths.find((entry) => entry.endsWith('semantic-imports.json'));
+  assert.ok(semanticImportsPath);
+  const semanticImports = JSON.parse(await fs.readFile(semanticImportsPath, 'utf8'));
+  assert.strictEqual(semanticImports.summary.selection.fallback, 1);
+  assert.strictEqual(semanticImports.summary.selection.fallbackReason, 'expected-semantic-import-empty-selection');
+  assert.strictEqual(semanticImports.summary.selected, 1);
+  assert.strictEqual(semanticImports.summary.imported, 1);
+  assert.strictEqual(semanticImports.summary.semanticImportExpectedSatisfied, true);
+  assert.strictEqual(semanticImports.records[0].path, 'packages/domain/src/runtime/fallback.ts');
 }

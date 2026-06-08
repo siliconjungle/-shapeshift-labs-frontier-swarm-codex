@@ -14,6 +14,7 @@ import {
 } from './semantic-import-sidecar.js';
 import { summarizeSemanticDependencies } from './semantic-import-dependencies.js';
 import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths, semanticImportPathVariants } from './semantic-import-select.js';
+import { discoverSemanticImportFallbackPaths, withSemanticImportFallback } from './semantic-import-fallback.js';
 
 export async function createCodexSemanticImportSidecar(input: {
   job: FrontierSwarmJob;
@@ -25,7 +26,18 @@ export async function createCodexSemanticImportSidecar(input: {
 }): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
   const options = normalizeSemanticImportOptions(input.options);
   if (!options) return undefined;
-  const selection = selectSemanticImportPaths(semanticImportCandidatePaths(input.job, input.changedPaths, input.workspace), options);
+  const candidatePaths = semanticImportCandidatePaths(input.job, input.changedPaths, input.workspace);
+  let selection = selectSemanticImportPaths(candidatePaths, options);
+  if (!selection.selected.length && input.semanticImportExpected === true) {
+    const fallbackPaths = await discoverSemanticImportFallbackPaths(input.job, input.workspace, options);
+    if (fallbackPaths.length) {
+      selection = withSemanticImportFallback(
+        selectSemanticImportPaths([...candidatePaths, ...fallbackPaths], options),
+        fallbackPaths.length,
+        'expected-semantic-import-empty-selection'
+      );
+    }
+  }
   const selected = selection.selected;
   const records: FrontierCodexSemanticImportRecord[] = [];
   const importPath = path.join(input.evidenceDir, 'semantic-imports.json');
