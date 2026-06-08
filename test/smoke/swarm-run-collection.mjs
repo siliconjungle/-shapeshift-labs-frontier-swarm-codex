@@ -1,10 +1,13 @@
 import assert from 'node:assert';
 import {
   collectCodexSwarmRun,
+  createCodexCleanupPlan,
   createBrowserPlan,
   exists,
+  execFileP,
   fs,
   path,
+  queryCodexSwarmCollection,
   runCodexSwarm
 } from './context.mjs';
 import { testNoIndexCollection } from './swarm-run-no-index.mjs';
@@ -193,6 +196,12 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(collection.semanticImport.importedCount, 1);
   assert.strictEqual(collection.semanticImport.candidateCount, 1);
   assert.strictEqual(collection.semanticImport.warningCount, 0);
+  assert.strictEqual(collection.artifactStore.kind, 'frontier.swarm-codex.artifact-store');
+  assert.ok(collection.artifactStore.summary.artifactCount >= 8);
+  assert.ok(collection.artifactStore.summary.gzipCount >= 1);
+  assert.ok(await exists(path.join(collection.outDir, 'artifact-store', 'artifacts.jsonl')));
+  assert.ok(await exists(path.join(collection.outDir, 'artifact-store', 'artifact-index.sql')));
+  assert.ok(await exists(path.join(collection.outDir, 'collected-and-indexed.json')));
   assert.ok(collection.compactDashboard.semanticImport.universalAstLayerCount >= 0);
   assert.ok(collection.compactDashboard.semanticImport.dependencyRelationCount >= 1);
   assert.ok(collection.compactDashboard.semanticImport.dependencyPredicates.includes('calls'));
@@ -232,6 +241,53 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(coordinatorQuery.jobs[0].semanticImportQuality.imported, 1);
   assert.strictEqual(coordinatorQuery.jobs[0].semanticImportQuality.candidates, 1);
   assert.ok(coordinatorQuery.jobs[0].primaryEvidencePath.endsWith('evidence.json'));
+  const artifactQuery = await queryCodexSwarmCollection({ collection: collection.outDir, q: 'runtime', semantic: true });
+  assert.strictEqual(artifactQuery.kind, 'frontier.swarm-codex.query');
+  assert.strictEqual(artifactQuery.jobs.length, 1);
+  assert.ok(artifactQuery.artifacts.length >= 1);
+  const cli = new URL('../../dist/cli.js', import.meta.url).pathname;
+  const cliQuery = JSON.parse((await execFileP(process.execPath, [
+    cli,
+    'query',
+    '--collection',
+    collection.outDir,
+    '--path',
+    'runtime',
+    '--semantic'
+  ])).stdout);
+  assert.strictEqual(cliQuery.jobs.length, 1);
+  await testSafeCleanup(tmp, collection.outDir);
+}
+
+async function testSafeCleanup(tmp, collectionDir) {
+  const workspacePath = path.join(tmp, 'agent-worktrees', 'frontier-swarm-codex', 'cleanup-job');
+  await fs.mkdir(workspacePath, { recursive: true });
+  await fs.writeFile(path.join(workspacePath, 'scratch.txt'), 'temporary workspace\n');
+  const proofDir = path.join(tmp, 'run', 'jobs', 'cleanup-job');
+  await fs.mkdir(proofDir, { recursive: true });
+  await fs.writeFile(path.join(proofDir, 'workspace-proof.json'), JSON.stringify({
+    manifest: { mode: 'copy', path: workspacePath }
+  }, null, 2) + '\n');
+  const dryRun = await createCodexCleanupPlan({ run: path.join(tmp, 'run'), keepActive: false });
+  assert.strictEqual(dryRun.dryRun, true);
+  assert.strictEqual(dryRun.indexed, true);
+  assert.strictEqual(dryRun.summary.candidateCount, 1);
+  assert.ok(await exists(workspacePath));
+  const cleanup = await createCodexCleanupPlan({ run: path.join(tmp, 'run'), keepActive: false, dryRun: false });
+  assert.strictEqual(cleanup.summary.deletedCount, 1);
+  assert.strictEqual(await exists(workspacePath), false);
+  const cli = new URL('../../dist/cli.js', import.meta.url).pathname;
+  const cliCleanup = JSON.parse((await execFileP(process.execPath, [
+    cli,
+    'cleanup',
+    '--run',
+    path.join(tmp, 'run'),
+    '--keep-active',
+    'false'
+  ])).stdout);
+  assert.strictEqual(cliCleanup.kind, 'frontier.swarm-codex.cleanup-plan');
+  assert.strictEqual(cliCleanup.summary.candidateCount, 0);
+  assert.ok(await exists(path.join(collectionDir, 'collected-and-indexed.json')));
 }
 
 async function testBrowserRun(tmp) {

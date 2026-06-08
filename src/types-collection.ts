@@ -13,6 +13,10 @@ import type {
 import type {
   FRONTIER_SWARM_CODEX_APPLY_LEDGER_KIND,
   FRONTIER_SWARM_CODEX_APPLY_LEDGER_VERSION,
+  FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND,
+  FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION,
+  FRONTIER_SWARM_CODEX_CLEANUP_PLAN_KIND,
+  FRONTIER_SWARM_CODEX_CLEANUP_PLAN_VERSION,
   FRONTIER_SWARM_CODEX_COLLECTION_KIND,
   FRONTIER_SWARM_CODEX_COLLECTION_VERSION,
   FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND,
@@ -61,7 +65,70 @@ export interface FrontierCodexCollectResult {
   dashboard: FrontierSwarmCoordinatorDashboard;
   compactDashboard: FrontierCodexCompactDashboard;
   semanticImport: FrontierCodexCompactDashboard['semanticImport'];
+  artifactStore?: FrontierCodexArtifactStoreResult;
   summary: Record<FrontierCodexCollectBucket, number> & { total: number };
+}
+
+export interface FrontierCodexArtifactRecord {
+  id: string;
+  runDir: string;
+  collectionDir: string;
+  path: string;
+  relativePath: string;
+  kind: string;
+  jobId?: string;
+  bucket?: string;
+  bytes: number;
+  sha256: string;
+  blobPath: string;
+  compression: 'gzip' | 'none' | string;
+  compressedBytes?: number;
+  mtimeMs: number;
+  tags: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface FrontierCodexArtifactStoreResult {
+  kind: typeof FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION;
+  generatedAt: number;
+  runDir: string;
+  collectionDir: string;
+  storeDir: string;
+  jsonlPath: string;
+  sqlPath: string;
+  sqlitePath?: string;
+  records: FrontierCodexArtifactRecord[];
+  summary: {
+    artifactCount: number;
+    totalBytes: number;
+    compressedBytes: number;
+    blobCount: number;
+    gzipCount: number;
+    sqliteWritten: boolean;
+  };
+}
+
+export interface FrontierCodexCleanupInput {
+  run: string;
+  cwd?: string;
+  maxAgeHours?: number;
+  keepFailed?: boolean;
+  keepActive?: boolean;
+  dryRun?: boolean;
+}
+
+export interface FrontierCodexCleanupPlan {
+  kind: typeof FRONTIER_SWARM_CODEX_CLEANUP_PLAN_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_CLEANUP_PLAN_VERSION;
+  ok: boolean;
+  dryRun: boolean;
+  runDir: string;
+  generatedAt: number;
+  indexed: boolean;
+  candidates: Array<{ path: string; reason: string; bytes: number; active: boolean; failed: boolean; deleted?: boolean }>;
+  blockedReasons: string[];
+  summary: { candidateCount: number; deletedCount: number; reclaimableBytes: number };
 }
 
 export type FrontierCodexApplyStatus = 'checked' | 'applied' | 'committed' | 'skipped' | 'failed';

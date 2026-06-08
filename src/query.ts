@@ -1,0 +1,163 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { FRONTIER_SWARM_CODEX_QUERY_KIND, FRONTIER_SWARM_CODEX_QUERY_VERSION } from './constants.js';
+import type { FrontierCodexArtifactRecord } from './index.js';
+import { isObject, pathExists, uniqueStrings } from './common.js';
+import { readCodexArtifactRecords } from './artifact-store.js';
+
+type CliValue = string | boolean | string[];
+type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
+
+export interface FrontierCodexQueryInput {
+  collection?: string;
+  run?: string;
+  q?: string;
+  jobId?: string;
+  bucket?: string;
+  kind?: string;
+  pathIncludes?: string;
+  tag?: string;
+  stale?: boolean;
+  semantic?: boolean;
+  passedTests?: boolean;
+  limit?: number;
+  cwd?: string;
+}
+
+export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) {
+  const collectionDir = await resolveCollectionDir(input);
+  const [artifacts, dashboard, evidenceIndex] = await Promise.all([
+    readCodexArtifactRecords(collectionDir).catch(() => []),
+    readJsonIfExists<{ jobs?: unknown[]; summary?: unknown }>(path.join(collectionDir, 'coordinator-query.json')),
+    readJsonIfExists<{ entries?: unknown[]; summary?: unknown }>(path.join(collectionDir, 'evidence-index.json'))
+  ]);
+  const jobs = (Array.isArray(dashboard?.jobs) ? dashboard.jobs : [])
+    .filter(isObject)
+    .filter((job) => matchesJob(job, input))
+    .slice(0, input.limit ?? 50);
+  const artifactRows = artifacts.filter((record) => matchesArtifact(record, input)).slice(0, input.limit ?? 100);
+  const evidenceRows = (Array.isArray(evidenceIndex?.entries) ? evidenceIndex.entries : [])
+    .filter(isObject)
+    .filter((entry) => matchesEvidence(entry, input))
+    .slice(0, input.limit ?? 100);
+  return {
+    kind: FRONTIER_SWARM_CODEX_QUERY_KIND,
+    version: FRONTIER_SWARM_CODEX_QUERY_VERSION,
+    ok: true,
+    collectionDir,
+    query: input,
+    summary: {
+      jobs: jobs.length,
+      artifacts: artifactRows.length,
+      evidence: evidenceRows.length,
+      touchedPaths: uniqueStrings(jobs.flatMap((job) => Array.isArray(job.changedPaths) ? job.changedPaths.filter((entry): entry is string => typeof entry === 'string') : []))
+    },
+    jobs,
+    artifacts: artifactRows,
+    evidence: evidenceRows
+  };
+}
+
+export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
+  const result = await queryCodexSwarmCollection({
+    cwd: process.cwd(),
+    collection: stringArg(args.collection),
+    run: stringArg(args.run),
+    q: stringArg(args.q ?? args.query),
+    jobId: stringArg(args.job ?? args.jobId ?? args['job-id']),
+    bucket: stringArg(args.bucket),
+    kind: stringArg(args.kind),
+    pathIncludes: stringArg(args.path ?? args['path-includes']),
+    tag: stringArg(args.tag),
+    stale: optionalBoolArg(args.stale),
+    semantic: optionalBoolArg(args.semantic),
+    passedTests: optionalBoolArg(args.passedTests ?? args['passed-tests']),
+    limit: numberArg(args.limit)
+  });
+  await writeMaybe(args, result);
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function resolveCollectionDir(input: Pick<FrontierCodexQueryInput, 'collection' | 'run' | 'cwd'>): Promise<string> {
+  const cwd = path.resolve(input.cwd ?? process.cwd());
+  const candidates = [
+    input.collection,
+    input.run ? path.join(input.run, 'collected') : undefined,
+    input.run ? path.join(input.run, 'collection') : undefined,
+    input.run
+  ].filter((entry): entry is string => !!entry).map((entry) => path.resolve(cwd, entry));
+  for (const candidate of candidates) {
+    if (await pathExists(path.join(candidate, 'coordinator-query.json')) || await pathExists(path.join(candidate, 'artifact-store', 'artifacts.jsonl'))) return candidate;
+  }
+  throw new Error('query requires --collection <dir> or --run <run-dir> with collected artifacts');
+}
+
+function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput): boolean {
+  const haystack = JSON.stringify(job).toLowerCase();
+  return matchesText(haystack, input)
+    && (input.jobId === undefined || job.jobId === input.jobId)
+    && (input.bucket === undefined || job.disposition === input.bucket || job.admissionStatus === input.bucket)
+    && (input.pathIncludes === undefined || arrayIncludes(job.changedPaths, input.pathIncludes))
+    && (input.stale === undefined || Boolean(job.staleAgainstHead) === input.stale)
+    && (input.semantic === undefined || Boolean(job.semanticImport) === input.semantic || Boolean(job.semanticImportQuality) === input.semantic)
+    && (input.passedTests === undefined || testsPassed(job) === input.passedTests);
+}
+
+function matchesArtifact(record: FrontierCodexArtifactRecord, input: FrontierCodexQueryInput): boolean {
+  const haystack = JSON.stringify(record).toLowerCase();
+  return matchesText(haystack, input)
+    && (input.jobId === undefined || record.jobId === input.jobId)
+    && (input.bucket === undefined || record.bucket === input.bucket)
+    && (input.kind === undefined || record.kind === input.kind)
+    && (input.pathIncludes === undefined || record.path.includes(input.pathIncludes))
+    && (input.tag === undefined || record.tags.includes(input.tag))
+    && (input.semantic === undefined || record.tags.includes('semantic-sidecar') === input.semantic);
+}
+
+function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQueryInput): boolean {
+  const haystack = JSON.stringify(entry).toLowerCase();
+  return matchesText(haystack, input)
+    && (input.jobId === undefined || entry.jobId === input.jobId)
+    && (input.bucket === undefined || entry.status === input.bucket)
+    && (input.kind === undefined || entry.kind === input.kind)
+    && (input.pathIncludes === undefined || String(entry.path ?? '').includes(input.pathIncludes))
+    && (input.tag === undefined || Array.isArray(entry.tags) && entry.tags.includes(input.tag));
+}
+
+function matchesText(haystack: string, input: FrontierCodexQueryInput): boolean {
+  return input.q === undefined || haystack.includes(input.q.toLowerCase());
+}
+
+function testsPassed(job: Record<string, unknown>): boolean {
+  const tests = isObject(job.tests) ? job.tests : {};
+  return Number(tests.requiredFailed ?? 0) === 0 && Number(tests.failed ?? 0) === 0;
+}
+
+function arrayIncludes(value: unknown, needle: string): boolean {
+  return Array.isArray(value) && value.some((entry) => typeof entry === 'string' && entry.includes(needle));
+}
+
+async function readJsonIfExists<T>(file: string): Promise<T | undefined> {
+  if (!await pathExists(file)) return undefined;
+  return JSON.parse(await fs.readFile(file, 'utf8')) as T;
+}
+
+async function writeMaybe(args: CliArgs, result: unknown): Promise<void> {
+  const out = stringArg(args.out ?? args.outFile ?? args['out-file']);
+  if (out) await fs.writeFile(path.resolve(process.cwd(), out), JSON.stringify(result, null, 2) + '\n');
+}
+
+function stringArg(value: CliValue | undefined): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function numberArg(value: CliValue | undefined): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function optionalBoolArg(value: CliValue | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (value === true) return true;
+  return /^(1|true|yes|on)$/i.test(String(value));
+}

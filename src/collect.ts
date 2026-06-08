@@ -22,6 +22,7 @@ import { createCodexCompactDashboard } from './dashboard.js';
 import { bundlePatchStaleness, classifyCodexCollectBucket, mergeRecordScore, normalizeCollectedMergeBundle } from './collect-bundles.js';
 import { copyOrWriteCollectedEvidenceSummary, createCollectedEvidenceEntries } from './collect-evidence.js';
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
+import { createCodexArtifactStore } from './artifact-store.js';
 
 
 export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Promise<FrontierCodexCollectResult> {
@@ -204,6 +205,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   await fs.writeFile(path.join(outDir, 'merge-admission.json'), JSON.stringify(admission, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'coordinator-query.json'), JSON.stringify(dashboard, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'compact-dashboard.json'), JSON.stringify(compactDashboard, null, 2) + '\n');
+  result.artifactStore = await createCodexArtifactStore({ collection: result });
+  await fs.writeFile(path.join(outDir, 'collection.json'), JSON.stringify(result, null, 2) + '\n');
   return result;
 }
 

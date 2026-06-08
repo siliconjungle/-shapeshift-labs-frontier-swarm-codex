@@ -4,6 +4,8 @@ import path from 'node:path';
 import { applyCodexSwarmCollection, checkCodexDependencyHealth, coerceCodexSwarmManifestInput, coerceCodexSwarmTasksInput, collectCodexSwarmRun, createCodexSwarmPlan, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, writeCodexDependencyHealthReport, type FrontierCodexModelPolicy, type FrontierCodexSwarmRunOptions } from './index.js';
 import { printHelp } from './cli-help.js';
 import { handleCodexTournamentCommand } from './tournament-query.js';
+import { handleCodexQueryCommand } from './query.js';
+import { handleCodexCleanupCommand } from './cleanup.js';
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
 const args = parseArgs(process.argv.slice(2));
@@ -109,6 +111,10 @@ try {
     if (!result.ok) process.exitCode = 1;
   } else if (command === 'tournament') {
     await handleCodexTournamentCommand(args);
+  } else if (command === 'query') {
+    await handleCodexQueryCommand(args);
+  } else if (command === 'cleanup') {
+    await handleCodexCleanupCommand(args);
   } else if (command === 'repair-links') {
     const result = await repairCodexWorkspacePackageLinks({
       root: stringArg(args.root),
