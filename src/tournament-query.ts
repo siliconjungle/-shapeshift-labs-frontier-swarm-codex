@@ -14,7 +14,10 @@ import {
   FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_KIND,
   FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_VERSION
 } from './constants.js';
-import { pathExists } from './common.js';
+import { isObject, pathExists } from './common.js';
+import type { FrontierCodexCompactDashboard } from './types-evidence.js';
+import type { FrontierCodexSemanticImportQuality } from './types-semantic.js';
+import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
@@ -38,6 +41,19 @@ export interface FrontierCodexTournamentQueryInput {
   cwd?: string;
 }
 
+export interface FrontierCodexTournamentSemanticImportQueryRecord {
+  summary?: FrontierCodexCompactDashboard['semanticImport'];
+  jobs: Array<{
+    jobId: string;
+    lane?: string;
+    disposition?: string;
+    mergeScore?: number;
+    changedPaths: string[];
+    semanticImportQuality: FrontierCodexSemanticImportQuality;
+  }>;
+  sources: string[];
+}
+
 export async function queryCodexSwarmTournament(input: FrontierCodexTournamentQueryInput) {
   const tournamentPath = await resolveTournamentPath(input);
   const source = await readTournament(tournamentPath);
@@ -52,7 +68,8 @@ export async function queryCodexSwarmTournament(input: FrontierCodexTournamentQu
     minScore: input.minScore,
     maxScore: input.maxScore
   });
-  return tournamentView(tournament, tournamentPath, input.view ?? 'standings', input.limit);
+  const semanticImport = await readTournamentSemanticImportQueryRecord(await resolveCollectionDir(input, tournamentPath));
+  return tournamentView(tournament, tournamentPath, input.view ?? 'standings', input.limit, semanticImport);
 }
 
 export async function compareCodexSwarmTournaments(input: { baseline: string; current: string; cwd?: string; scoreThreshold?: number }) {
@@ -119,7 +136,13 @@ async function feedbackCommand(args: CliArgs, cwd: string) {
   });
 }
 
-function tournamentView(tournament: FrontierSwarmStrategyTournament, tournamentPath: string, view: FrontierCodexTournamentView, limit?: number) {
+function tournamentView(
+  tournament: FrontierSwarmStrategyTournament,
+  tournamentPath: string,
+  view: FrontierCodexTournamentView,
+  limit?: number,
+  semanticImport?: FrontierCodexTournamentSemanticImportQueryRecord
+) {
   const standings = limit ? tournament.standings.slice(0, limit) : tournament.standings;
   const matches = limit ? tournament.matches.slice(0, limit) : tournament.matches;
   return {
@@ -129,10 +152,86 @@ function tournamentView(tournament: FrontierSwarmStrategyTournament, tournamentP
     tournamentPath,
     view,
     summary: tournament.summary,
+    ...(semanticImport ? { semanticImport } : {}),
     ...(view === 'standings' || view === 'full' ? { standings } : {}),
     ...(view === 'matches' || view === 'full' ? { matches } : {}),
     ...(view === 'full' ? { tournament } : {})
   };
+}
+
+async function resolveCollectionDir(
+  input: Pick<FrontierCodexTournamentQueryInput, 'collection' | 'run' | 'cwd'>,
+  tournamentPath: string
+): Promise<string | undefined> {
+  const cwd = path.resolve(input.cwd ?? process.cwd());
+  const candidates = [
+    input.collection,
+    input.run ? path.join(input.run, 'collected') : undefined,
+    input.run ? path.join(input.run, 'collection') : undefined,
+    path.dirname(tournamentPath)
+  ].filter((entry): entry is string => !!entry).map((entry) => path.resolve(cwd, entry));
+  for (const candidate of candidates) {
+    if (await pathExists(path.join(candidate, 'compact-dashboard.json')) || await pathExists(path.join(candidate, 'coordinator-query.json'))) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+async function readTournamentSemanticImportQueryRecord(
+  collectionDir: string | undefined
+): Promise<FrontierCodexTournamentSemanticImportQueryRecord | undefined> {
+  if (!collectionDir) return undefined;
+  const compactPath = path.join(collectionDir, 'compact-dashboard.json');
+  const dashboardPath = path.join(collectionDir, 'coordinator-query.json');
+  const compact = await readJsonIfExists<FrontierCodexCompactDashboard>(compactPath);
+  const dashboard = await readJsonIfExists<{ jobs?: unknown[] }>(dashboardPath);
+  const expected = compact?.semanticImport.expected ?? false;
+  const jobs = Array.isArray(dashboard?.jobs)
+    ? dashboard.jobs.map((entry) => semanticImportJobQueryRecord(entry, expected)).filter((entry): entry is FrontierCodexTournamentSemanticImportQueryRecord['jobs'][number] => Boolean(entry))
+    : compact?.topJobs.map((entry) => ({
+      jobId: entry.jobId,
+      ...(entry.lane ? { lane: entry.lane } : {}),
+      disposition: entry.disposition,
+      mergeScore: entry.mergeScore,
+      changedPaths: [...entry.changedPaths],
+      semanticImportQuality: entry.semanticImportQuality ?? summarizeCodexSemanticImportQuality(undefined, expected)
+    })) ?? [];
+  if (!compact && jobs.length === 0) return undefined;
+  return {
+    ...(compact ? { summary: compact.semanticImport } : {}),
+    jobs,
+    sources: [
+      ...(compact ? [compactPath] : []),
+      ...(dashboard ? [dashboardPath] : [])
+    ]
+  };
+}
+
+function semanticImportJobQueryRecord(
+  value: unknown,
+  expected: boolean
+): FrontierCodexTournamentSemanticImportQueryRecord['jobs'][number] | undefined {
+  if (!isObject(value) || typeof value.jobId !== 'string') return undefined;
+  return {
+    jobId: value.jobId,
+    ...(typeof value.lane === 'string' ? { lane: value.lane } : {}),
+    ...(typeof value.disposition === 'string' ? { disposition: value.disposition } : {}),
+    ...(typeof value.mergeScore === 'number' ? { mergeScore: value.mergeScore } : {}),
+    changedPaths: Array.isArray(value.changedPaths) ? value.changedPaths.filter((entry): entry is string => typeof entry === 'string') : [],
+    semanticImportQuality: isObject(value.semanticImportQuality)
+      ? value.semanticImportQuality as unknown as FrontierCodexSemanticImportQuality
+      : summarizeCodexSemanticImportQuality(isObject(value.semanticImport) ? value.semanticImport as Parameters<typeof summarizeCodexSemanticImportQuality>[0] : undefined, expected)
+  };
+}
+
+async function readJsonIfExists<T>(file: string): Promise<T | undefined> {
+  if (!await pathExists(file)) return undefined;
+  try {
+    return JSON.parse(await fs.readFile(file, 'utf8')) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 async function resolveTournamentPath(input: Pick<FrontierCodexTournamentQueryInput, 'tournament' | 'collection' | 'run' | 'cwd'>): Promise<string> {

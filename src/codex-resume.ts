@@ -7,6 +7,12 @@ import {
 } from './constants.js';
 import { isObject, pathExists, uniqueStrings } from './common.js';
 import { runCodexSwarm } from './codex-run.js';
+import {
+  readResumeArray,
+  readResumeObjectArray,
+  readResumeString,
+  summarizeResumeJobs
+} from './codex-resume-summary.js';
 import type {
   FrontierCodexResumeJob,
   FrontierCodexResumeJobStatus,
@@ -72,39 +78,67 @@ async function inspectResumeJob(
   options: FrontierCodexResumeOptions
 ): Promise<FrontierCodexResumeJob> {
   const paths = await discoverResumeEvidence(runDir, job, result);
-  const status = classifyResumeStatus(result, paths);
+  const classification = classifyResumeStatus(result, paths);
   return {
     jobId: job.id,
     taskId: job.taskId,
     lane: job.lane,
-    status,
-    shouldResume: shouldResumeStatus(status, options),
-    reason: resumeReason(status),
+    status: classification.status,
+    shouldResume: shouldResumeStatus(classification.status, options),
+    reason: classification.reason,
     evidencePaths: paths.evidence,
     ...(paths.lastMessage ? { lastMessagePath: paths.lastMessage } : {}),
     ...(result ? { previousResultPath: path.join(runDir, 'swarm-results.json') } : {})
   };
 }
 
+interface FrontierCodexResumeEvidenceDiscovery {
+  evidence: string[];
+  lastMessage?: string;
+  lastMessageText?: string;
+  mergeBundle?: Record<string, unknown>;
+  evidenceSummary?: Record<string, unknown>;
+  patchIntent?: Record<string, unknown>;
+  logSummary?: Record<string, unknown>;
+}
+
+interface FrontierCodexResumeClassification {
+  status: FrontierCodexResumeJobStatus;
+  reason: string;
+}
+
 async function discoverResumeEvidence(
   runDir: string,
   job: FrontierSwarmJob,
   result: FrontierSwarmJobResult | undefined
-): Promise<{ evidence: string[]; lastMessage?: string }> {
+): Promise<FrontierCodexResumeEvidenceDiscovery> {
   const jobDir = path.join(runDir, job.id);
+  const lastMessagePath = path.join(jobDir, 'last-message.md');
+  const evidenceSummaryPath = path.join(jobDir, 'evidence', 'evidence.json');
+  const mergeBundlePath = path.join(jobDir, 'evidence', 'merge.json');
+  const patchIntentPath = path.join(jobDir, 'evidence', 'patch-intent.json');
+  const logSummaryPath = path.join(jobDir, 'evidence', 'log-summary.json');
   const candidates = [
-    path.join(jobDir, 'last-message.md'),
-    path.join(jobDir, 'evidence', 'evidence.json'),
-    path.join(jobDir, 'evidence', 'merge.json'),
-    path.join(jobDir, 'evidence', 'patch-intent.json'),
+    lastMessagePath,
+    evidenceSummaryPath,
+    mergeBundlePath,
+    patchIntentPath,
     path.join(jobDir, 'evidence', 'semantic-imports.json'),
-    path.join(jobDir, 'evidence', 'log-summary.json'),
+    logSummaryPath,
     ...(result?.evidencePaths ?? [])
   ];
   const existing: string[] = [];
   for (const candidate of uniqueStrings(candidates)) if (await pathExists(candidate)) existing.push(candidate);
   const lastMessage = existing.find((entry) => entry.endsWith('last-message.md'));
-  return { evidence: existing, ...(lastMessage ? { lastMessage } : {}) };
+  return {
+    evidence: existing,
+    ...(lastMessage ? { lastMessage } : {}),
+    ...(lastMessage ? { lastMessageText: await fs.readFile(lastMessage, 'utf8').catch(() => '') } : {}),
+    ...(await readOptionalJson(mergeBundlePath).then((mergeBundle) => mergeBundle ? { mergeBundle } : {})),
+    ...(await readOptionalJson(evidenceSummaryPath).then((evidenceSummary) => evidenceSummary ? { evidenceSummary } : {})),
+    ...(await readOptionalJson(patchIntentPath).then((patchIntent) => patchIntent ? { patchIntent } : {})),
+    ...(await readOptionalJson(logSummaryPath).then((logSummary) => logSummary ? { logSummary } : {}))
+  };
 }
 
 async function readPreviousResults(runDir: string, plan: FrontierSwarmPlan): Promise<Map<string, FrontierSwarmJobResult>> {
@@ -175,18 +209,28 @@ function renderResumePromptPrefix(overlay: FrontierCodexResumeOverlay, jobId: st
 
 function classifyResumeStatus(
   result: FrontierSwarmJobResult | undefined,
-  paths: { evidence: string[] }
-): FrontierCodexResumeJobStatus {
-  if (result?.status === 'completed') return 'completed';
-  if (result?.status === 'failed') return 'failed';
-  if (result?.status === 'blocked') return 'blocked';
-  return paths.evidence.length > 0 ? 'partial' : 'missing';
+  paths: FrontierCodexResumeEvidenceDiscovery
+): FrontierCodexResumeClassification {
+  const resultStatus = terminalResumeStatus(result?.status);
+  if (resultStatus) return { status: resultStatus, reason: resumeReason(resultStatus) };
+  const structured = classifyStructuredResumeEvidence(paths);
+  if (structured) return structured;
+  const lastMessage = classifyLastMessageEvidence(paths.lastMessageText);
+  if (lastMessage) return lastMessage;
+  if (paths.logSummary) {
+    return { status: 'rerun-needed', reason: 'only log summary evidence exists; worker output should be rerun' };
+  }
+  if (paths.evidence.length > 0) {
+    return { status: 'rerun-needed', reason: 'prior evidence is incomplete and needs rerun' };
+  }
+  return { status: 'rerun-needed', reason: 'no prior result or usable evidence was found' };
 }
 
 function shouldResumeStatus(status: FrontierCodexResumeJobStatus, options: FrontierCodexResumeOptions): boolean {
   if (status === 'completed') return options.includeCompleted === true;
   if (status === 'failed') return options.includeFailed !== false;
   if (status === 'blocked') return options.includeBlocked !== false;
+  if (status === 'evidence-only') return options.includeEvidenceOnly === true;
   return true;
 }
 
@@ -194,17 +238,62 @@ function resumeReason(status: FrontierCodexResumeJobStatus): string {
   if (status === 'completed') return 'completed in previous run';
   if (status === 'failed') return 'previous worker failed and may need continuation or rerun';
   if (status === 'blocked') return 'previous worker reported a blocker';
-  if (status === 'partial') return 'partial evidence exists without a completed result';
-  return 'no prior result was found';
+  if (status === 'evidence-only') return 'usable evidence exists without a run result';
+  return 'job needs rerun';
 }
 
-function summarizeResumeJobs(jobs: readonly FrontierCodexResumeJob[]): FrontierCodexResumeOverlay['summary'] {
-  const summary = { total: jobs.length, completed: 0, failed: 0, blocked: 0, partial: 0, missing: 0, resume: 0 };
-  for (const job of jobs) {
-    summary[job.status] += 1;
-    if (job.shouldResume) summary.resume += 1;
+function terminalResumeStatus(status: unknown): FrontierCodexResumeJobStatus | undefined {
+  const normalized = typeof status === 'string' ? status.toLowerCase() : '';
+  if (normalized === 'completed' || normalized === 'verified') return 'completed';
+  if (normalized === 'failed') return 'failed';
+  if (normalized === 'blocked') return 'blocked';
+  return undefined;
+}
+
+function classifyStructuredResumeEvidence(paths: FrontierCodexResumeEvidenceDiscovery): FrontierCodexResumeClassification | undefined {
+  const records = [paths.mergeBundle, paths.evidenceSummary, paths.patchIntent].filter(isObject);
+  if (!records.length) return undefined;
+  const statuses = records.map((record) => terminalResumeStatus(readResumeString(record, 'status'))).filter(Boolean);
+  if (statuses.includes('blocked')) return { status: 'blocked', reason: 'blocked status recovered from existing evidence' };
+  if (records.some(recordIndicatesBlocked)) return { status: 'blocked', reason: 'blocked evidence recovered from merge or evidence summary' };
+  if (statuses.includes('failed')) return { status: 'failed', reason: 'failed status recovered from existing evidence' };
+  if (records.some(recordIndicatesFailed)) return { status: 'failed', reason: 'failed evidence recovered from merge or evidence summary' };
+  if (statuses.includes('completed')) return { status: 'completed', reason: 'completed status recovered from existing evidence' };
+  if (records.some(recordIndicatesCompleted)) return { status: 'completed', reason: 'completed merge evidence recovered without swarm results' };
+  return { status: 'evidence-only', reason: 'structured evidence exists without a terminal run result' };
+}
+
+function recordIndicatesBlocked(record: Record<string, unknown>): boolean {
+  return readResumeString(record, 'mergeReadiness') === 'blocked' || readResumeString(record, 'disposition') === 'blocked';
+}
+
+function recordIndicatesFailed(record: Record<string, unknown>): boolean {
+  if (readResumeString(record, 'mergeReadiness') === 'rejected' || readResumeString(record, 'disposition') === 'rejected') return true;
+  if (readResumeString(record, 'status') === 'failed') return true;
+  if (readResumeObjectArray(record.commandsFailed).length > 0) return true;
+  if (readResumeArray(record.ownershipViolations).length > 0) return true;
+  const commands = isObject(record.commands) ? record.commands : undefined;
+  if (commands && readResumeObjectArray(commands.failed).length > 0) return true;
+  return readResumeObjectArray(record.verification).some((entry) => entry.required !== false && typeof entry.status === 'number' && entry.status !== 0);
+}
+
+function recordIndicatesCompleted(record: Record<string, unknown>): boolean {
+  return readResumeString(record, 'mergeReadiness') === 'verified-patch' || readResumeString(record, 'disposition') === 'auto-mergeable';
+}
+
+function classifyLastMessageEvidence(text: string | undefined): FrontierCodexResumeClassification | undefined {
+  const normalized = text?.toLowerCase() ?? '';
+  if (!normalized.trim()) return undefined;
+  if (/\b(blocked|blocker|cannot proceed|waiting for)\b/.test(normalized)) {
+    return { status: 'blocked', reason: 'last-message reports a blocker' };
   }
-  return summary;
+  if (/\b(test failed|tests failed|verification failed|failed verification|unable to complete|could not complete)\b|error:/.test(normalized)) {
+    return { status: 'failed', reason: 'last-message reports failure evidence' };
+  }
+  if (/\b(no remaining gaps|remaining gaps:\s*(none|no\b)|completed|implemented|done|tests pass|tests passed|verification passed)\b|commands run:|changed files:|evidence paths:/.test(normalized)) {
+    return { status: 'evidence-only', reason: 'last-message contains a usable handoff without a run result' };
+  }
+  return undefined;
 }
 
 async function resolveRunDir(run: string): Promise<string> {
@@ -218,7 +307,11 @@ async function readJson<T>(file: string): Promise<T> {
 }
 
 async function readOptionalJson(file: string): Promise<Record<string, unknown> | undefined> {
-  if (!await pathExists(file)) return undefined;
-  const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
-  return isObject(parsed) ? parsed : undefined;
+  try {
+    if (!await pathExists(file)) return undefined;
+    const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
+    return isObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }

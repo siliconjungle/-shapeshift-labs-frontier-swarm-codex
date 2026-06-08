@@ -56,6 +56,7 @@ export interface FrontierCodexJobEvidenceSummary {
   patchHunks: FrontierCodexPatchHunkSummary[];
   readyToPortHunkCount: number;
   semanticImport?: FrontierCodexSemanticImportSidecar['summary'];
+  semanticImportQuality?: FrontierCodexSemanticImportQuality;
   traceSummary?: FrontierCodexTraceSummary;
   sourceCitations: Array<{ path: string; kind: string; language?: string; hash?: string }>;
   metadata?: Record<string, unknown>;
@@ -118,9 +119,15 @@ export interface FrontierCodexCompactDashboard {
     expectedSatisfiedCount: number;
     expectedUnsatisfiedCount: number;
     expectedMissingReasonCodes: string[];
+    selectedCount: number;
+    eligibleCount: number;
+    importedCount: number;
+    candidateCount: number;
     presentCount: number;
     emptyCount: number;
     weakCount: number;
+    warningCount: number;
+    warnings: string[];
     symbolCount: number;
     ownershipRegionCount: number;
     patchHintCount: number;

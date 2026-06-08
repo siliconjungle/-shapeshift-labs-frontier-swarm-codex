@@ -9,6 +9,7 @@ import {
   createSwarmStrategyTournamentHistory,
   createSwarmTournamentAdaptiveFeedback,
   createSwarmQueueOverlay,
+  type FrontierSwarmCoordinatorDashboard,
   type FrontierSwarmCoordinatorProcessInput,
   type FrontierSwarmEvidenceIndexEntryInput,
   type FrontierSwarmMergeBundle,
@@ -20,6 +21,7 @@ import { findFilesByName, isObject, pathExists, pathHasIgnoredSegment, resolveBu
 import { createCodexCompactDashboard } from './dashboard.js';
 import { bundlePatchStaleness, classifyCodexCollectBucket, mergeRecordScore, normalizeCollectedMergeBundle } from './collect-bundles.js';
 import { copyOrWriteCollectedEvidenceSummary, createCollectedEvidenceEntries } from './collect-evidence.js';
+import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 
 
 export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Promise<FrontierCodexCollectResult> {
@@ -36,6 +38,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const collectedBundles: FrontierSwarmMergeBundle[] = [];
   const evidenceEntries: FrontierSwarmEvidenceIndexEntryInput[] = [];
   const patchStatuses: Record<string, FrontierSwarmPatchStatus> = {};
+  const semanticImportExpected = input.semanticImportExpected ?? false;
+  const semanticImportQualities = new Map<string, ReturnType<typeof summarizeCodexSemanticImportQuality>>();
   const processes = await readCodexPidProcesses(path.join(runDir, 'pids.json')).catch(() => []);
   const mergePaths = (await findFilesByName(runDir, 'merge.json'))
     .filter((mergePath) => !pathHasIgnoredSegment(path.relative(runDir, mergePath), [
@@ -65,6 +69,9 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(bundle.jobId)}` : bundle.branchName;
     const outputDir = path.join(outDir, bucket, slug(bundle.jobId));
     const collectedEvidencePath = path.join(outputDir, 'evidence.json');
+    const semanticImport = semanticImportSummaryFromBundle(bundle);
+    const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
+    semanticImportQualities.set(bundle.jobId, semanticImportQuality);
     const collectReasons = staleness.patchStatus === 'applies'
       ? bundle.reasons
       : uniqueStrings([...bundle.reasons, ...staleness.reasons]);
@@ -75,13 +82,15 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       disposition: staleAgainstHead ? 'stale-against-head' : bundle.disposition,
       autoMergeable: bucket === 'ready-to-apply' && bundle.autoMergeable,
       reasons: collectReasons,
+      ...(semanticImport ? { semanticImport } : {}),
       metadata: {
         ...(isObject(bundle.metadata) ? bundle.metadata : {}),
         collect: {
           patchStatus: staleness.patchStatus,
-          staleReasons: staleness.reasons
+          staleReasons: staleness.reasons,
+          semanticImportQuality
         }
-      },
+      } as unknown as FrontierSwarmMergeBundle['metadata'],
       evidencePaths: uniqueStrings([...bundle.evidencePaths, collectedEvidencePath])
     };
     collectedBundles.push(nextBundle);
@@ -96,9 +105,10 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       mergePath,
       patchPath,
       patchStatus: patchStatuses[nextBundle.jobId],
-      staleReasons: staleness.reasons
+      staleReasons: staleness.reasons,
+      semanticImportExpected
     });
-    evidenceEntries.push(...createCollectedEvidenceEntries(nextBundle, collectedEvidencePath, bucket));
+    evidenceEntries.push(...createCollectedEvidenceEntries(nextBundle, collectedEvidencePath, bucket, semanticImportExpected));
     buckets[bucket].push({ bucket, jobId: bundle.jobId, mergePath, outputDir, bundle: nextBundle });
   }
   const mergeIndex = createSwarmMergeIndex({
@@ -139,7 +149,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     allowRisks: ['low', 'medium', 'unknown'],
     generatedAt
   });
-  const dashboard = createSwarmCoordinatorDashboard({
+  const dashboard = enrichCollectedCoordinatorDashboard(createSwarmCoordinatorDashboard({
     bundles: collectedBundles,
     mergeIndex,
     queueOverlay,
@@ -148,12 +158,12 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     processes,
     generatedAt,
     metadata: { runDir, outDir }
-  });
+  }), semanticImportQualities, semanticImportExpected);
   const compactDashboard = createCodexCompactDashboard({
     runDir,
     dashboard,
     strategyTournament,
-    semanticImportExpected: input.semanticImportExpected ?? false,
+    semanticImportExpected,
     generatedAt
   });
   const summary = {
@@ -180,6 +190,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     admission,
     dashboard,
     compactDashboard,
+    semanticImport: compactDashboard.semanticImport,
     summary
   };
   await fs.mkdir(outDir, { recursive: true });
@@ -194,6 +205,54 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   await fs.writeFile(path.join(outDir, 'coordinator-query.json'), JSON.stringify(dashboard, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'compact-dashboard.json'), JSON.stringify(compactDashboard, null, 2) + '\n');
   return result;
+}
+
+function enrichCollectedCoordinatorDashboard(
+  dashboard: FrontierSwarmCoordinatorDashboard,
+  qualities: ReadonlyMap<string, ReturnType<typeof summarizeCodexSemanticImportQuality>>,
+  semanticImportExpected: boolean
+): FrontierSwarmCoordinatorDashboard {
+  const mutable = dashboard as FrontierSwarmCoordinatorDashboard & {
+    jobs: Array<FrontierSwarmCoordinatorDashboard['jobs'][number] & { semanticImportQuality?: ReturnType<typeof summarizeCodexSemanticImportQuality> }>;
+    summary: FrontierSwarmCoordinatorDashboard['summary'] & Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  };
+  const semanticQualities = dashboard.jobs.map((job) => qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected));
+  mutable.jobs = dashboard.jobs.map((job) => {
+    const semanticImportQuality = qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected);
+    return { ...job, semanticImportQuality };
+  });
+  mutable.summary = {
+    ...dashboard.summary,
+    semanticImportExpectedCount: semanticQualities.filter((entry) => entry.expected).length,
+    semanticImportExpectedSatisfiedCount: semanticQualities.filter((entry) => entry.expected && entry.expectedSatisfied).length,
+    semanticImportExpectedUnsatisfiedCount: semanticQualities.filter((entry) => entry.expected && !entry.expectedSatisfied).length,
+    semanticImportCandidateCount: semanticQualities.reduce((sum, entry) => sum + entry.candidates, 0),
+    semanticImportSelectedCount: semanticQualities.reduce((sum, entry) => sum + entry.selected, 0),
+    semanticImportEligibleCount: semanticQualities.reduce((sum, entry) => sum + entry.eligible, 0),
+    semanticImportImportedCount: semanticQualities.reduce((sum, entry) => sum + entry.imported, 0),
+    semanticImportWarningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
+    semanticImportWarnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings)),
+    semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
+  };
+  mutable.metadata = {
+    ...(mutable.metadata ?? {}),
+    semanticImport: {
+      expected: semanticImportExpected,
+      expectedSatisfiedCount: semanticQualities.filter((entry) => entry.expected && entry.expectedSatisfied).length,
+      expectedUnsatisfiedCount: semanticQualities.filter((entry) => entry.expected && !entry.expectedSatisfied).length,
+      expectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes)),
+      candidateCount: semanticQualities.reduce((sum, entry) => sum + entry.candidates, 0),
+      selectedCount: semanticQualities.reduce((sum, entry) => sum + entry.selected, 0),
+      eligibleCount: semanticQualities.reduce((sum, entry) => sum + entry.eligible, 0),
+      importedCount: semanticQualities.reduce((sum, entry) => sum + entry.imported, 0),
+      symbolCount: semanticQualities.reduce((sum, entry) => sum + entry.symbols, 0),
+      ownershipRegionCount: semanticQualities.reduce((sum, entry) => sum + entry.ownershipRegions, 0),
+      warningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
+      warnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings))
+    }
+  };
+  return mutable;
 }
 
 export async function readCodexPidProcesses(file: string): Promise<FrontierSwarmCoordinatorProcessInput[]> {

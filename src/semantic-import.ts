@@ -25,7 +25,7 @@ export async function createCodexSemanticImportSidecar(input: {
 }): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
   const options = normalizeSemanticImportOptions(input.options);
   if (!options) return undefined;
-  const selection = selectSemanticImportPaths(semanticImportCandidatePaths(input.job, input.changedPaths), options);
+  const selection = selectSemanticImportPaths(semanticImportCandidatePaths(input.job, input.changedPaths, input.workspace), options);
   const selected = selection.selected;
   const records: FrontierCodexSemanticImportRecord[] = [];
   const importPath = path.join(input.evidenceDir, 'semantic-imports.json');

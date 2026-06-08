@@ -113,7 +113,7 @@ export function matchesSemanticImportGlob(file: string, glob: string): boolean {
 
 
 
-export function semanticImportCandidatePaths(job: FrontierSwarmJob, changedPaths: readonly string[]): string[] {
+export function semanticImportCandidatePaths(job: FrontierSwarmJob, changedPaths: readonly string[], workspace?: string): string[] {
   const concreteRefs = [
     ...job.task.sourceRefs,
     ...job.task.targetRefs,
@@ -123,7 +123,31 @@ export function semanticImportCandidatePaths(job: FrontierSwarmJob, changedPaths
     const normalized = normalizeWorkspacePath(file);
     return normalized && path.extname(normalized).length > 0;
   });
-  return uniqueWorkspacePaths([...changedPaths, ...concreteRefs]);
+  return uniqueWorkspacePaths([...normalizeSemanticImportCandidatePaths(changedPaths, workspace), ...concreteRefs]);
+}
+
+
+
+export function normalizeSemanticImportCandidatePaths(paths: readonly string[], workspace?: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const file of paths) {
+    const normalized = normalizeSemanticImportCandidatePath(file, workspace);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+
+
+export function normalizeSemanticImportCandidatePath(file: string, workspace?: string): string | undefined {
+  const value = String(file ?? '').trim();
+  const normalized = normalizeWorkspacePath(value);
+  if (normalized) return normalized;
+  if (!workspace || !path.isAbsolute(value)) return undefined;
+  return normalizeWorkspacePath(path.relative(workspace, value).replace(/\\/g, '/'));
 }
 
 

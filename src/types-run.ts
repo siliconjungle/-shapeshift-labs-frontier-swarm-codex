@@ -45,6 +45,17 @@ export interface FrontierCodexAdaptiveConcurrencyOptions {
   writePlan?: boolean;
 }
 
+export interface FrontierCodexResourceSchedulingOptions {
+  enabled?: boolean;
+  browserConcurrency?: number;
+  staticCheckConcurrency?: number;
+  apiCheckConcurrency?: number;
+  fuzzerConcurrency?: number;
+  laneConcurrency?: Record<string, number>;
+  capabilityConcurrency?: Record<string, number>;
+  resourceQuotas?: Record<string, number>;
+}
+
 export interface FrontierCodexCompactLogOptions {
   enabled?: boolean;
   maxEventBytes?: number;
@@ -153,6 +164,7 @@ export interface FrontierCodexSwarmRunOptions {
   codexPath?: string;
   maxConcurrency?: number;
   adaptiveConcurrency?: boolean | FrontierCodexAdaptiveConcurrencyOptions;
+  resourceScheduling?: boolean | FrontierCodexResourceSchedulingOptions;
   compactLogs?: boolean | FrontierCodexCompactLogOptions;
   dependencyHealth?: boolean | FrontierCodexDependencyHealthOptions;
   semanticImportExpected?: boolean;

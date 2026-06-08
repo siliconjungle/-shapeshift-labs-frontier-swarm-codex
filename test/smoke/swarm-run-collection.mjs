@@ -2,12 +2,12 @@ import assert from 'node:assert';
 import {
   collectCodexSwarmRun,
   createBrowserPlan,
-  execFileP,
   exists,
   fs,
   path,
   runCodexSwarm
 } from './context.mjs';
+import { testNoIndexCollection } from './swarm-run-no-index.mjs';
 
 export async function testSwarmRunCollection({ plan, tmp }) {
   const result = await runCodexSwarm(plan, {
@@ -188,6 +188,11 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(collection.compactDashboard.semanticImport.presentCount, 1);
   assert.strictEqual(collection.compactDashboard.semanticImport.expected, true);
   assert.strictEqual(collection.compactDashboard.semanticImport.expectedUnsatisfiedCount, 0);
+  assert.strictEqual(collection.semanticImport.selectedCount, 1);
+  assert.strictEqual(collection.semanticImport.eligibleCount, 1);
+  assert.strictEqual(collection.semanticImport.importedCount, 1);
+  assert.strictEqual(collection.semanticImport.candidateCount, 1);
+  assert.strictEqual(collection.semanticImport.warningCount, 0);
   assert.ok(collection.compactDashboard.semanticImport.universalAstLayerCount >= 0);
   assert.ok(collection.compactDashboard.semanticImport.dependencyRelationCount >= 1);
   assert.ok(collection.compactDashboard.semanticImport.dependencyPredicates.includes('calls'));
@@ -195,94 +200,38 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(collection.compactDashboard.semanticImport.proofSpecFailedObligations, 0);
   const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
   assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
+  assert.strictEqual(collectedMergeBundle.metadata.collect.semanticImportQuality.selected, 1);
+  assert.strictEqual(collectedMergeBundle.metadata.collect.semanticImportQuality.eligible, 1);
+  assert.strictEqual(collectedMergeBundle.metadata.collect.semanticImportQuality.imported, 1);
+  assert.strictEqual(collectedMergeBundle.metadata.collect.semanticImportQuality.candidates, 1);
+  assert.ok(collectedMergeBundle.metadata.collect.semanticImportQuality.symbols >= 1);
+  assert.ok(collectedMergeBundle.metadata.collect.semanticImportQuality.ownershipRegions >= 1);
+  assert.deepStrictEqual(collectedMergeBundle.metadata.collect.semanticImportQuality.warnings, []);
+  const collectedEvidence = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'evidence.json'), 'utf8'));
+  assert.strictEqual(collectedEvidence.semanticImportQuality.selected, 1);
+  assert.strictEqual(collectedEvidence.semanticImportQuality.eligible, 1);
+  assert.strictEqual(collectedEvidence.semanticImportQuality.imported, 1);
+  assert.strictEqual(collectedEvidence.semanticImportQuality.candidates, 1);
+  assert.ok(collectedEvidence.semanticImportQuality.symbols >= 1);
+  assert.ok(collectedEvidence.semanticImportQuality.ownershipRegions >= 1);
+  const evidenceIndex = JSON.parse(await fs.readFile(path.join(collection.outDir, 'evidence-index.json'), 'utf8'));
+  assert.strictEqual(evidenceIndex.entries[0].facets.semanticSelected, 1);
+  assert.strictEqual(evidenceIndex.entries[0].facets.semanticEligible, 1);
+  assert.strictEqual(evidenceIndex.entries[0].facets.semanticImported, 1);
+  assert.strictEqual(evidenceIndex.entries[0].facets.semanticCandidates, 1);
+  assert.strictEqual(evidenceIndex.entries[0].facets.semanticWarningCount, 0);
   const coordinatorQuery = JSON.parse(await fs.readFile(path.join(collection.outDir, 'coordinator-query.json'), 'utf8'));
   assert.strictEqual(coordinatorQuery.kind, 'frontier.swarm.coordinator-dashboard');
   assert.ok(coordinatorQuery.summary.semanticDependencyRelationCount >= 1);
+  assert.strictEqual(coordinatorQuery.summary.semanticImportSelectedCount, 1);
+  assert.strictEqual(coordinatorQuery.summary.semanticImportEligibleCount, 1);
+  assert.strictEqual(coordinatorQuery.summary.semanticImportImportedCount, 1);
+  assert.strictEqual(coordinatorQuery.summary.semanticImportCandidateCount, 1);
+  assert.strictEqual(coordinatorQuery.jobs[0].semanticImportQuality.selected, 1);
+  assert.strictEqual(coordinatorQuery.jobs[0].semanticImportQuality.eligible, 1);
+  assert.strictEqual(coordinatorQuery.jobs[0].semanticImportQuality.imported, 1);
+  assert.strictEqual(coordinatorQuery.jobs[0].semanticImportQuality.candidates, 1);
   assert.ok(coordinatorQuery.jobs[0].primaryEvidencePath.endsWith('evidence.json'));
-}
-
-async function testNoIndexCollection(tmp, mergeBundle) {
-  const noIndexRepo = path.join(tmp, 'no-index-repo');
-  await fs.mkdir(path.join(noIndexRepo, 'src'), { recursive: true });
-  await execFileP('git', ['init'], { cwd: noIndexRepo });
-  await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: noIndexRepo });
-  await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: noIndexRepo });
-  await fs.writeFile(path.join(noIndexRepo, 'src', 'foo.ts'), 'old\n');
-  await execFileP('git', ['add', '--', 'src/foo.ts'], { cwd: noIndexRepo });
-  await execFileP('git', ['commit', '-m', 'Initial no-index fixture'], { cwd: noIndexRepo });
-  const noIndexOldHash = (await execFileP('git', ['rev-parse', 'HEAD:src/foo.ts'], { cwd: noIndexRepo })).stdout.trim();
-  const noIndexRunDir = path.join(noIndexRepo, 'agent-runs', 'copy-run');
-  const noIndexJobDir = path.join(noIndexRunDir, 'copy-worker');
-  await fs.mkdir(noIndexJobDir, { recursive: true });
-  await fs.writeFile(path.join(noIndexJobDir, 'changes.patch'), [
-    `diff --git a${path.join(noIndexRepo, 'src', 'foo.ts')} b${path.join(noIndexRepo, 'agent-worktrees', 'copy-worker', 'src', 'foo.ts')}`,
-    `index ${noIndexOldHash}..1234567 100644`,
-    `--- a${path.join(noIndexRepo, 'src', 'foo.ts')}`,
-    `+++ b${path.join(noIndexRepo, 'agent-worktrees', 'copy-worker', 'src', 'foo.ts')}`,
-    '@@ -1 +1 @@',
-    '-old',
-    '+new',
-    ''
-  ].join('\n'));
-  await fs.writeFile(path.join(noIndexJobDir, 'merge.json'), JSON.stringify({
-    ...mergeBundle,
-    id: 'copy-worker-bundle',
-    jobId: 'copy-worker',
-    taskId: 'copy-task',
-    status: 'completed',
-    mergeReadiness: 'patch-candidate',
-    disposition: 'needs-port',
-    autoMergeable: false,
-    changedPaths: ['src/foo.ts'],
-    ownedFilesTouched: ['src/foo.ts'],
-    patchPath: 'changes.patch',
-    staleAgainstHead: false,
-    reasons: []
-  }, null, 2) + '\n');
-  const noIndexCollection = await collectCodexSwarmRun({ run: noIndexRunDir, cwd: noIndexRepo, outDir: path.join(noIndexRunDir, 'collected') });
-  assert.strictEqual(noIndexCollection.summary['stale-against-head'], 0);
-  assert.strictEqual(noIndexCollection.summary['needs-human-port'], 1);
-  const noIndexCollectedBundle = JSON.parse(await fs.readFile(path.join(noIndexCollection.outDir, 'needs-human-port', 'copy-worker', 'merge.json'), 'utf8'));
-  assert.strictEqual(noIndexCollectedBundle.staleAgainstHead, false);
-  assert.ok(noIndexCollectedBundle.reasons.some((reason) => reason.includes('patch base hashes match HEAD')));
-  await testBaseHashDriftCollection(noIndexRepo, noIndexOldHash, mergeBundle);
-}
-
-async function testBaseHashDriftCollection(repo, oldHash, mergeBundle) {
-  await fs.writeFile(path.join(repo, 'src', 'foo.ts'), 'current\n');
-  await execFileP('git', ['add', '--', 'src/foo.ts'], { cwd: repo });
-  await execFileP('git', ['commit', '-m', 'Move coordinator head'], { cwd: repo });
-  const driftRunDir = path.join(repo, 'agent-runs', 'drift-run');
-  const driftJobDir = path.join(driftRunDir, 'drift-worker');
-  await fs.mkdir(driftJobDir, { recursive: true });
-  await fs.writeFile(path.join(driftJobDir, 'changes.patch'), [
-    'diff --git a/src/foo.ts b/src/foo.ts',
-    `index ${oldHash}..1234567 100644`,
-    '--- a/src/foo.ts',
-    '+++ b/src/foo.ts',
-    '@@ -1 +1 @@',
-    '-old',
-    '+new',
-    ''
-  ].join('\n'));
-  await fs.writeFile(path.join(driftJobDir, 'merge.json'), JSON.stringify({
-    ...mergeBundle,
-    id: 'drift-worker-bundle',
-    jobId: 'drift-worker',
-    taskId: 'drift-task',
-    disposition: 'needs-port',
-    autoMergeable: false,
-    changedPaths: ['src/foo.ts'],
-    ownedFilesTouched: ['src/foo.ts'],
-    patchPath: 'changes.patch',
-    staleAgainstHead: false,
-    reasons: []
-  }, null, 2) + '\n');
-  const driftCollection = await collectCodexSwarmRun({ run: driftRunDir, cwd: repo, outDir: path.join(driftRunDir, 'collected') });
-  assert.strictEqual(driftCollection.summary['stale-against-head'], 0);
-  assert.strictEqual(driftCollection.summary['needs-human-port'], 1);
-  const driftBundle = JSON.parse(await fs.readFile(path.join(driftCollection.outDir, 'needs-human-port', 'drift-worker', 'merge.json'), 'utf8'));
-  assert.ok(driftBundle.reasons.some((reason) => reason.includes('manual port required')));
 }
 
 async function testBrowserRun(tmp) {

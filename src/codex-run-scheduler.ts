@@ -15,6 +15,7 @@ import {
   type FrontierSwarmPlan
 } from '@shapeshift-labs/frontier-swarm';
 import { writeJsonAtomic } from './common.js';
+import { createCodexResourceScheduledPlan } from './codex-resource-schedule.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { appendFileSwarmEvent } from './codex-events.js';
 import type {
@@ -27,6 +28,7 @@ export async function runScheduledJobPool(
   input: {
     concurrency: number;
     adaptive?: boolean | FrontierCodexAdaptiveConcurrencyOptions;
+    resourceScheduling?: Parameters<typeof createCodexResourceScheduledPlan>[2];
     observations?: readonly FrontierSwarmAdaptiveObservationInput[];
     outDir?: string;
     eventStream?: FrontierSwarmEventStream;
@@ -35,6 +37,7 @@ export async function runScheduledJobPool(
 ): Promise<FrontierSwarmJobResultInput[]> {
   const concurrency = Math.max(1, Math.floor(input.concurrency));
   const adaptiveOptions = normalizeAdaptiveConcurrencyOptions(input.adaptive, concurrency);
+  const resourceSchedule = createCodexResourceScheduledPlan(plan, concurrency, input.resourceScheduling);
   const results: FrontierSwarmJobResultInput[] = [];
   const active = new Map<string, Promise<FrontierSwarmJobResultInput>>();
   const leases: FrontierSwarmLease[] = [];
@@ -43,15 +46,15 @@ export async function runScheduledJobPool(
   const adaptiveHistory: FrontierSwarmAdaptiveLoadPlan[] = [];
   let currentAdaptiveLimits: FrontierSwarmAdaptiveLoadPlan['effectiveLimits'] | undefined;
   while (resultByJob.size < plan.jobs.length) {
-    const run = createSwarmRun({ plan, status: 'running', results });
+    const run = createSwarmRun({ plan: resourceSchedule.plan, status: 'running', results });
     run.jobs = run.jobs.map((job) => active.has(job.id) ? { ...job, status: 'running' } : job);
     const adaptivePlan = adaptiveOptions.enabled ? createSwarmAdaptiveLoadPlan({
-      plan,
+      plan: resourceSchedule.plan,
       run,
       mode: adaptiveOptions.mode,
-      maxLimits: { maxReadyJobs: adaptiveOptions.maxConcurrency },
+      maxLimits: { maxReadyJobs: adaptiveOptions.maxConcurrency, ...resourceSchedule.limits },
       minLimits: { maxReadyJobs: adaptiveOptions.minConcurrency },
-      currentLimits: currentAdaptiveLimits ?? { maxReadyJobs: adaptiveOptions.maxConcurrency },
+      currentLimits: currentAdaptiveLimits ?? { maxReadyJobs: adaptiveOptions.maxConcurrency, ...resourceSchedule.limits },
       observations: [...(input.observations ?? []), ...createCodexAdaptiveObservations(results)]
     }) : undefined;
     if (adaptivePlan) {
@@ -84,7 +87,9 @@ export async function runScheduledJobPool(
     const effectiveConcurrency = Math.max(1, Math.min(concurrency, adaptivePlan?.effectiveLimits.maxReadyJobs ?? concurrency));
     const readyWindow = Math.max(0, effectiveConcurrency - active.size);
     const schedule = createSwarmSchedule({
-      ...(adaptivePlan ? createSwarmScheduleInputFromAdaptiveLoadPlan(plan, adaptivePlan, { run }) : { plan, run }),
+      ...(adaptivePlan
+        ? createSwarmScheduleInputFromAdaptiveLoadPlan(resourceSchedule.plan, adaptivePlan, { run })
+        : { plan: resourceSchedule.plan, run, ...resourceSchedule.limits }),
       maxReadyJobs: readyWindow
     });
     const nextLeases = createSwarmLeases({
@@ -94,7 +99,7 @@ export async function runScheduledJobPool(
       existingLeases: leases
     });
     for (const lease of nextLeases) {
-      const job = plan.jobs.find((entry) => entry.id === lease.jobId);
+      const job = resourceSchedule.plan.jobs.find((entry) => entry.id === lease.jobId);
       if (!job || active.has(job.id) || completed.has(job.id)) continue;
       leases.push(lease);
       active.set(job.id, worker(job, lease));

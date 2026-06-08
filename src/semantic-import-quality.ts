@@ -10,9 +10,12 @@ export function summarizeCodexSemanticImportQuality(
   summary: FrontierSwarmMergeBundle['semanticImport'] | FrontierCodexSemanticImportSidecar['summary'] | FrontierSwarmJobResultInput['semanticImport'] | undefined,
   expected = false
 ): FrontierCodexSemanticImportQuality {
+  const total = nonNegativeNumber(summary?.total);
+  const candidates = semanticImportCandidateCount(summary);
   const selected = nonNegativeNumber(summary?.selected);
   const eligible = nonNegativeNumber(summary?.eligible);
   const imported = nonNegativeNumber(summary?.imported);
+  const errors = nonNegativeNumber(summary?.errors);
   const symbols = nonNegativeNumber(summary?.semanticIndex?.symbols);
   const ownershipRegions = nonNegativeNumber(summary?.semanticSidecars?.ownershipRegions);
   const patchHints = nonNegativeNumber(summary?.semanticSidecars?.patchHints);
@@ -28,7 +31,7 @@ export function summarizeCodexSemanticImportQuality(
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const selection = semanticSelectionSummary(summary);
   const present = !!summary;
-  const empty = present && (nonNegativeNumber(summary?.total) === 0 || selected === 0 && eligible === 0 && imported === 0 && symbols === 0);
+  const empty = present && (total === 0 || selected === 0 && eligible === 0 && imported === 0 && symbols === 0);
   const effectiveExpected = semanticImportExpected(summary, expected);
   const expectedMissingReasonCodes = semanticImportExpectedMissingReasonCodes(summary, {
     expected: effectiveExpected,
@@ -54,7 +57,9 @@ export function summarizeCodexSemanticImportQuality(
   if (effectiveExpected && !present) warnings.push('semantic import expected but missing');
   if (effectiveExpected && empty) warnings.push('semantic import expected but empty');
   if (effectiveExpected && !expectedSatisfied) warnings.push('semantic import expected evidence was not satisfied');
+  if (present && candidates === 0) warnings.push('semantic import has no candidates');
   if (present && imported === 0) warnings.push('semantic import imported no files');
+  if (present && errors > 0) warnings.push('semantic import has errors');
   if (present && selected === 0 && selection.includeFiltered > 0) warnings.push('semantic import include filters selected no files');
   if (present && selected === 0 && selection.unsupportedLanguage > 0) warnings.push('semantic import candidates had unsupported languages');
   if (present && selected > 0 && symbols === 0) warnings.push('semantic import has no symbols');
@@ -70,9 +75,12 @@ export function summarizeCodexSemanticImportQuality(
     expectedMissingReasonCodes,
     present,
     empty,
+    total,
+    candidates,
     selected,
     eligible,
     imported,
+    errors,
     symbols,
     ownershipRegions,
     patchHints,
@@ -88,6 +96,11 @@ export function summarizeCodexSemanticImportQuality(
     paradigmSemanticsLoweringRecords: paradigmSemantics.loweringRecords,
     warnings: uniqueStrings(warnings)
   };
+}
+
+function semanticImportCandidateCount(summary: unknown): number {
+  const record = summaryRecord(summary);
+  return nonNegativeNumber((record?.selection as { candidates?: unknown } | undefined)?.candidates ?? record?.total);
 }
 
 function semanticImportExpected(summary: unknown, fallback: boolean): boolean {

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { FrontierSwarmCommand } from '@shapeshift-labs/frontier-swarm';
 import {
+  normalizeWorkspacePath,
   pathExists,
   pathHasIgnoredSegment,
   runProcess,
@@ -47,11 +48,32 @@ export function filterWorkspaceChangedPaths(
 ): FrontierCodexChangedPathCollection {
   const changedPaths: string[] = [];
   const ignoredChangedPaths: string[] = [];
-  for (const file of uniqueWorkspacePaths(paths)) {
+  for (const file of uniqueWorkspaceChangedPaths(paths, plan)) {
     if (isIgnoredWorkspaceChangedPath(file, plan)) ignoredChangedPaths.push(file);
     else changedPaths.push(file);
   }
   return { changedPaths, ignoredChangedPaths };
+}
+
+export function normalizeWorkspaceChangedPath(file: string, plan: FrontierCodexWorkspacePlan): string | undefined {
+  const value = String(file ?? '').trim();
+  if (!value) return undefined;
+  if (path.isAbsolute(value)) {
+    return normalizeWorkspacePath(path.relative(plan.path, value).replace(/\\/g, '/'));
+  }
+  return normalizeWorkspacePath(value);
+}
+
+export function uniqueWorkspaceChangedPaths(paths: readonly string[], plan: FrontierCodexWorkspacePlan): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const file of paths) {
+    const normalized = normalizeWorkspaceChangedPath(file, plan);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
 }
 
 export async function writeCodexPatchFile(input: {

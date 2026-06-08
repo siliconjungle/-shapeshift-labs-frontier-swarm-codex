@@ -72,6 +72,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   const results = await runScheduledJobPool(plan, {
     concurrency: Math.max(1, options.maxConcurrency ?? 1),
     adaptive: options.adaptiveConcurrency,
+    resourceScheduling: options.resourceScheduling,
     observations: adaptiveObservations,
     outDir,
     eventStream
@@ -120,7 +121,6 @@ async function readAdaptiveFeedbackObservations(options: FrontierCodexSwarmRunOp
   const parsed = JSON.parse(await fs.readFile(absolute, 'utf8')) as { observations?: unknown[] };
   return observations.concat(Array.isArray(parsed.observations) ? parsed.observations as typeof observations : []);
 }
-
 export async function runCodexJob(
   job: FrontierSwarmJob,
   options: FrontierCodexSwarmRunOptions,
@@ -313,6 +313,7 @@ export async function runCodexJob(
     logSummary,
     semanticImportPath: semanticImport?.path,
     semanticImport: semanticImport?.sidecar,
+    semanticImportExpected: options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport),
     handoffArtifacts
   });
   return result;

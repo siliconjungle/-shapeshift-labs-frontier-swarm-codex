@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { fs, path, runCodexSwarm } from './context.mjs';
 import {
   matchesSemanticImportGlob,
   selectSemanticImportPaths,
@@ -6,7 +7,7 @@ import {
   semanticImportPathVariants
 } from '../../dist/semantic-import-select.js';
 
-export async function testSemanticImportSelection() {
+export async function testSemanticImportSelection({ plan, tmp }) {
   assert.equal(matchesSemanticImportGlob('src/index.js', 'src/**/*.js'), true);
   assert.equal(matchesSemanticImportGlob('src/internal/index.js', 'src/**/*.js'), true);
   assert.equal(matchesSemanticImportGlob('test/index.js', 'src/**/*.js'), false);
@@ -20,6 +21,20 @@ export async function testSemanticImportSelection() {
     'packages/domain/src/core.js',
     'domain/src/core.js',
     'src/core.js'
+  ]);
+  const workspaceRoot = path.join(tmp, 'absolute-copy-root');
+  assert.deepEqual(semanticImportCandidatePaths({
+    task: {
+      sourceRefs: [],
+      targetRefs: [],
+      allowedWrites: []
+    },
+    allowedWrites: []
+  }, [
+    path.join(workspaceRoot, 'packages/domain/src/core.ts'),
+    path.join(workspaceRoot, 'packages/domain/src/core.ts')
+  ], workspaceRoot), [
+    'packages/domain/src/core.ts'
   ]);
 
   const selection = selectSemanticImportPaths([
@@ -89,4 +104,69 @@ export async function testSemanticImportSelection() {
     'src/runtime/owned.ts',
     'src/lane/concrete.js'
   ]);
+
+  await testCopiedWorkspacePackageSubdirSemanticImport(plan, tmp);
+}
+
+async function testCopiedWorkspacePackageSubdirSemanticImport(plan, tmp) {
+  const copyPlan = JSON.parse(JSON.stringify(plan));
+  const job = copyPlan.jobs[0];
+  job.allowedWrites = ['packages/domain/src/**'];
+  job.task.sourceRefs = [];
+  job.task.targetRefs = [];
+  job.task.allowedWrites = ['packages/domain/src/**'];
+  job.verification = [];
+  const copyRun = await runCodexSwarm(copyPlan, {
+    outDir: path.join(tmp, 'copy-semantic-run'),
+    cwd: tmp,
+    maxConcurrency: 1,
+    semanticImport: {
+      enabled: true,
+      include: ['snes/packages/domain/src/**/*.ts'],
+      exclude: ['**/*.test.ts'],
+      maxFiles: 1,
+      maxBytes: 500000
+    },
+    semanticImportExpected: true,
+    workspace: {
+      mode: 'copy',
+      root: path.join(tmp, 'copy-workspaces'),
+      includes: [],
+      linkNodeModules: false
+    },
+    dryRun: false,
+    prepareJobWorkspace: async (input) => {
+      const runtimeDir = path.join(input.workspacePath, 'packages/domain/src/runtime');
+      await fs.mkdir(runtimeDir, { recursive: true });
+      await fs.writeFile(path.join(runtimeDir, 'action.ts'), 'export function action() { return 1; }\n');
+      await fs.writeFile(path.join(runtimeDir, 'secondary.ts'), 'export function secondary() { return 1; }\n');
+      await fs.writeFile(path.join(runtimeDir, 'action.test.ts'), 'export const testValue = 1;\n');
+    },
+    executor: async (input) => {
+      const runtimeDir = path.join(input.workspacePath, 'packages/domain/src/runtime');
+      await fs.writeFile(path.join(runtimeDir, 'action.ts'), 'export function helper() { return 2; }\nexport function action() { return helper(); }\n');
+      await fs.writeFile(path.join(runtimeDir, 'secondary.ts'), 'export function secondary() { return 2; }\n');
+      await fs.writeFile(path.join(runtimeDir, 'action.test.ts'), 'export const testValue = 2;\n');
+      await fs.writeFile(input.paths.lastMessagePath, 'copy semantic import done\n');
+      return { exitCode: 0, lastMessage: 'copy semantic import done' };
+    }
+  });
+  assert.strictEqual(copyRun.ok, true);
+  const result = copyRun.run.results[0];
+  assert.deepStrictEqual(result.changedPaths, [
+    'packages/domain/src/runtime/action.test.ts',
+    'packages/domain/src/runtime/action.ts',
+    'packages/domain/src/runtime/secondary.ts'
+  ]);
+  const semanticImportsPath = result.evidencePaths.find((entry) => entry.endsWith('semantic-imports.json'));
+  assert.ok(semanticImportsPath);
+  const semanticImports = JSON.parse(await fs.readFile(semanticImportsPath, 'utf8'));
+  assert.strictEqual(semanticImports.summary.selection.candidates, 3);
+  assert.strictEqual(semanticImports.summary.selection.excludeFiltered, 1);
+  assert.strictEqual(semanticImports.summary.eligible, 2);
+  assert.strictEqual(semanticImports.summary.selected, 1);
+  assert.strictEqual(semanticImports.summary.omitted, 1);
+  assert.strictEqual(semanticImports.summary.imported, 1);
+  assert.strictEqual(semanticImports.records[0].path, 'packages/domain/src/runtime/action.ts');
+  assert.strictEqual(semanticImports.records[0].language, 'typescript');
 }

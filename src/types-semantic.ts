@@ -220,9 +220,12 @@ export interface FrontierCodexSemanticImportQuality {
   expectedMissingReasonCodes: string[];
   present: boolean;
   empty: boolean;
+  total: number;
+  candidates: number;
   selected: number;
   eligible: number;
   imported: number;
+  errors: number;
   symbols: number;
   ownershipRegions: number;
   patchHints: number;

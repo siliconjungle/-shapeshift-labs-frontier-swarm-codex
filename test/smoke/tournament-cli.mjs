@@ -19,6 +19,12 @@ export async function testTournamentCli({ plan, tmp }) {
   });
   assert.strictEqual(apiQuery.kind, 'frontier.swarm-codex.tournament-query');
   assert.strictEqual(apiQuery.standings.length, 1);
+  assert.strictEqual(apiQuery.semanticImport.summary.selectedCount, 1);
+  assert.strictEqual(apiQuery.semanticImport.summary.eligibleCount, 1);
+  assert.strictEqual(apiQuery.semanticImport.summary.importedCount, 1);
+  assert.strictEqual(apiQuery.semanticImport.summary.candidateCount, 1);
+  assert.strictEqual(apiQuery.semanticImport.jobs[0].semanticImportQuality.selected, 1);
+  assert.strictEqual(apiQuery.semanticImport.jobs[0].semanticImportQuality.candidates, 1);
 
   const history = await createCodexSwarmTournamentHistory({ tournaments: [tournamentPath] });
   assert.strictEqual(history.history.summary.tournamentCount, 1);
@@ -45,6 +51,8 @@ export async function testTournamentCli({ plan, tmp }) {
   ])).stdout);
   assert.strictEqual(query.summary.matchCount, 1);
   assert.strictEqual(query.standings.length, 1);
+  assert.strictEqual(query.semanticImport.summary.selectedCount, 1);
+  assert.strictEqual(query.semanticImport.jobs[0].semanticImportQuality.imported, 1);
 
   const cliHistory = JSON.parse((await execFileP(process.execPath, [
     cli,

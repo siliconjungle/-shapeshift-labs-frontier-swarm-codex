@@ -9,6 +9,7 @@ import { classifyCodexHandoffArtifact } from './handoff-artifacts.js';
 import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradigm.js';
 import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers.js';
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
+import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { codexBundleTraceSummary } from './trace-summary.js';
 
 
@@ -20,14 +21,21 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
   patchPath?: string;
   patchStatus: string;
   staleReasons?: readonly string[];
+  semanticImportExpected?: boolean;
 }): Promise<void> {
   const existing = input.bundle.evidencePaths.find((entry) => path.basename(entry) === 'evidence.json' && entry !== input.file);
   const traceSummary = codexBundleTraceSummary(input.bundle);
+  const semanticImport = semanticImportSummaryFromBundle(input.bundle);
+  const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, input.semanticImportExpected ?? false);
   await fs.mkdir(path.dirname(input.file), { recursive: true });
   if (existing && await pathExists(existing)) {
     await fs.copyFile(existing, input.file).catch(() => {});
     if (await pathExists(input.file)) {
-      if (traceSummary.shardCount) await augmentCollectedEvidenceTraceSummary(input.file, traceSummary);
+      await augmentCollectedEvidenceSummary(input.file, {
+        semanticImport,
+        semanticImportQuality,
+        traceSummary: traceSummary.shardCount ? traceSummary : undefined
+      });
       return;
     }
   }
@@ -56,7 +64,8 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
     },
     patchHunks,
     readyToPortHunkCount: input.bucket === 'needs-human-port' || input.bucket === 'ready-to-apply' ? patchHunks.length : 0,
-    ...(input.bundle.semanticImport ? { semanticImport: input.bundle.semanticImport as FrontierCodexSemanticImportSidecar['summary'] } : {}),
+    ...(semanticImport ? { semanticImport: semanticImport as FrontierCodexSemanticImportSidecar['summary'] } : {}),
+    semanticImportQuality,
     ...(traceSummary.shardCount ? { traceSummary } : {}),
     sourceCitations: createCodexEvidenceSourceCitations(input.bundle),
     metadata: {
@@ -72,11 +81,24 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
 }
 
 
-async function augmentCollectedEvidenceTraceSummary(file: string, traceSummary: FrontierCodexTraceSummary): Promise<void> {
+async function augmentCollectedEvidenceSummary(
+  file: string,
+  input: {
+    semanticImport?: unknown;
+    semanticImportQuality: ReturnType<typeof summarizeCodexSemanticImportQuality>;
+    traceSummary?: FrontierCodexTraceSummary;
+  }
+): Promise<void> {
   try {
     const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
     if (!isObject(parsed)) return;
-    parsed.traceSummary = traceSummary;
+    if (input.semanticImport) parsed.semanticImport = input.semanticImport;
+    parsed.semanticImportQuality = input.semanticImportQuality;
+    if (input.traceSummary) parsed.traceSummary = input.traceSummary;
+    parsed.metadata = {
+      ...(isObject(parsed.metadata) ? parsed.metadata : {}),
+      semanticImportQuality: input.semanticImportQuality
+    };
     await fs.writeFile(file, JSON.stringify(parsed, null, 2) + '\n');
   } catch {
     // Keep collection best-effort when a worker evidence file is not JSON.
@@ -87,10 +109,13 @@ async function augmentCollectedEvidenceTraceSummary(file: string, traceSummary: 
 export function createCollectedEvidenceEntries(
   bundle: FrontierSwarmMergeBundle,
   collectedEvidencePath: string,
-  bucket: FrontierCodexCollectBucket
+  bucket: FrontierCodexCollectBucket,
+  semanticImportExpected = false
 ): FrontierSwarmEvidenceIndexEntryInput[] {
   const confidence = bucket === 'ready-to-apply' ? 0.95 : bucket === 'needs-human-port' ? 0.7 : bucket === 'failed-evidence' ? 0.25 : 0.2;
-  const universalAstLayers = semanticImportUniversalAstLayerSummary(bundle.semanticImport);
+  const semanticImport = semanticImportSummaryFromBundle(bundle);
+  const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
+  const universalAstLayers = semanticImportUniversalAstLayerSummary(semanticImport);
   const traceSummary = codexBundleTraceSummary(bundle);
   const entries: FrontierSwarmEvidenceIndexEntryInput[] = [{
     jobId: bundle.jobId,
@@ -101,24 +126,44 @@ export function createCollectedEvidenceEntries(
     kind: 'evidence',
     status: bucket,
     confidence,
-    tags: ['coordinator-query', bucket],
+    tags: uniqueStrings([
+      'coordinator-query',
+      bucket,
+      ...(semanticImportQuality.expected && !semanticImportQuality.expectedSatisfied ? ['semantic-expected-unsatisfied'] : []),
+      ...(semanticImportQuality.empty ? ['semantic-empty'] : []),
+      ...(semanticImportQuality.warnings.length ? ['semantic-warning'] : [])
+    ]),
     facets: {
       bucket,
       disposition: bundle.disposition,
       riskLevel: bundle.riskLevel,
       autoMergeable: bundle.autoMergeable,
       staleAgainstHead: bundle.staleAgainstHead,
-      semanticSymbols: bundle.semanticImport?.semanticIndex.symbols ?? 0,
-      semanticRegions: bundle.semanticImport?.semanticSidecars.ownershipRegions ?? 0,
-      semanticDependencyRelations: (bundle.semanticImport as { dependencies?: { total?: number } } | undefined)?.dependencies?.total ?? 0,
-      semanticDependencyPredicates: (bundle.semanticImport as { dependencies?: { predicates?: string[] } } | undefined)?.dependencies?.predicates?.join(',') ?? '',
+      semanticExpected: semanticImportQuality.expected,
+      semanticExpectedSatisfied: semanticImportQuality.expectedSatisfied,
+      semanticExpectedMissingReasonCodes: semanticImportQuality.expectedMissingReasonCodes.join(','),
+      semanticPresent: semanticImportQuality.present,
+      semanticEmpty: semanticImportQuality.empty,
+      semanticTotal: semanticImportQuality.total,
+      semanticCandidates: semanticImportQuality.candidates,
+      semanticSelected: semanticImportQuality.selected,
+      semanticEligible: semanticImportQuality.eligible,
+      semanticImported: semanticImportQuality.imported,
+      semanticErrors: semanticImportQuality.errors,
+      semanticSymbols: semanticImportQuality.symbols,
+      semanticRegions: semanticImportQuality.ownershipRegions,
+      semanticPatchHints: semanticImportQuality.patchHints,
+      semanticWarnings: semanticImportQuality.warnings.join(','),
+      semanticWarningCount: semanticImportQuality.warnings.length,
+      semanticDependencyRelations: semanticImportQuality.dependencyRelations,
+      semanticDependencyPredicates: semanticImportQuality.dependencyPredicates.join(','),
       universalAstLayers: universalAstLayers.total,
       universalAstLayerNames: universalAstLayers.names.join(','),
-      proofSpecObligations: semanticImportProofSpecSummary(bundle.semanticImport).obligations,
-      proofSpecFailedObligations: semanticImportProofSpecSummary(bundle.semanticImport).failed,
-      paradigmSemanticsRecords: semanticImportParadigmSemanticsSummary(bundle.semanticImport).total,
-      paradigmSemanticsGroups: semanticImportParadigmSemanticsSummary(bundle.semanticImport).groups.length,
-      paradigmSemanticsLoweringRecords: semanticImportParadigmSemanticsSummary(bundle.semanticImport).loweringRecords,
+      proofSpecObligations: semanticImportProofSpecSummary(semanticImport).obligations,
+      proofSpecFailedObligations: semanticImportProofSpecSummary(semanticImport).failed,
+      paradigmSemanticsRecords: semanticImportParadigmSemanticsSummary(semanticImport).total,
+      paradigmSemanticsGroups: semanticImportParadigmSemanticsSummary(semanticImport).groups.length,
+      paradigmSemanticsLoweringRecords: semanticImportParadigmSemanticsSummary(semanticImport).loweringRecords,
       traceShards: traceSummary.shardCount,
       traceDivergences: traceSummary.divergenceCount,
       traceOpenDivergences: traceSummary.openDivergenceCount,

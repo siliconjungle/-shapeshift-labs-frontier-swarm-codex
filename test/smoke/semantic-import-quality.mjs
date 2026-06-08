@@ -16,6 +16,19 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     semanticImport: emptyExpectedSemanticImportSummary(),
     metadata: { semanticImport: emptyExpectedSemanticImportSummary() }
   }, null, 2) + '\n');
+  const missingJobDir = path.join(runDir, 'missing-semantic-worker');
+  await fs.mkdir(missingJobDir, { recursive: true });
+  await fs.writeFile(path.join(missingJobDir, 'merge.json'), JSON.stringify({
+    ...mergeBundle,
+    id: 'missing-semantic-worker-bundle',
+    jobId: 'missing-semantic-worker',
+    taskId: 'missing-semantic-task',
+    changedPaths: ['src/runtime/missing.ts'],
+    evidencePaths: [],
+    semanticImport: undefined,
+    metadata: {},
+    patchPath: undefined
+  }, null, 2) + '\n');
   const collection = await collectCodexSwarmRun({
     run: runDir,
     checkStale: false,
@@ -23,11 +36,30 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     outDir: path.join(runDir, 'collected')
   });
   const semanticImport = collection.compactDashboard.semanticImport;
-  const topQuality = collection.compactDashboard.topJobs[0].semanticImportQuality;
-  assert.strictEqual(semanticImport.expectedUnsatisfiedCount, 1);
+  const qualityByJob = new Map(collection.compactDashboard.topJobs.map((entry) => [entry.jobId, entry.semanticImportQuality]));
+  const emptyQuality = qualityByJob.get('empty-semantic-worker');
+  const missingQuality = qualityByJob.get('missing-semantic-worker');
+  assert.strictEqual(semanticImport.expectedUnsatisfiedCount, 2);
   assert.ok(semanticImport.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
-  assert.strictEqual(topQuality.expectedSatisfied, false);
-  assert.ok(topQuality.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
+  assert.ok(semanticImport.expectedMissingReasonCodes.includes('expected-semantic-import-missing'));
+  assert.ok(semanticImport.warnings.includes('semantic import expected but empty'));
+  assert.ok(semanticImport.warnings.includes('semantic import expected but missing'));
+  assert.strictEqual(emptyQuality.expectedSatisfied, false);
+  assert.ok(emptyQuality.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
+  assert.ok(emptyQuality.warnings.includes('semantic import expected but empty'));
+  assert.strictEqual(missingQuality.expectedSatisfied, false);
+  assert.ok(missingQuality.expectedMissingReasonCodes.includes('expected-semantic-import-missing'));
+  assert.ok(missingQuality.warnings.includes('semantic import expected but missing'));
+
+  const emptyEvidence = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'empty-semantic-worker', 'evidence.json'), 'utf8'));
+  assert.ok(emptyEvidence.semanticImportQuality.warnings.includes('semantic import expected but empty'));
+  const missingEvidence = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'missing-semantic-worker', 'evidence.json'), 'utf8'));
+  assert.ok(missingEvidence.semanticImportQuality.warnings.includes('semantic import expected but missing'));
+
+  const coordinatorQuery = JSON.parse(await fs.readFile(path.join(collection.outDir, 'coordinator-query.json'), 'utf8'));
+  const queryQualityByJob = new Map(coordinatorQuery.jobs.map((entry) => [entry.jobId, entry.semanticImportQuality]));
+  assert.ok(queryQualityByJob.get('empty-semantic-worker').warnings.includes('semantic import expected but empty'));
+  assert.ok(queryQualityByJob.get('missing-semantic-worker').warnings.includes('semantic import expected but missing'));
 }
 
 function emptyExpectedSemanticImportSummary() {

@@ -16,6 +16,7 @@ import {
   type FrontierCodexApplyResult,
   type FrontierCodexPatchScoreResult,
   type FrontierCodexResourceAllocation,
+  type FrontierCodexResourceSchedulingOptions,
   type FrontierCodexSwarmRunResult
 } from '../dist/index.js';
 
@@ -49,6 +50,12 @@ const resultPromise: Promise<FrontierCodexSwarmRunResult> = runCodexSwarm(plan, 
   outDir: '.',
   dryRun: true,
   adaptiveConcurrency: true,
+  resourceScheduling: {
+    browserConcurrency: 1,
+    staticCheckConcurrency: 4,
+    apiCheckConcurrency: 1,
+    fuzzerConcurrency: 1
+  },
   compactLogs: true,
   semanticImportExpected: true,
   workspace: {
@@ -68,6 +75,10 @@ const resourceAllocation: FrontierCodexResourceAllocation = createCodexResourceA
   outDir: '.',
   workspacePath: '.'
 });
+const resourceScheduling: FrontierCodexResourceSchedulingOptions = {
+  capabilityConcurrency: { browser: 1, 'static-check': 4 },
+  resourceQuotas: { browser: 1, 'api-check': 1 }
+};
 const workspaceManifest: FrontierCodexWorkspaceManifest = createSwarmWorkspaceManifest(workspacePlan);
 const collectPromise: Promise<FrontierCodexCollectResult> = collectCodexSwarmRun({ run: '.', checkStale: false });
 const applyPromise: Promise<FrontierCodexApplyResult> = applyCodexSwarmCollection({ collection: '.', dryRun: true });
@@ -77,6 +88,7 @@ const handoffArtifactsPromise: Promise<FrontierCodexHandoffArtifact[]> = discove
 args satisfies string[];
 workspacePlan satisfies FrontierCodexWorkspacePlan;
 resourceAllocation.env satisfies Record<string, string>;
+resourceScheduling satisfies FrontierCodexResourceSchedulingOptions;
 workspaceManifest.kind satisfies string;
 resultPromise satisfies Promise<FrontierCodexSwarmRunResult>;
 collectPromise satisfies Promise<FrontierCodexCollectResult>;

@@ -4,7 +4,13 @@ import {
   FRONTIER_SWARM_CODEX_DEFAULT_MODEL,
   FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT
 } from './constants.js';
-import { stableHash, uniqueStrings, uniqueWorkspacePaths } from './common.js';
+import { stableHash, uniqueWorkspacePaths } from './common.js';
+import { createCodexEvidenceResourceHints } from './codex-evidence-capabilities.js';
+export { createCodexEvidenceResourceHints } from './codex-evidence-capabilities.js';
+export type {
+  FrontierCodexEvidenceCapability,
+  FrontierCodexEvidenceResourceHints
+} from './codex-evidence-capabilities.js';
 import type {
   FrontierCodexBrowserAllocation,
   FrontierCodexJobPaths,
@@ -75,8 +81,9 @@ export function createCodexResourceAllocation(
   input: { cwd?: string; outDir: string; workspacePath?: string; lease?: FrontierSwarmLease }
 ): FrontierCodexResourceAllocation {
   const requirements = job.resourceRequirements;
-  const capabilities = uniqueStrings([...(job.capabilities ?? []), ...(requirements?.capabilities ?? [])]);
-  const resources = { ...(requirements?.resources ?? {}) };
+  const hints = createCodexEvidenceResourceHints(job);
+  const capabilities = hints.capabilities;
+  const resources = hints.resources;
   const env: Record<string, string> = {
     FRONTIER_SWARM_JOB_ID: job.id,
     FRONTIER_SWARM_TASK_ID: job.taskId,
@@ -84,7 +91,10 @@ export function createCodexResourceAllocation(
     FRONTIER_SWARM_CAPABILITIES: capabilities.join(',')
   };
   const browser = requirements?.browser;
-  if (!browser) return { capabilities, resources, env };
+  if (!browser) {
+    env.FRONTIER_SWARM_RESOURCE_ALLOCATION = JSON.stringify({ capabilities, resources });
+    return { capabilities, resources, env };
+  }
   const portPool = uniqueWorkspacePaths(browser.portPool ?? []);
   const port = portPool.length ? portPool[resourceSlot(job, input.lease, portPool.length)] : undefined;
   const profileDir = resolveBrowserProfileDir(job, browser.profileDir, browser.profileDirPrefix, input.cwd ?? process.cwd());

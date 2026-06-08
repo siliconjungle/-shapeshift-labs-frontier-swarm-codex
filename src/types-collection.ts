@@ -60,6 +60,7 @@ export interface FrontierCodexCollectResult {
   admission: FrontierSwarmMergeAdmission;
   dashboard: FrontierSwarmCoordinatorDashboard;
   compactDashboard: FrontierCodexCompactDashboard;
+  semanticImport: FrontierCodexCompactDashboard['semanticImport'];
   summary: Record<FrontierCodexCollectBucket, number> & { total: number };
 }
 

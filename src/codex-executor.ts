@@ -34,11 +34,22 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
       }).catch(() => {});
     }
     const timer = setTimeout(() => child.kill('SIGTERM'), input.timeoutMs);
-    child.stdout.on('data', (chunk: Buffer) => appendLimitedLogChunk(input.paths.eventsPath, chunk, eventLimit, logSummary, 'event', eventLogState).catch(() => {}));
-    child.stderr.on('data', (chunk: Buffer) => appendLimitedLogChunk(input.paths.stderrPath, chunk, stderrLimit, logSummary, 'stderr').catch(() => {}));
+    let stdoutWrites = Promise.resolve();
+    let stderrWrites = Promise.resolve();
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutWrites = stdoutWrites
+        .then(() => appendLimitedLogChunk(input.paths.eventsPath, chunk, eventLimit, logSummary, 'event', eventLogState))
+        .catch(() => {});
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrWrites = stderrWrites
+        .then(() => appendLimitedLogChunk(input.paths.stderrPath, chunk, stderrLimit, logSummary, 'stderr'))
+        .catch(() => {});
+    });
     child.stdin.end(input.prompt);
     child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timer);
+      await Promise.all([stdoutWrites, stderrWrites]);
       await flushEventLogRemainder(input.paths.eventsPath, eventLimit, logSummary, eventLogState).catch(() => {});
       await fs.writeFile(input.paths.logSummaryPath, JSON.stringify(logSummary, null, 2) + '\n').catch(() => {});
       resolve({
@@ -48,10 +59,11 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
         logSummary
       });
     });
-    child.on('error', (error: Error) => {
+    child.on('error', async (error: Error) => {
       clearTimeout(timer);
-      flushEventLogRemainder(input.paths.eventsPath, eventLimit, logSummary, eventLogState).catch(() => {});
-      fs.writeFile(input.paths.logSummaryPath, JSON.stringify(logSummary, null, 2) + '\n').catch(() => {});
+      await Promise.all([stdoutWrites, stderrWrites]);
+      await flushEventLogRemainder(input.paths.eventsPath, eventLimit, logSummary, eventLogState).catch(() => {});
+      await fs.writeFile(input.paths.logSummaryPath, JSON.stringify(logSummary, null, 2) + '\n').catch(() => {});
       resolve({ exitCode: 1, logSummary, error });
     });
   });

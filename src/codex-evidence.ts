@@ -22,10 +22,12 @@ export async function writeCodexJobEvidenceSummary(input: {
   logSummary?: FrontierCodexLogSummary;
   semanticImportPath?: string;
   semanticImport?: FrontierCodexSemanticImportSidecar;
+  semanticImportExpected?: boolean;
   handoffArtifacts: readonly FrontierCodexHandoffArtifact[];
 }): Promise<void> {
   const patchHunks = input.patchPath ? await readPatchHunks(input.patchPath) : [];
   const sourceCitations = createCodexEvidenceSourceCitations(input.mergeBundle, input.semanticImport);
+  const semanticImportQuality = summarizeCodexSemanticImportQuality(input.semanticImport?.summary, input.semanticImportExpected ?? false);
   const evidence: FrontierCodexJobEvidenceSummary = {
     kind: FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND,
     version: FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION,
@@ -61,6 +63,7 @@ export async function writeCodexJobEvidenceSummary(input: {
     patchHunks,
     readyToPortHunkCount: input.mergeBundle.disposition === 'needs-port' || input.mergeBundle.disposition === 'auto-mergeable' ? patchHunks.length : 0,
     ...(input.semanticImport ? { semanticImport: input.semanticImport.summary } : {}),
+    semanticImportQuality,
     sourceCitations,
     metadata: {
       autoMergeable: input.mergeBundle.autoMergeable,

@@ -1,6 +1,6 @@
 import type { FrontierCodexSwarmRunOptions, FrontierCodexSwarmRunResult } from './types-run.js';
 
-export type FrontierCodexResumeJobStatus = 'completed' | 'failed' | 'blocked' | 'partial' | 'missing';
+export type FrontierCodexResumeJobStatus = 'completed' | 'failed' | 'blocked' | 'evidence-only' | 'rerun-needed';
 
 export interface FrontierCodexResumeJob {
   jobId: string;
@@ -28,8 +28,8 @@ export interface FrontierCodexResumeOverlay {
     completed: number;
     failed: number;
     blocked: number;
-    partial: number;
-    missing: number;
+    evidenceOnly: number;
+    rerunNeeded: number;
     resume: number;
   };
 }
@@ -39,6 +39,7 @@ export interface FrontierCodexResumeOptions {
   includeCompleted?: boolean;
   includeFailed?: boolean;
   includeBlocked?: boolean;
+  includeEvidenceOnly?: boolean;
   outFile?: string;
 }
 
