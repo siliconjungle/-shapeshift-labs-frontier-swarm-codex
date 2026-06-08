@@ -1,0 +1,103 @@
+import assert from 'node:assert';
+import {
+  compareCodexSwarmTournaments,
+  createCodexSwarmTournamentHistory,
+  execFileP,
+  fs,
+  path,
+  queryCodexSwarmTournament,
+  runCodexSwarm
+} from './context.mjs';
+
+export async function testTournamentCli({ plan, tmp }) {
+  const collection = path.join(tmp, 'run', 'collected');
+  const tournamentPath = path.join(collection, 'strategy-tournament.json');
+  const apiQuery = await queryCodexSwarmTournament({
+    collection,
+    strategyId: 'runtime-runtime-action',
+    view: 'standings'
+  });
+  assert.strictEqual(apiQuery.kind, 'frontier.swarm-codex.tournament-query');
+  assert.strictEqual(apiQuery.standings.length, 1);
+
+  const history = await createCodexSwarmTournamentHistory({ tournaments: [tournamentPath] });
+  assert.strictEqual(history.history.summary.tournamentCount, 1);
+  const comparison = await compareCodexSwarmTournaments({
+    baseline: tournamentPath,
+    current: tournamentPath,
+    scoreThreshold: 1
+  });
+  assert.strictEqual(comparison.comparison.summary.stableCount, 1);
+
+  const cli = new URL('../../dist/cli.js', import.meta.url).pathname;
+  const query = JSON.parse((await execFileP(process.execPath, [
+    cli,
+    'tournament',
+    'query',
+    '--collection',
+    collection,
+    '--strategy',
+    'runtime-runtime-action',
+    '--view',
+    'standings',
+    '--limit',
+    '1'
+  ])).stdout);
+  assert.strictEqual(query.summary.matchCount, 1);
+  assert.strictEqual(query.standings.length, 1);
+
+  const cliHistory = JSON.parse((await execFileP(process.execPath, [
+    cli,
+    'tournament',
+    'history',
+    '--collection',
+    collection
+  ])).stdout);
+  assert.strictEqual(cliHistory.history.summary.tournamentCount, 1);
+
+  const feedbackOut = path.join(tmp, 'tournament-feedback');
+  const feedback = JSON.parse((await execFileP(process.execPath, [
+    cli,
+    'tournament',
+    'feedback',
+    '--collection',
+    collection,
+    '--score-floor',
+    '100',
+    '--outDir',
+    feedbackOut
+  ])).stdout);
+  assert.strictEqual(feedback.kind, 'frontier.swarm.tournament-adaptive-feedback');
+  assert.ok(feedback.observations.length >= 1);
+  assert.ok(await existsFile(path.join(feedbackOut, 'tournament-feedback.json')));
+
+  const customFeedback = path.join(tmp, 'custom-tournament-feedback.json');
+  await fs.writeFile(customFeedback, JSON.stringify({
+    observations: [{
+      kind: 'log-noise',
+      severity: 'warning',
+      at: 1,
+      value: 5,
+      reason: 'fixture feedback'
+    }]
+  }, null, 2) + '\n');
+  await runCodexSwarm(plan, {
+    outDir: path.join(tmp, 'feedback-run'),
+    cwd: tmp,
+    maxConcurrency: 2,
+    adaptiveConcurrency: true,
+    adaptiveFeedbackPath: customFeedback,
+    dryRun: true
+  });
+  const adaptive = JSON.parse(await fs.readFile(path.join(tmp, 'feedback-run', 'adaptive-load.json'), 'utf8'));
+  assert.ok(adaptive.latest.observations.some((entry) => entry.reasons.includes('fixture feedback')));
+}
+
+async function existsFile(file) {
+  try {
+    await fs.access(file);
+    return true;
+  } catch {
+    return false;
+  }
+}

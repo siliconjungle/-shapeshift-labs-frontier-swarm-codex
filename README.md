@@ -309,7 +309,9 @@ Each run writes event streams under `streams/`, a `coordinator-dashboard.json` s
 - `failed-evidence/` for failed workers, blockers, ownership violations, or failed required commands,
 - `stale-against-head/` for patch bundles that no longer apply.
 
-It also writes `merge-index.json`, `queue-overlay.json`, `strategy-tournament.json`, `evidence-index.json`, `merge-admission.json`, `coordinator-query.json`, and `compact-dashboard.json` so coordinator dashboards can show changed paths, tests, semantic dependency relations, semantic regions, universal AST layer quality, proof obligation status, source citations, risk, ready-to-port hunks, stale patches, duplicate surfaces, semantic import quality, evidence scores, pid liveness, conflicts, derived queue status, strategy payoff standings, and ready merge pressure without scraping every worker directory. Stale checks distinguish patches that fail only because the coordinator worktree is dirty from patches whose base hashes no longer match HEAD. Copied/no-index workspace patches with source-side absolute paths are normalized back to repo-relative paths when possible; patches without comparable base hashes are treated as `needs-human-port`, not stale. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
+It also writes `merge-index.json`, `queue-overlay.json`, `strategy-tournament.json`, `strategy-history.json`, `tournament-adaptive-feedback.json`, `evidence-index.json`, `merge-admission.json`, `coordinator-query.json`, and `compact-dashboard.json` so coordinator dashboards can show changed paths, tests, semantic dependency relations, semantic regions, universal AST layer quality, proof obligation status, source citations, risk, ready-to-port hunks, stale patches, duplicate surfaces, semantic import quality, evidence scores, pid liveness, conflicts, derived queue status, strategy payoff standings, tournament history, adaptive feedback, and ready merge pressure without scraping every worker directory. Stale checks distinguish patches that fail only because the coordinator worktree is dirty from patches whose base hashes no longer match HEAD. Copied/no-index workspace patches with source-side absolute paths are normalized back to repo-relative paths when possible; patches without comparable base hashes are treated as `needs-human-port`, not stale. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
+
+`frontier-swarm tournament query --collection <collection-dir>` reads `strategy-tournament.json` and emits filtered JSON views. Use `--view summary|standings|matches|full`, `--strategy`, `--game`, `--outcome`, `--tag`, `--min-score`, `--max-score`, and `--limit` to narrow review. `frontier-swarm tournament compare --baseline <file> --current <file>` compares two tournaments, `frontier-swarm tournament history --tournament <file>` folds one or more tournaments into cross-run standings, and `frontier-swarm tournament feedback --collection <dir>` emits adaptive scheduler observations. Pass that feedback into a later run with `--adaptive --adaptive-feedback <tournament-adaptive-feedback.json>`.
 
 `frontier-swarm apply --collection <collection-dir>` reviews the `ready-to-apply/` bucket and writes `apply-ledger.json`. It defaults to `--dry-run`, which runs `git apply --check` without mutating the checkout. Non-dry-run apply refuses a dirty worktree unless `--allow-dirty` is passed, and can optionally create small branches with `--branch-prefix` and commits with `--commit`.
 
@@ -337,6 +339,10 @@ It also writes `merge-index.json`, `queue-overlay.json`, `strategy-tournament.js
 - `collectCodexSwarmRun`
 - `applyCodexSwarmCollection`
 - `scoreCodexSwarmPatches`
+- `queryCodexSwarmTournament`
+- `compareCodexSwarmTournaments`
+- `createCodexSwarmTournamentHistory`
+- `readCodexTournamentAdaptiveFeedback`
 - `renderCodexPrompt`
 - `spawnCodexExecutor`
 - `FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND`

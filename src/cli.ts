@@ -1,23 +1,9 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {
-  applyCodexSwarmCollection,
-  checkCodexDependencyHealth,
-  coerceCodexSwarmManifestInput,
-  coerceCodexSwarmTasksInput,
-  collectCodexSwarmRun,
-  createCodexSwarmPlan,
-  repairCodexWorkspacePackageLinks,
-  resumeCodexSwarmRun,
-  runCodexSwarm,
-  scoreCodexSwarmPatches,
-  stopCodexSwarmRun,
-  writeCodexDependencyHealthReport,
-  type FrontierCodexModelPolicy,
-  type FrontierCodexSwarmRunOptions
-} from './index.js';
+import { applyCodexSwarmCollection, checkCodexDependencyHealth, coerceCodexSwarmManifestInput, coerceCodexSwarmTasksInput, collectCodexSwarmRun, createCodexSwarmPlan, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, writeCodexDependencyHealthReport, type FrontierCodexModelPolicy, type FrontierCodexSwarmRunOptions } from './index.js';
 import { printHelp } from './cli-help.js';
+import { handleCodexTournamentCommand } from './tournament-query.js';
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
 const args = parseArgs(process.argv.slice(2));
@@ -121,6 +107,8 @@ try {
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
+  } else if (command === 'tournament') {
+    await handleCodexTournamentCommand(args);
   } else if (command === 'repair-links') {
     const result = await repairCodexWorkspacePackageLinks({
       root: stringArg(args.root),
@@ -257,6 +245,7 @@ function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarmRunOpti
     compactLogs: compactLogsArg(args),
     dependencyHealth: dependencyHealthArg(args),
     semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
+    adaptiveFeedbackPath: stringArg(args.adaptiveFeedback ?? args['adaptive-feedback'] ?? args.tournamentFeedback ?? args['tournament-feedback']),
     sandbox: stringArg(args.sandbox),
     approval: stringArg(args.approval ?? args['ask-for-approval'] ?? args['approval-policy']),
     model: stringArg(args.model),

@@ -5,6 +5,7 @@ import type {
   FrontierSwarmJobResultInput,
   FrontierSwarmLease,
   FrontierSwarmManifestInput,
+  FrontierSwarmAdaptiveObservationInput,
   FrontierSwarmPlan,
   FrontierSwarmPlanInput,
   FrontierSwarmRun,
@@ -155,6 +156,8 @@ export interface FrontierCodexSwarmRunOptions {
   compactLogs?: boolean | FrontierCodexCompactLogOptions;
   dependencyHealth?: boolean | FrontierCodexDependencyHealthOptions;
   semanticImportExpected?: boolean;
+  adaptiveFeedbackPath?: string;
+  adaptiveObservations?: readonly FrontierSwarmAdaptiveObservationInput[];
   workspace?: FrontierCodexSwarmWorkspaceInput;
   sandbox?: string;
   approval?: string | false;

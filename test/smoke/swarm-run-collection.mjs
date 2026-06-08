@@ -166,6 +166,8 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(collection.strategyTournament.kind, 'frontier.swarm.strategy-tournament');
   assert.strictEqual(collection.strategyTournament.summary.matchCount, 1);
   assert.strictEqual(collection.strategyTournament.summary.topStrategyId, 'runtime-runtime-action');
+  assert.strictEqual(collection.strategyHistory.kind, 'frontier.swarm.strategy-tournament-history');
+  assert.strictEqual(collection.tournamentAdaptiveFeedback.kind, 'frontier.swarm.tournament-adaptive-feedback');
   assert.strictEqual(collection.evidenceIndex.summary.jobCount, 1);
   assert.strictEqual(collection.admission.summary.deferredCount, 1);
   assert.strictEqual(collection.dashboard.summary.jobCount, 1);
@@ -174,6 +176,8 @@ async function testCollectedRun(tmp) {
   assert.ok(await exists(path.join(collection.outDir, 'merge-index.json')));
   assert.ok(await exists(path.join(collection.outDir, 'queue-overlay.json')));
   assert.ok(await exists(path.join(collection.outDir, 'strategy-tournament.json')));
+  assert.ok(await exists(path.join(collection.outDir, 'strategy-history.json')));
+  assert.ok(await exists(path.join(collection.outDir, 'tournament-adaptive-feedback.json')));
   assert.ok(await exists(path.join(collection.outDir, 'evidence-index.json')));
   assert.ok(await exists(path.join(collection.outDir, 'merge-admission.json')));
   assert.ok(await exists(path.join(collection.outDir, 'coordinator-query.json')));

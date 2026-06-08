@@ -31,3 +31,5 @@ export const FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_KIND = 'frontier.swarm-codex
 export const FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_RESUME_OVERLAY_KIND = 'frontier.swarm-codex.resume-overlay';
 export const FRONTIER_SWARM_CODEX_RESUME_OVERLAY_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_KIND = 'frontier.swarm-codex.tournament-query';
+export const FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_VERSION = 1;

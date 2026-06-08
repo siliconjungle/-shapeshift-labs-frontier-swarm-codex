@@ -20,6 +20,8 @@ export async function testCliAndPidManifest({ tmp }) {
   assert.ok(helpSource.includes('--semantic-import-max-files <n>'));
   assert.ok(helpSource.includes('dependency-health.json'));
   assert.ok(helpSource.includes('--resume-overlay <file>'));
+  assert.ok(helpSource.includes('tournament show/query/compare/history/feedback'));
+  assert.ok(helpSource.includes('--adaptive-feedback <tournament-adaptive-feedback.json>'));
 
   const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
   await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: 'pid-test', startedAt: Date.now() }, 'pid-test');

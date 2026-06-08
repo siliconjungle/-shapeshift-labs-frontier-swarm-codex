@@ -5,7 +5,9 @@ import type {
   FrontierSwarmMergeAdmission,
   FrontierSwarmMergeBundle,
   FrontierSwarmMergeIndex,
+  FrontierSwarmStrategyTournamentHistory,
   FrontierSwarmStrategyTournament,
+  FrontierSwarmTournamentAdaptiveFeedback,
   FrontierSwarmQueueOverlay
 } from '@shapeshift-labs/frontier-swarm';
 import type {
@@ -52,6 +54,8 @@ export interface FrontierCodexCollectResult {
   mergeIndex: FrontierSwarmMergeIndex;
   queueOverlay: FrontierSwarmQueueOverlay;
   strategyTournament: FrontierSwarmStrategyTournament;
+  strategyHistory: FrontierSwarmStrategyTournamentHistory;
+  tournamentAdaptiveFeedback: FrontierSwarmTournamentAdaptiveFeedback;
   evidenceIndex: FrontierSwarmEvidenceIndex;
   admission: FrontierSwarmMergeAdmission;
   dashboard: FrontierSwarmCoordinatorDashboard;

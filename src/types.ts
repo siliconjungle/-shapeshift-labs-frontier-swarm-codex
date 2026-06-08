@@ -5,3 +5,4 @@ export type * from './types-collection.js';
 export type * from './types-workspace.js';
 export type * from './types-dependency-health.js';
 export type * from './types-resume.js';
+export type * from './tournament-query.js';

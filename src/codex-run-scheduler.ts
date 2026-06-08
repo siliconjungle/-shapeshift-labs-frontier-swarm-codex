@@ -27,6 +27,7 @@ export async function runScheduledJobPool(
   input: {
     concurrency: number;
     adaptive?: boolean | FrontierCodexAdaptiveConcurrencyOptions;
+    observations?: readonly FrontierSwarmAdaptiveObservationInput[];
     outDir?: string;
     eventStream?: FrontierSwarmEventStream;
   },
@@ -51,7 +52,7 @@ export async function runScheduledJobPool(
       maxLimits: { maxReadyJobs: adaptiveOptions.maxConcurrency },
       minLimits: { maxReadyJobs: adaptiveOptions.minConcurrency },
       currentLimits: currentAdaptiveLimits ?? { maxReadyJobs: adaptiveOptions.maxConcurrency },
-      observations: createCodexAdaptiveObservations(results)
+      observations: [...(input.observations ?? []), ...createCodexAdaptiveObservations(results)]
     }) : undefined;
     if (adaptivePlan) {
       currentAdaptiveLimits = adaptivePlan.effectiveLimits;

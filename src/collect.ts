@@ -6,6 +6,8 @@ import {
   createSwarmMergeAdmission,
   createSwarmMergeIndex,
   createSwarmMergeTournament,
+  createSwarmStrategyTournamentHistory,
+  createSwarmTournamentAdaptiveFeedback,
   createSwarmQueueOverlay,
   type FrontierSwarmCoordinatorProcessInput,
   type FrontierSwarmEvidenceIndexEntryInput,
@@ -111,6 +113,16 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     mergeIndex,
     generatedAt
   });
+  const strategyHistory = createSwarmStrategyTournamentHistory({
+    id: `codex-strategy-history:${path.basename(runDir)}`,
+    tournaments: [strategyTournament],
+    generatedAt
+  });
+  const tournamentAdaptiveFeedback = createSwarmTournamentAdaptiveFeedback({
+    tournament: strategyTournament,
+    history: strategyHistory,
+    generatedAt
+  });
   const queueOverlay = createSwarmQueueOverlay({
     runId: path.basename(runDir),
     bundles: collectedBundles
@@ -161,6 +173,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     mergeIndex,
     queueOverlay,
     strategyTournament,
+    strategyHistory,
+    tournamentAdaptiveFeedback,
     evidenceIndex,
     admission,
     dashboard,
@@ -172,6 +186,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   await fs.writeFile(path.join(outDir, 'merge-index.json'), JSON.stringify(mergeIndex, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'queue-overlay.json'), JSON.stringify(queueOverlay, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'strategy-tournament.json'), JSON.stringify(strategyTournament, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'strategy-history.json'), JSON.stringify(strategyHistory, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'tournament-adaptive-feedback.json'), JSON.stringify(tournamentAdaptiveFeedback, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'evidence-index.json'), JSON.stringify(evidenceIndex, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'merge-admission.json'), JSON.stringify(admission, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'coordinator-query.json'), JSON.stringify(dashboard, null, 2) + '\n');
