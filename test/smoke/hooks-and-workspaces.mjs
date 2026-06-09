@@ -4,6 +4,7 @@ import {
   createCodexWorkspacePlan,
   createSwarmWorkspaceProof,
   exists,
+  execFileP,
   fs,
   manifestInput,
   path,
@@ -215,6 +216,13 @@ async function testChangedPathDiscovery(plan, tmp) {
   });
   assert.strictEqual(changedResult.ok, true);
   assert.deepStrictEqual(changedResult.run.results[0].changedPaths, ['src/runtime/action.ts']);
+  const changedPatchPath = changedResult.run.results[0].patchPath;
+  assert.ok(changedPatchPath);
+  const changedPatch = await fs.readFile(changedPatchPath, 'utf8');
+  assert.ok(changedPatch.includes('diff --git a/src/runtime/action.ts b/src/runtime/action.ts'));
+  assert.ok(changedPatch.includes('+++ b/src/runtime/action.ts'));
+  assert.ok(!changedPatch.includes(tmp));
+  await execFileP('git', ['apply', '--check', changedPatchPath], { cwd: tmp });
   assert.ok(changedResult.run.results[0].metadata.codexHandoffArtifacts.some((artifact) => artifact.kind === 'last-message'));
   assert.ok(changedResult.run.results[0].evidencePaths.some((entry) => entry.endsWith('last-message.md')));
   const changedWorkspaceProofPath = changedResult.run.results[0].evidencePaths.find((entry) => entry.endsWith('workspace-proof.json'));

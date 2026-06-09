@@ -143,9 +143,24 @@ async function noIndexWorkspacePatch(sourceRoot: string, workspace: string, chan
     const left = sourceExists ? source : '/dev/null';
     const right = targetExists ? target : '/dev/null';
     const result = await runProcess('git', ['diff', '--no-index', '--', left, right], { cwd: sourceRoot, allowFailure: true });
-    if (result.stdout.trim()) chunks.push(result.stdout);
+    if (result.stdout.trim()) chunks.push(rewriteNoIndexPatchPaths(result.stdout, file, { sourceExists, targetExists }));
   }
   return chunks.join('\n');
+}
+
+function rewriteNoIndexPatchPaths(
+  patch: string,
+  file: string,
+  input: { sourceExists: boolean; targetExists: boolean }
+): string {
+  const oldPath = input.sourceExists ? `a/${file}` : '/dev/null';
+  const newPath = input.targetExists ? `b/${file}` : '/dev/null';
+  return patch.split(/\r?\n/).map((line) => {
+    if (line.startsWith('diff --git ')) return `diff --git a/${file} b/${file}`;
+    if (line.startsWith('--- ')) return `--- ${oldPath}`;
+    if (line.startsWith('+++ ')) return `+++ ${newPath}`;
+    return line;
+  }).join('\n');
 }
 
 function isIgnoredWorkspaceChangedPath(file: string, plan: FrontierCodexWorkspacePlan): boolean {
