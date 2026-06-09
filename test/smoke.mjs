@@ -15,6 +15,7 @@ import { testPlanningAndLinks } from './smoke/planning-and-links.mjs';
 import { testResumeRun } from './smoke/resume.mjs';
 import { testSemanticImportSelection } from './smoke/semantic-import-selection.mjs';
 import { testSemanticImportQuality } from './smoke/semantic-import-quality.mjs';
+import { testSemanticLineageCollection } from './smoke/semantic-lineage-collection.mjs';
 import { testSwarmRunCollection } from './smoke/swarm-run-collection.mjs';
 import { testTournamentCli } from './smoke/tournament-cli.mjs';
 
@@ -27,6 +28,7 @@ await testSemanticImportSelection(context);
 const { mergeBundle } = await testSwarmRunCollection(context);
 await testTournamentCli(context);
 await testSemanticImportQuality(context, mergeBundle);
+await testSemanticLineageCollection(context, mergeBundle);
 await testApplyAndScore(context, mergeBundle);
 await testHooksAndWorkspaces(context);
 await testDependencyHealth(context);

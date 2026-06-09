@@ -14,6 +14,7 @@ import {
 } from './semantic-import-sidecar.js';
 import { mergeSemanticFactSummaries, semanticImportFactSummary, summarizeLangSidecarSemanticFacts } from './semantic-import-facts.js';
 import { summarizeSemanticDependencies } from './semantic-import-dependencies.js';
+import { summarizeSemanticLineageEvidence } from './semantic-import-lineage.js';
 import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths, semanticImportPathVariants } from './semantic-import-select.js';
 import { discoverSemanticImportFallbackPaths, withSemanticImportFallback } from './semantic-import-fallback.js';
 
@@ -157,6 +158,7 @@ export async function createCodexSemanticImportSidecar(input: {
         universalAstLayers: summarizeUniversalAstLayers(importResult?.universalAst, semanticSidecar),
         proofSpec: summarizeProofSpec(importResult?.universalAst?.proof, semanticSidecar),
         paradigmSemantics: summarizeParadigmSemantics(importResult?.universalAst?.paradigmSemantics, semanticSidecar),
+        semanticLineage: summarizeSemanticLineageEvidence(semanticSidecar),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),
         mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate),

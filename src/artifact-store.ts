@@ -4,7 +4,11 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
-import { FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND, FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION } from './constants.js';
+import {
+  FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND,
+  FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION,
+  FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND
+} from './constants.js';
 import type { FrontierCodexArtifactRecord, FrontierCodexArtifactStoreResult, FrontierCodexCollectResult } from './index.js';
 import { isObject, pathExists, uniqueStrings } from './common.js';
 
@@ -83,7 +87,9 @@ function collectArtifactCandidates(collection: FrontierCodexCollectResult): Arra
       out.push({ file: path.join(entry.outputDir, 'merge.json'), jobId: entry.jobId, bucket, kind: 'merge-bundle' });
       out.push({ file: path.join(entry.outputDir, 'changes.patch'), jobId: entry.jobId, bucket, kind: 'patch' });
       out.push({ file: path.join(entry.outputDir, 'evidence.json'), jobId: entry.jobId, bucket, kind: 'evidence' });
-      for (const evidencePath of entry.bundle.evidencePaths) out.push({ file: evidencePath, jobId: entry.jobId, bucket, kind: 'worker-evidence' });
+      for (const evidencePath of entry.bundle.evidencePaths) {
+        out.push({ file: evidencePath, jobId: entry.jobId, bucket, kind: artifactKindForEvidencePath(evidencePath) });
+      }
     }
   }
   for (const name of ['collection.json', 'merge-index.json', 'queue-overlay.json', 'strategy-tournament.json', 'strategy-history.json', 'tournament-adaptive-feedback.json', 'evidence-index.json', 'merge-admission.json', 'coordinator-query.json', 'compact-dashboard.json']) {
@@ -139,13 +145,31 @@ async function readArtifactMetadata(file: string): Promise<Record<string, unknow
   if (path.extname(file) !== '.json') return {};
   try {
     const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+    if (!isObject(parsed)) return {};
+    const semanticImport = semanticImportSummaryForArtifact(parsed, file);
+    const lineage = semanticLineageForArtifact(parsed, semanticImport);
     return isObject(parsed) ? {
+      artifactKind: typeof parsed.kind === 'string' ? parsed.kind : undefined,
       disposition: parsed.disposition,
       status: parsed.status,
       mergeReadiness: parsed.mergeReadiness,
       staleAgainstHead: parsed.staleAgainstHead,
       changedPaths: Array.isArray(parsed.changedPaths) ? parsed.changedPaths.length : undefined,
-      semanticPresent: Boolean(parsed.semanticImport),
+      semanticPresent: Boolean(semanticImport),
+      semanticRecordCount: numberField(semanticImport, 'total'),
+      semanticSelected: numberField(semanticImport, 'selected'),
+      semanticEligible: numberField(semanticImport, 'eligible'),
+      semanticImported: numberField(semanticImport, 'imported'),
+      semanticSymbols: numberField(readObject(semanticImport?.semanticIndex), 'symbols'),
+      semanticOwnershipRegions: numberField(readObject(semanticImport?.semanticSidecars), 'ownershipRegions'),
+      semanticPatchHints: numberField(readObject(semanticImport?.semanticSidecars), 'patchHints'),
+      semanticDependencyRelations: numberField(readObject(semanticImport?.dependencies), 'total'),
+      semanticDependencyPredicates: stringArray(readObject(semanticImport?.dependencies)?.predicates),
+      semanticLineageEvents: numberField(lineage, 'inferredEvents'),
+      semanticLineageMoved: numberField(lineage, 'moved'),
+      semanticLineageRenamed: numberField(lineage, 'renamed'),
+      semanticLineageDeleted: numberField(lineage, 'deleted'),
+      lineagePresent: Boolean(lineage) && numberField(lineage, 'inferredEvents') > 0,
       traceShards: Array.isArray(parsed.traceShards) ? parsed.traceShards.length : undefined
     } : {};
   } catch {
@@ -154,12 +178,18 @@ async function readArtifactMetadata(file: string): Promise<Record<string, unknow
 }
 
 function artifactTags(candidate: { bucket?: string; kind: string }, metadata: Record<string, unknown>): string[] {
+  const semanticPresent = Boolean(metadata.semanticPresent);
+  const lineagePresent = Boolean(metadata.lineagePresent);
   return uniqueStrings([
     candidate.kind,
     ...(candidate.bucket ? [candidate.bucket] : []),
-    metadata.semanticPresent ? 'semantic-sidecar' : '',
+    semanticPresent ? 'semantic-sidecar' : '',
+    semanticPresent ? 'semantic-import' : '',
+    candidate.kind === 'semantic-imports' ? 'semantic-imports' : '',
+    lineagePresent ? 'semantic-lineage' : '',
     metadata.staleAgainstHead ? 'stale' : '',
-    Number(metadata.traceShards ?? 0) > 0 ? 'trace' : ''
+    Number(metadata.traceShards ?? 0) > 0 ? 'trace' : '',
+    Number(metadata.semanticDependencyRelations ?? 0) > 0 ? 'semantic-dependencies' : ''
   ]);
 }
 
@@ -176,10 +206,11 @@ function renderArtifactSql(records: readonly FrontierCodexArtifactRecord[]): str
     record.compression,
     record.bytes,
     record.compressedBytes ?? null,
-    record.tags.join(',')
+    record.tags.join(','),
+    JSON.stringify(record.metadata)
   ].map(sqlValue).join(', ')});`);
   return [
-    'create table if not exists artifacts (id text, job_id text, bucket text, kind text, path text, relative_path text, sha256 text, blob_path text, compression text, bytes integer, compressed_bytes integer, tags text);',
+    'create table if not exists artifacts (id text, job_id text, bucket text, kind text, path text, relative_path text, sha256 text, blob_path text, compression text, bytes integer, compressed_bytes integer, tags text, metadata_json text);',
     ...rows
   ].join('\n') + '\n';
 }
@@ -189,11 +220,53 @@ async function writeSqliteIndex(file: string, records: readonly FrontierCodexArt
   if (!sqlite.DatabaseSync) return false;
   await fs.rm(file, { force: true });
   const db = new sqlite.DatabaseSync(file);
-  db.exec('create table artifacts (id text, job_id text, bucket text, kind text, path text, relative_path text, sha256 text, blob_path text, compression text, bytes integer, compressed_bytes integer, tags text)');
-  const stmt = db.prepare('insert into artifacts values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  for (const record of records) stmt.run(record.id, record.jobId ?? null, record.bucket ?? null, record.kind, record.path, record.relativePath, record.sha256, record.blobPath, record.compression, record.bytes, record.compressedBytes ?? null, record.tags.join(','));
+  db.exec('create table artifacts (id text, job_id text, bucket text, kind text, path text, relative_path text, sha256 text, blob_path text, compression text, bytes integer, compressed_bytes integer, tags text, metadata_json text)');
+  const stmt = db.prepare('insert into artifacts values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  for (const record of records) stmt.run(record.id, record.jobId ?? null, record.bucket ?? null, record.kind, record.path, record.relativePath, record.sha256, record.blobPath, record.compression, record.bytes, record.compressedBytes ?? null, record.tags.join(','), JSON.stringify(record.metadata));
   db.close();
   return true;
+}
+
+function artifactKindForEvidencePath(file: string): string {
+  const name = path.basename(file).toLowerCase();
+  if (name === 'semantic-imports.json') return 'semantic-imports';
+  if (name === 'patch-intent.json') return 'patch-intent';
+  if (name === 'log-summary.json') return 'log-summary';
+  if (name === 'resource-allocation.json') return 'resource-allocation';
+  if (name === 'workspace-proof.json') return 'workspace-proof';
+  if (name === 'merge.json') return 'merge-bundle';
+  if (name === 'evidence.json') return 'evidence';
+  return 'worker-evidence';
+}
+
+function semanticImportSummaryForArtifact(parsed: Record<string, unknown>, file: string): Record<string, unknown> | undefined {
+  if (path.basename(file) === 'semantic-imports.json' || parsed.kind === FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND) {
+    return readObject(parsed.summary) ?? {};
+  }
+  const metadata = readObject(parsed.metadata);
+  return readObject(parsed.semanticImport) ?? readObject(metadata?.semanticImport);
+}
+
+function semanticLineageForArtifact(
+  parsed: Record<string, unknown>,
+  semanticImport: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  return readObject(parsed.semanticLineage) ??
+    readObject(semanticImport?.semanticLineage) ??
+    readObject(semanticImport?.semanticLineageInference);
+}
+
+function readObject(value: unknown): Record<string, unknown> | undefined {
+  return isObject(value) ? value : undefined;
+}
+
+function numberField(value: Record<string, unknown> | undefined, key: string): number {
+  const number = Number(value?.[key]);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
 function sqlValue(value: unknown): string {

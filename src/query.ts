@@ -16,9 +16,12 @@ export interface FrontierCodexQueryInput {
   bucket?: string;
   kind?: string;
   pathIncludes?: string;
+  symbol?: string;
   tag?: string;
   stale?: boolean;
   semantic?: boolean;
+  lineage?: boolean;
+  readiness?: string;
   passedTests?: boolean;
   limit?: number;
   cwd?: string;
@@ -68,9 +71,12 @@ export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
     bucket: stringArg(args.bucket),
     kind: stringArg(args.kind),
     pathIncludes: stringArg(args.path ?? args['path-includes']),
+    symbol: stringArg(args.symbol ?? args.function ?? args['function']),
     tag: stringArg(args.tag),
     stale: optionalBoolArg(args.stale),
     semantic: optionalBoolArg(args.semantic),
+    lineage: optionalBoolArg(args.lineage ?? args['semantic-lineage']),
+    readiness: stringArg(args.readiness ?? args.view),
     passedTests: optionalBoolArg(args.passedTests ?? args['passed-tests']),
     limit: numberArg(args.limit)
   });
@@ -98,8 +104,11 @@ function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput
     && (input.jobId === undefined || job.jobId === input.jobId)
     && (input.bucket === undefined || job.disposition === input.bucket || job.admissionStatus === input.bucket)
     && (input.pathIncludes === undefined || arrayIncludes(job.changedPaths, input.pathIncludes))
+    && (input.symbol === undefined || haystack.includes(input.symbol.toLowerCase()))
     && (input.stale === undefined || Boolean(job.staleAgainstHead) === input.stale)
     && (input.semantic === undefined || Boolean(job.semanticImport) === input.semantic || Boolean(job.semanticImportQuality) === input.semantic)
+    && (input.lineage === undefined || jobHasLineage(job) === input.lineage)
+    && (input.readiness === undefined || matchesReadiness(job, input.readiness))
     && (input.passedTests === undefined || testsPassed(job) === input.passedTests);
 }
 
@@ -110,8 +119,10 @@ function matchesArtifact(record: FrontierCodexArtifactRecord, input: FrontierCod
     && (input.bucket === undefined || record.bucket === input.bucket)
     && (input.kind === undefined || record.kind === input.kind)
     && (input.pathIncludes === undefined || record.path.includes(input.pathIncludes))
+    && (input.symbol === undefined || haystack.includes(input.symbol.toLowerCase()))
     && (input.tag === undefined || record.tags.includes(input.tag))
-    && (input.semantic === undefined || record.tags.includes('semantic-sidecar') === input.semantic);
+    && (input.semantic === undefined || record.tags.includes('semantic-sidecar') === input.semantic)
+    && (input.lineage === undefined || textHasLineage(haystack) === input.lineage);
 }
 
 function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQueryInput): boolean {
@@ -121,7 +132,9 @@ function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQue
     && (input.bucket === undefined || entry.status === input.bucket)
     && (input.kind === undefined || entry.kind === input.kind)
     && (input.pathIncludes === undefined || String(entry.path ?? '').includes(input.pathIncludes))
-    && (input.tag === undefined || Array.isArray(entry.tags) && entry.tags.includes(input.tag));
+    && (input.symbol === undefined || haystack.includes(input.symbol.toLowerCase()))
+    && (input.tag === undefined || Array.isArray(entry.tags) && entry.tags.includes(input.tag))
+    && (input.lineage === undefined || textHasLineage(haystack) === input.lineage);
 }
 
 function matchesText(haystack: string, input: FrontierCodexQueryInput): boolean {
@@ -131,6 +144,29 @@ function matchesText(haystack: string, input: FrontierCodexQueryInput): boolean 
 function testsPassed(job: Record<string, unknown>): boolean {
   const tests = isObject(job.tests) ? job.tests : {};
   return Number(tests.requiredFailed ?? 0) === 0 && Number(tests.failed ?? 0) === 0;
+}
+
+function jobHasLineage(job: Record<string, unknown>): boolean {
+  const quality = isObject(job.semanticImportQuality) ? job.semanticImportQuality : {};
+  return Number(quality.semanticLineageEvents ?? 0) > 0 ||
+    Number(quality.semanticLineageMoved ?? 0) > 0 ||
+    Number(quality.semanticLineageRenamed ?? 0) > 0 ||
+    Number(quality.semanticLineageDeleted ?? 0) > 0;
+}
+
+function textHasLineage(haystack: string): boolean {
+  return haystack.includes('semanticlineage') || haystack.includes('lineageinference');
+}
+
+function matchesReadiness(job: Record<string, unknown>, value: string): boolean {
+  const readiness = value.toLowerCase();
+  if (readiness === 'ready-to-port') return job.disposition === 'needs-port' || job.mergeReadiness === 'verified-patch';
+  if (readiness === 'ready-to-apply') return job.disposition === 'auto-mergeable' || job.admissionStatus === 'ready-to-apply';
+  if (readiness === 'stale') return Boolean(job.staleAgainstHead) || job.disposition === 'stale-against-head';
+  if (readiness === 'discovery-only') return job.mergeReadiness === 'discovery-only' || job.disposition === 'discovery-only';
+  if (readiness === 'blocked') return job.status === 'blocked' || job.mergeReadiness === 'blocked' || job.disposition === 'blocked';
+  if (readiness === 'evidence-only') return job.mergeReadiness === 'evidence-only' || job.disposition === 'evidence-only';
+  return JSON.stringify(job).toLowerCase().includes(readiness);
 }
 
 function arrayIncludes(value: unknown, needle: string): boolean {

@@ -202,6 +202,13 @@ async function testCollectedRun(tmp) {
   assert.ok(await exists(path.join(collection.outDir, 'artifact-store', 'artifacts.jsonl')));
   assert.ok(await exists(path.join(collection.outDir, 'artifact-store', 'artifact-index.sql')));
   assert.ok(await exists(path.join(collection.outDir, 'collected-and-indexed.json')));
+  const semanticArtifact = collection.artifactStore.records.find((record) => record.relativePath.endsWith('semantic-imports.json'));
+  assert.ok(semanticArtifact);
+  assert.strictEqual(semanticArtifact.kind, 'semantic-imports');
+  assert.ok(semanticArtifact.tags.includes('semantic-import'));
+  assert.strictEqual(semanticArtifact.metadata.semanticRecordCount, 1);
+  assert.ok(semanticArtifact.metadata.semanticDependencyPredicates.includes('calls'));
+  assert.ok((await fs.readFile(path.join(collection.outDir, 'artifact-store', 'artifact-index.sql'), 'utf8')).includes('metadata_json'));
   assert.ok(collection.compactDashboard.semanticImport.universalAstLayerCount >= 0);
   assert.ok(collection.compactDashboard.semanticImport.dependencyRelationCount >= 1);
   assert.ok(collection.compactDashboard.semanticImport.dependencyPredicates.includes('calls'));
@@ -245,6 +252,8 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(artifactQuery.kind, 'frontier.swarm-codex.query');
   assert.strictEqual(artifactQuery.jobs.length, 1);
   assert.ok(artifactQuery.artifacts.length >= 1);
+  const semanticArtifactQuery = await queryCodexSwarmCollection({ collection: collection.outDir, kind: 'semantic-imports', semantic: true });
+  assert.strictEqual(semanticArtifactQuery.artifacts[0].kind, 'semantic-imports');
   const cli = new URL('../../dist/cli.js', import.meta.url).pathname;
   const cliQuery = JSON.parse((await execFileP(process.execPath, [
     cli,

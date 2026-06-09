@@ -224,6 +224,15 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   paradigmSemanticsRecords: number;
   paradigmSemanticsGroups: number;
   paradigmSemanticsLoweringRecords: number;
+  semanticLineageEvents: number;
+  semanticLineageMoved: number;
+  semanticLineageRenamed: number;
+  semanticLineageDeleted: number;
+  semanticLineageAmbiguous: number;
+  semanticLineageBlocked: number;
+  semanticLineageNeedsReview: number;
+  semanticLineageEventKinds: string[];
+  semanticLineageReasonCodes: string[];
   readiness: Record<string, number>;
   lossesBySeverity: Record<string, number>;
   scoreAdjustment: number;

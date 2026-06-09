@@ -6,6 +6,7 @@ import { printHelp } from './cli-help.js';
 import { handleCodexTournamentCommand } from './tournament-query.js';
 import { handleCodexQueryCommand } from './query.js';
 import { handleCodexCleanupCommand } from './cleanup.js';
+import { collectResultForCli } from './cli-output.js';
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
 const args = parseArgs(process.argv.slice(2));
@@ -75,7 +76,7 @@ try {
       semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
       branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix'])
     });
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(collectResultForCli(result, boolArg(args.full, false)), null, 2));
     if (!result.ok) process.exitCode = 1;
   } else if (command === 'apply') {
     const result = await applyCodexSwarmCollection({

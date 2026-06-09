@@ -91,7 +91,16 @@ export function createCodexCompactDashboard(input: {
       proofSpecFailedObligations: semanticQualities.reduce((sum, entry) => sum + entry.proofSpecFailedObligations, 0),
       paradigmSemanticsRecords: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsRecords, 0),
       paradigmSemanticsGroups: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsGroups, 0),
-      paradigmSemanticsLoweringRecords: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsLoweringRecords, 0)
+      paradigmSemanticsLoweringRecords: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsLoweringRecords, 0),
+      semanticLineageEvents: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageEvents, 0),
+      semanticLineageMoved: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageMoved, 0),
+      semanticLineageRenamed: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageRenamed, 0),
+      semanticLineageDeleted: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageDeleted, 0),
+      semanticLineageAmbiguous: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageAmbiguous, 0),
+      semanticLineageBlocked: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageBlocked, 0),
+      semanticLineageNeedsReview: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageNeedsReview, 0),
+      semanticLineageEventKinds: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageEventKinds)),
+      semanticLineageReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageReasonCodes))
     },
     trace: {
       shardCount: traceSummary.shardCount,

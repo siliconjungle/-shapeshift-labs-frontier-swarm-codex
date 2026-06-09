@@ -6,6 +6,7 @@ import { semanticImportFactSummary } from './semantic-import-facts.js';
 import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradigm.js';
 import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers.js';
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
+import { semanticImportLineageSummary } from './semantic-import-lineage.js';
 
 
 export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): FrontierCodexPatchScoreSemanticEvidence {
@@ -41,6 +42,15 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
       paradigmSemanticsRecords: 0,
       paradigmSemanticsGroups: 0,
       paradigmSemanticsLoweringRecords: 0,
+      semanticLineageEvents: 0,
+      semanticLineageMoved: 0,
+      semanticLineageRenamed: 0,
+      semanticLineageDeleted: 0,
+      semanticLineageAmbiguous: 0,
+      semanticLineageBlocked: 0,
+      semanticLineageNeedsReview: 0,
+      semanticLineageEventKinds: [],
+      semanticLineageReasonCodes: [],
       readiness: {},
       lossesBySeverity: {},
       scoreAdjustment,
@@ -67,6 +77,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   const universalAstLayerNames = universalAstLayerSummary.names;
   const proofSpec = semanticImportProofSpecSummary(summary);
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
+  const semanticLineage = semanticImportLineageSummary(summary);
   const errorLosses = nonNegativeNumber(lossesBySeverity.error);
   const warningLosses = nonNegativeNumber(lossesBySeverity.warning);
   const blocked = nonNegativeNumber(readiness.blocked);
@@ -146,6 +157,21 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     scoreAdjustment -= Math.min(10, proofSpec.open + proofSpec.unknown);
     cleanEligible = false;
   }
+  if (semanticLineage.blocked > 0) {
+    reasons.push(`blocked semantic lineage: ${semanticLineage.blocked}`);
+    scoreAdjustment -= 20;
+    cleanEligible = false;
+  }
+  if (semanticLineage.ambiguous > 0) {
+    reasons.push(`ambiguous semantic lineage: ${semanticLineage.ambiguous}`);
+    scoreAdjustment -= 10;
+    cleanEligible = false;
+  }
+  if (semanticLineage.needsReview > 0 || semanticLineage.reviewRequired) {
+    reasons.push('semantic lineage needs review');
+    scoreAdjustment -= 5;
+    cleanEligible = false;
+  }
   if (sourceMapMappings > 0 && semanticSymbols > 0 && ownershipRegions > 0 && universalAstLayers > 0) {
     scoreAdjustment += 10;
   }
@@ -157,6 +183,9 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   }
   if (paradigmSemantics.total > 0) {
     scoreAdjustment += 3;
+  }
+  if (semanticLineage.inferredEvents > 0 && semanticLineage.blocked === 0) {
+    scoreAdjustment += 2;
   }
 
   return {
@@ -180,6 +209,15 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     paradigmSemanticsRecords: paradigmSemantics.total,
     paradigmSemanticsGroups: paradigmSemantics.groups.length,
     paradigmSemanticsLoweringRecords: paradigmSemantics.loweringRecords,
+    semanticLineageEvents: semanticLineage.inferredEvents,
+    semanticLineageMoved: semanticLineage.moved,
+    semanticLineageRenamed: semanticLineage.renamed,
+    semanticLineageDeleted: semanticLineage.deleted,
+    semanticLineageAmbiguous: semanticLineage.ambiguous,
+    semanticLineageBlocked: semanticLineage.blocked,
+    semanticLineageNeedsReview: semanticLineage.needsReview,
+    semanticLineageEventKinds: semanticLineage.eventKinds,
+    semanticLineageReasonCodes: semanticLineage.reasonCodes,
     readiness,
     lossesBySeverity,
     scoreAdjustment: Math.max(-60, Math.min(15, scoreAdjustment)),

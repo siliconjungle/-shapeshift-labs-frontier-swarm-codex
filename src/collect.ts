@@ -9,7 +9,6 @@ import {
   createSwarmStrategyTournamentHistory,
   createSwarmTournamentAdaptiveFeedback,
   createSwarmQueueOverlay,
-  type FrontierSwarmCoordinatorDashboard,
   type FrontierSwarmCoordinatorProcessInput,
   type FrontierSwarmEvidenceIndexEntryInput,
   type FrontierSwarmMergeBundle,
@@ -19,10 +18,18 @@ import { FRONTIER_SWARM_CODEX_COLLECTION_KIND, FRONTIER_SWARM_CODEX_COLLECTION_V
 import type { FrontierCodexCollectBucket, FrontierCodexCollectInput, FrontierCodexCollectedBundle, FrontierCodexCollectResult } from './index.js';
 import { findFilesByName, isObject, pathExists, pathHasIgnoredSegment, resolveBundlePatchPath, slug, uniqueStrings } from './common.js';
 import { createCodexCompactDashboard } from './dashboard.js';
-import { bundlePatchStaleness, classifyCodexCollectBucket, mergeRecordScore, normalizeCollectedMergeBundle } from './collect-bundles.js';
+import {
+  bundlePatchStaleness,
+  classifyCodexCollectBucket,
+  mergeRecordScore,
+  normalizeCollectedDisposition,
+  normalizeCollectedMergeBundle,
+  normalizeCollectedStaleAgainstHead
+} from './collect-bundles.js';
 import { copyOrWriteCollectedEvidenceSummary, createCollectedEvidenceEntries } from './collect-evidence.js';
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { createCodexArtifactStore } from './artifact-store.js';
+import { enrichCollectedCoordinatorDashboard } from './collect-dashboard.js';
 
 
 export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Promise<FrontierCodexCollectResult> {
@@ -63,24 +70,23 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     const patchPath = resolveBundlePatchPath(bundle, mergePath);
     const patchExists = !!patchPath && await pathExists(patchPath);
     const staleness = input.checkStale === false
-      ? { stale: false, patchStatus: patchExists ? 'unknown' : 'missing', reasons: ['stale check disabled'] }
+      ? { stale: false, patchStatus: patchExists ? 'unknown' : 'missing', reasons: ['stale check disabled'], fresh: false }
       : await bundlePatchStaleness(bundle, mergePath, cwd);
-    const staleAgainstHead = staleness.stale;
-    const bucket = classifyCodexCollectBucket(bundle, staleAgainstHead);
+    const staleAgainstHead = normalizeCollectedStaleAgainstHead(bundle, staleness, input.checkStale !== false);
+    const disposition = normalizeCollectedDisposition(bundle, staleAgainstHead);
+    const bucket = classifyCodexCollectBucket({ ...bundle, staleAgainstHead, disposition }, staleAgainstHead);
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(bundle.jobId)}` : bundle.branchName;
     const outputDir = path.join(outDir, bucket, slug(bundle.jobId));
     const collectedEvidencePath = path.join(outputDir, 'evidence.json');
     const semanticImport = semanticImportSummaryFromBundle(bundle);
     const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
     semanticImportQualities.set(bundle.jobId, semanticImportQuality);
-    const collectReasons = staleness.patchStatus === 'applies'
-      ? bundle.reasons
-      : uniqueStrings([...bundle.reasons, ...staleness.reasons]);
+    const collectReasons = normalizeCollectedReasons(bundle.reasons, staleness.reasons, staleness.patchStatus, staleAgainstHead, bundle);
     const nextBundle: FrontierSwarmMergeBundle = {
       ...bundle,
       ...(branchName ? { branchName } : {}),
-      staleAgainstHead: bundle.staleAgainstHead || staleAgainstHead,
-      disposition: staleAgainstHead ? 'stale-against-head' : bundle.disposition,
+      staleAgainstHead,
+      disposition,
       autoMergeable: bucket === 'ready-to-apply' && bundle.autoMergeable,
       reasons: collectReasons,
       ...(semanticImport ? { semanticImport } : {}),
@@ -210,56 +216,27 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   return result;
 }
 
-function enrichCollectedCoordinatorDashboard(
-  dashboard: FrontierSwarmCoordinatorDashboard,
-  qualities: ReadonlyMap<string, ReturnType<typeof summarizeCodexSemanticImportQuality>>,
-  semanticImportExpected: boolean
-): FrontierSwarmCoordinatorDashboard {
-  const mutable = dashboard as FrontierSwarmCoordinatorDashboard & {
-    jobs: Array<FrontierSwarmCoordinatorDashboard['jobs'][number] & { semanticImportQuality?: ReturnType<typeof summarizeCodexSemanticImportQuality> }>;
-    summary: FrontierSwarmCoordinatorDashboard['summary'] & Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-  };
-  const semanticQualities = dashboard.jobs.map((job) => qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected));
-  mutable.jobs = dashboard.jobs.map((job) => {
-    const semanticImportQuality = qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected);
-    return { ...job, semanticImportQuality };
-  });
-  mutable.summary = {
-    ...dashboard.summary,
-    semanticImportExpectedCount: semanticQualities.filter((entry) => entry.expected).length,
-    semanticImportExpectedSatisfiedCount: semanticQualities.filter((entry) => entry.expected && entry.expectedSatisfied).length,
-    semanticImportExpectedUnsatisfiedCount: semanticQualities.filter((entry) => entry.expected && !entry.expectedSatisfied).length,
-    semanticImportCandidateCount: semanticQualities.reduce((sum, entry) => sum + entry.candidates, 0),
-    semanticImportSelectedCount: semanticQualities.reduce((sum, entry) => sum + entry.selected, 0),
-    semanticImportEligibleCount: semanticQualities.reduce((sum, entry) => sum + entry.eligible, 0),
-    semanticImportImportedCount: semanticQualities.reduce((sum, entry) => sum + entry.imported, 0),
-    semanticImportWarningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
-    semanticImportWarnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings)),
-    semanticImportFactCount: semanticQualities.reduce((sum, entry) => sum + entry.semanticFacts, 0),
-    semanticImportFactPredicates: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticFactPredicates)),
-    semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
-  };
-  mutable.metadata = {
-    ...(mutable.metadata ?? {}),
-    semanticImport: {
-      expected: semanticImportExpected,
-      expectedSatisfiedCount: semanticQualities.filter((entry) => entry.expected && entry.expectedSatisfied).length,
-      expectedUnsatisfiedCount: semanticQualities.filter((entry) => entry.expected && !entry.expectedSatisfied).length,
-      expectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes)),
-      candidateCount: semanticQualities.reduce((sum, entry) => sum + entry.candidates, 0),
-      selectedCount: semanticQualities.reduce((sum, entry) => sum + entry.selected, 0),
-      eligibleCount: semanticQualities.reduce((sum, entry) => sum + entry.eligible, 0),
-      importedCount: semanticQualities.reduce((sum, entry) => sum + entry.imported, 0),
-      symbolCount: semanticQualities.reduce((sum, entry) => sum + entry.symbols, 0),
-      ownershipRegionCount: semanticQualities.reduce((sum, entry) => sum + entry.ownershipRegions, 0),
-      semanticFactCount: semanticQualities.reduce((sum, entry) => sum + entry.semanticFacts, 0),
-      semanticFactPredicates: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticFactPredicates)),
-      warningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
-      warnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings))
-    }
-  };
-  return mutable;
+function normalizeCollectedReasons(
+  bundleReasons: readonly string[],
+  staleReasons: readonly string[],
+  patchStatus: FrontierSwarmPatchStatus,
+  staleAgainstHead: boolean,
+  bundle: FrontierSwarmMergeBundle
+): string[] {
+  const reasons = patchStatus === 'applies'
+    ? [...bundleReasons]
+    : uniqueStrings([...bundleReasons, ...staleReasons]);
+  const filtered = staleAgainstHead
+    ? reasons
+    : reasons.filter((reason) => reason !== 'stale-against-head');
+  if (
+    !staleAgainstHead
+    && (bundle.staleAgainstHead || bundle.disposition === 'stale-against-head')
+    && patchStatus !== 'missing'
+  ) {
+    filtered.push('stale-against-head cleared by patch freshness check');
+  }
+  return uniqueStrings(filtered);
 }
 
 export async function readCodexPidProcesses(file: string): Promise<FrontierSwarmCoordinatorProcessInput[]> {

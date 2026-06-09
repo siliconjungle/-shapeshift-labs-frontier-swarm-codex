@@ -41,6 +41,7 @@ export interface FrontierCodexSemanticImportRecord {
   universalAstLayers?: FrontierCodexUniversalAstLayerSummary;
   proofSpec?: FrontierCodexProofSpecSummary;
   paradigmSemantics?: FrontierCodexParadigmSemanticsSummary;
+  semanticLineage?: FrontierCodexSemanticLineageSummary;
   sourceProjection?: unknown;
   nativeCompile?: unknown;
   mergeCandidate?: unknown;
@@ -143,6 +144,27 @@ export interface FrontierCodexParadigmSemanticsSummary {
   empty: boolean;
 }
 
+export interface FrontierCodexSemanticLineageSummary {
+  total: number;
+  inferredEvents: number;
+  moved: number;
+  renamed: number;
+  deleted: number;
+  ambiguous: number;
+  unmatchedAdded: number;
+  unchangedAnchors: number;
+  beforeSymbols: number;
+  afterSymbols: number;
+  blocked: number;
+  needsReview: number;
+  ready: number;
+  reviewRequired: boolean;
+  readiness: Record<string, number>;
+  eventKinds: string[];
+  reasonCodes: string[];
+  empty: boolean;
+}
+
 export interface FrontierCodexSemanticImportSidecar {
   kind: typeof FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND;
   version: typeof FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION;
@@ -191,6 +213,7 @@ export interface FrontierCodexSemanticImportSidecar {
     universalAstLayers: FrontierCodexUniversalAstLayerSummary;
     proofSpec: FrontierCodexProofSpecSummary;
     paradigmSemantics: FrontierCodexParadigmSemanticsSummary;
+    semanticLineage: FrontierCodexSemanticLineageSummary;
     sourceProjections: {
       total: number;
       preserved: number;
@@ -252,5 +275,14 @@ export interface FrontierCodexSemanticImportQuality {
   paradigmSemanticsRecords: number;
   paradigmSemanticsGroups: number;
   paradigmSemanticsLoweringRecords: number;
+  semanticLineageEvents: number;
+  semanticLineageMoved: number;
+  semanticLineageRenamed: number;
+  semanticLineageDeleted: number;
+  semanticLineageAmbiguous: number;
+  semanticLineageBlocked: number;
+  semanticLineageNeedsReview: number;
+  semanticLineageEventKinds: string[];
+  semanticLineageReasonCodes: string[];
   warnings: string[];
 }

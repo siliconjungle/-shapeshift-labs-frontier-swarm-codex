@@ -9,24 +9,31 @@ import {
 import type { FrontierCodexCollectBucket } from './index.js';
 import { isObject, pathExists, resolveBundlePatchPath, runProcess, tail, uniqueStrings } from './common.js';
 
+export interface FrontierCodexPatchStaleness {
+  stale: boolean;
+  patchStatus: FrontierSwarmPatchStatus;
+  reasons: string[];
+  fresh: boolean;
+}
 
 export async function bundlePatchStaleness(
   bundle: FrontierSwarmMergeBundle,
   mergePath: string,
   cwd: string
-): Promise<{ stale: boolean; patchStatus: FrontierSwarmPatchStatus; reasons: string[] }> {
+): Promise<FrontierCodexPatchStaleness> {
   const patchPath = resolveBundlePatchPath(bundle, mergePath);
-  if (!patchPath || !await pathExists(patchPath)) return { stale: false, patchStatus: 'missing', reasons: ['missing patch'] };
+  if (!patchPath || !await pathExists(patchPath)) return { stale: false, patchStatus: 'missing', reasons: ['missing patch'], fresh: false };
   const patch = await fs.readFile(patchPath, 'utf8').catch(() => '');
-  if (!patch.trim()) return { stale: false, patchStatus: 'missing', reasons: ['empty patch'] };
+  if (!patch.trim()) return { stale: false, patchStatus: 'missing', reasons: ['empty patch'], fresh: false };
   const result = await runProcess('git', ['apply', '--check', patchPath], { cwd, allowFailure: true });
-  if (result.status === 0) return { stale: false, patchStatus: 'applies', reasons: ['patch applies to working tree'] };
+  if (result.status === 0) return { stale: false, patchStatus: 'applies', reasons: ['patch applies to working tree'], fresh: true };
   const cached = await runProcess('git', ['apply', '--check', '--cached', patchPath], { cwd, allowFailure: true });
   if (cached.status === 0) {
     return {
       stale: false,
       patchStatus: 'dirty-workspace-conflict',
-      reasons: ['patch applies to index but not dirty working tree']
+      reasons: ['patch applies to index but not dirty working tree'],
+      fresh: true
     };
   }
   const baseStatus = await patchBaseHashStatus(patch, cwd);
@@ -34,20 +41,23 @@ export async function bundlePatchStaleness(
     return {
       stale: false,
       patchStatus: 'needs-port',
-      reasons: ['patch does not expose comparable base hashes; coordinator review must port it', ...baseStatus.reasons]
+      reasons: ['patch does not expose comparable base hashes; coordinator review must port it', ...baseStatus.reasons],
+      fresh: false
     };
   }
   if (baseStatus.known && baseStatus.mismatched === 0) {
     return {
       stale: false,
       patchStatus: 'needs-port',
-      reasons: ['patch base hashes match HEAD but textual apply failed', ...baseStatus.reasons]
+      reasons: ['patch base hashes match HEAD or working tree content but textual apply failed', ...baseStatus.reasons],
+      fresh: true
     };
   }
   return {
     stale: false,
     patchStatus: 'needs-port',
-    reasons: uniqueStrings(['patch base hashes differ from HEAD; manual port required', ...baseStatus.reasons, ...tail(result.stderr || result.stdout, 3)])
+    reasons: uniqueStrings(['patch base hashes differ from HEAD and working tree content; manual port required', ...baseStatus.reasons, ...tail(result.stderr || result.stdout, 3)]),
+    fresh: false
   };
 }
 
@@ -59,16 +69,16 @@ async function patchBaseHashStatus(patch: string, cwd: string): Promise<{ known:
   const reasons: string[] = [];
   for (const entry of entries) {
     const head = await runProcess('git', ['rev-parse', `HEAD:${entry.path}`], { cwd, allowFailure: true });
-    if (head.status !== 0) {
-      mismatched += 1;
-      reasons.push(`missing HEAD blob for ${entry.path}`);
+    const headHash = head.stdout.trim();
+    if (head.status === 0 && headHash.startsWith(entry.oldHash)) continue;
+    const worktree = await runProcess('git', ['hash-object', '--', entry.path], { cwd, allowFailure: true });
+    const worktreeHash = worktree.stdout.trim();
+    if (worktree.status === 0 && worktreeHash.startsWith(entry.oldHash)) {
+      reasons.push(`base hash matches working tree content for ${entry.path}`);
       continue;
     }
-    const headHash = head.stdout.trim();
-    if (!headHash.startsWith(entry.oldHash)) {
-      mismatched += 1;
-      reasons.push(`base hash mismatch for ${entry.path}`);
-    }
+    mismatched += 1;
+    reasons.push(head.status !== 0 ? `missing HEAD blob for ${entry.path}` : `base hash mismatch for ${entry.path}`);
   }
   return { known: true, mismatched, reasons };
 }
@@ -176,10 +186,33 @@ function stringArray(value: unknown): string[] {
 
 
 export function classifyCodexCollectBucket(bundle: FrontierSwarmMergeBundle, staleAgainstHead: boolean): FrontierCodexCollectBucket {
-  if (staleAgainstHead || bundle.staleAgainstHead || bundle.disposition === 'stale-against-head') return 'stale-against-head';
+  if (staleAgainstHead) return 'stale-against-head';
   if (bundle.disposition === 'rejected' || bundle.disposition === 'blocked' || bundle.commandsFailed.length > 0 || bundle.status === 'failed') {
     return 'failed-evidence';
   }
   if (bundle.disposition === 'auto-mergeable' && bundle.autoMergeable) return 'ready-to-apply';
   return 'needs-human-port';
+}
+
+
+export function normalizeCollectedStaleAgainstHead(
+  bundle: FrontierSwarmMergeBundle,
+  staleness: FrontierCodexPatchStaleness,
+  checkStale: boolean
+): boolean {
+  const inheritedStale = bundle.staleAgainstHead || bundle.disposition === 'stale-against-head';
+  if (!checkStale) return inheritedStale;
+  if (staleness.stale) return true;
+  if (staleness.fresh) return false;
+  return inheritedStale;
+}
+
+
+export function normalizeCollectedDisposition(
+  bundle: FrontierSwarmMergeBundle,
+  staleAgainstHead: boolean
+): FrontierSwarmMergeBundle['disposition'] {
+  if (staleAgainstHead) return 'stale-against-head';
+  if (bundle.disposition === 'stale-against-head') return 'needs-port';
+  return bundle.disposition;
 }

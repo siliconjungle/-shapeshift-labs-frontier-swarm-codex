@@ -5,6 +5,7 @@ import { semanticImportFactSummary } from './semantic-import-facts.js';
 import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers.js';
 import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradigm.js';
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
+import { semanticImportLineageSummary } from './semantic-import-lineage.js';
 
 
 export function summarizeCodexSemanticImportQuality(
@@ -31,6 +32,7 @@ export function summarizeCodexSemanticImportQuality(
   const universalAstLayerNames = universalAstLayerSummary.names;
   const proofSpec = semanticImportProofSpecSummary(summary);
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
+  const semanticLineage = semanticImportLineageSummary(summary);
   const selection = semanticSelectionSummary(summary);
   const present = !!summary;
   const empty = present && (total === 0 || selected === 0 && eligible === 0 && imported === 0 && symbols === 0);
@@ -71,6 +73,8 @@ export function summarizeCodexSemanticImportQuality(
   if (present && selected > 0 && symbols > 1 && dependencyRelations === 0) warnings.push('semantic import has no dependency relations');
   if (present && proofSpec.failed > 0) warnings.push('semantic import has failed proof obligations');
   if (present && proofSpec.stale > 0) warnings.push('semantic import has stale proof obligations');
+  if (present && semanticLineage.blocked > 0) warnings.push('semantic lineage inference is blocked');
+  if (present && semanticLineage.ambiguous > 0) warnings.push('semantic lineage inference has ambiguous matches');
   return {
     expected: effectiveExpected,
     expectedSatisfied,
@@ -99,6 +103,15 @@ export function summarizeCodexSemanticImportQuality(
     paradigmSemanticsRecords: paradigmSemantics.total,
     paradigmSemanticsGroups: paradigmSemantics.groups.length,
     paradigmSemanticsLoweringRecords: paradigmSemantics.loweringRecords,
+    semanticLineageEvents: semanticLineage.inferredEvents,
+    semanticLineageMoved: semanticLineage.moved,
+    semanticLineageRenamed: semanticLineage.renamed,
+    semanticLineageDeleted: semanticLineage.deleted,
+    semanticLineageAmbiguous: semanticLineage.ambiguous,
+    semanticLineageBlocked: semanticLineage.blocked,
+    semanticLineageNeedsReview: semanticLineage.needsReview,
+    semanticLineageEventKinds: semanticLineage.eventKinds,
+    semanticLineageReasonCodes: semanticLineage.reasonCodes,
     warnings: uniqueStrings(warnings)
   };
 }
@@ -246,7 +259,8 @@ function semanticImportSummaryRichness(summary: FrontierSwarmMergeBundle['semant
     summary.semanticSidecars?.patchHints,
     semanticImportUniversalAstLayerSummary(summary).total,
     semanticImportProofSpecSummary(summary).total,
-    semanticImportParadigmSemanticsSummary(summary).total
+    semanticImportParadigmSemanticsSummary(summary).total,
+    semanticImportLineageSummary(summary).inferredEvents
   ];
   return values.reduce<number>((sum, value) => sum + nonNegativeNumber(value), 0);
 }

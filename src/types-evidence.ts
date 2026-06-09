@@ -143,6 +143,15 @@ export interface FrontierCodexCompactDashboard {
     paradigmSemanticsRecords: number;
     paradigmSemanticsGroups: number;
     paradigmSemanticsLoweringRecords: number;
+    semanticLineageEvents: number;
+    semanticLineageMoved: number;
+    semanticLineageRenamed: number;
+    semanticLineageDeleted: number;
+    semanticLineageAmbiguous: number;
+    semanticLineageBlocked: number;
+    semanticLineageNeedsReview: number;
+    semanticLineageEventKinds: string[];
+    semanticLineageReasonCodes: string[];
   };
   trace: {
     shardCount: number;

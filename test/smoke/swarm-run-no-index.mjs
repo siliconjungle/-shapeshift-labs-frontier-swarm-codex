@@ -50,7 +50,50 @@ export async function testNoIndexCollection(tmp, mergeBundle) {
   const noIndexCollectedBundle = JSON.parse(await fs.readFile(path.join(noIndexCollection.outDir, 'needs-human-port', 'copy-worker', 'merge.json'), 'utf8'));
   assert.strictEqual(noIndexCollectedBundle.staleAgainstHead, false);
   assert.ok(noIndexCollectedBundle.reasons.some((reason) => reason.includes('patch base hashes match HEAD')));
+  await testInheritedStaleNoIndexCollection(noIndexRepo, noIndexOldHash, mergeBundle);
   await testBaseHashDriftCollection(noIndexRepo, noIndexOldHash, mergeBundle);
+}
+
+async function testInheritedStaleNoIndexCollection(repo, oldHash, mergeBundle) {
+  await fs.mkdir(path.join(repo, 'docs'), { recursive: true });
+  await fs.writeFile(path.join(repo, 'docs', 'notes.md'), 'tracked\n');
+  await execFileP('git', ['add', '--', 'docs/notes.md'], { cwd: repo });
+  await execFileP('git', ['commit', '-m', 'Add unrelated tracked file'], { cwd: repo });
+  await fs.writeFile(path.join(repo, 'docs', 'notes.md'), 'dirty unrelated\n');
+  const staleRunDir = path.join(repo, 'agent-runs', 'inherited-stale-run');
+  const staleJobDir = path.join(staleRunDir, 'inherited-stale-worker');
+  await fs.mkdir(staleJobDir, { recursive: true });
+  await fs.writeFile(path.join(staleJobDir, 'changes.patch'), [
+    `diff --git a${path.join(repo, 'src', 'foo.ts')} b${path.join(repo, 'agent-worktrees', 'inherited-stale-worker', 'src', 'foo.ts')}`,
+    `index ${oldHash}..1234567 100644`,
+    `--- a${path.join(repo, 'src', 'foo.ts')}`,
+    `+++ b${path.join(repo, 'agent-worktrees', 'inherited-stale-worker', 'src', 'foo.ts')}`,
+    '@@ -1 +1 @@',
+    '-old',
+    '+new',
+    ''
+  ].join('\n'));
+  await fs.writeFile(path.join(staleJobDir, 'merge.json'), JSON.stringify({
+    ...mergeBundle,
+    id: 'inherited-stale-worker-bundle',
+    jobId: 'inherited-stale-worker',
+    taskId: 'inherited-stale-task',
+    disposition: 'stale-against-head',
+    autoMergeable: false,
+    changedPaths: ['src/foo.ts'],
+    ownedFilesTouched: ['src/foo.ts'],
+    patchPath: 'changes.patch',
+    staleAgainstHead: true,
+    reasons: ['stale-against-head']
+  }, null, 2) + '\n');
+  const staleCollection = await collectCodexSwarmRun({ run: staleRunDir, cwd: repo, outDir: path.join(staleRunDir, 'collected') });
+  assert.strictEqual(staleCollection.summary['stale-against-head'], 0);
+  assert.strictEqual(staleCollection.summary['needs-human-port'], 1);
+  const staleBundle = JSON.parse(await fs.readFile(path.join(staleCollection.outDir, 'needs-human-port', 'inherited-stale-worker', 'merge.json'), 'utf8'));
+  assert.strictEqual(staleBundle.staleAgainstHead, false);
+  assert.strictEqual(staleBundle.disposition, 'needs-port');
+  assert.ok(!staleBundle.reasons.includes('stale-against-head'));
+  assert.ok(staleBundle.reasons.some((reason) => reason.includes('cleared by patch freshness check')));
 }
 
 async function testBaseHashDriftCollection(repo, oldHash, mergeBundle) {
