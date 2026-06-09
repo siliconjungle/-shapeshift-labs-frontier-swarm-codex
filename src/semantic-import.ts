@@ -6,6 +6,10 @@ import { summarizeUniversalAstLayers, summarizeNativeSourceProjection, summarize
 import { summarizeParadigmSemantics } from './semantic-import-paradigm.js';
 import { summarizeProofSpec } from './semantic-import-proof.js';
 import {
+  readSemanticImportBaseSource,
+  summarizeNativeSourceChangeSet
+} from './semantic-import-base.js';
+import {
   createSemanticImportSidecar,
   summarizeLangSemanticImportSidecar,
   summarizeSemanticIndex,
@@ -23,6 +27,7 @@ export async function createCodexSemanticImportSidecar(input: {
   workspace: string;
   changedPaths: readonly string[];
   evidenceDir: string;
+  baseCwd?: string;
   options?: boolean | FrontierCodexSemanticImportOptions;
   semanticImportExpected?: boolean;
 }): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
@@ -67,7 +72,36 @@ export async function createCodexSemanticImportSidecar(input: {
     const resolved = await resolveSemanticImportWorkspacePath(input.workspace, file.path);
     const absolute = resolved.absolute;
     const stat = await fs.stat(absolute).catch(() => undefined);
+    const baseSource = await readSemanticImportBaseSource({
+      baseCwd: input.baseCwd,
+      workspace: input.workspace,
+      file: resolved.path,
+      maxBytes: options.maxBytes
+    });
     if (!stat?.isFile()) {
+      if (baseSource && api.diffNativeSources) {
+        const nativeDiff = api.diffNativeSources({
+          language: file.language,
+          sourcePath: resolved.path,
+          parser: 'source-text',
+          beforeSourceText: baseSource.sourceText,
+          beforeMetadata: semanticImportMetadata(input.job, 'before', baseSource.path),
+          metadata: semanticImportMetadata(input.job, 'diff', resolved.path)
+        });
+        records.push({
+          path: resolved.path,
+          ...(resolved.path !== file.path ? { requestedPath: file.path } : {}),
+          language: file.language,
+          status: 'imported',
+          reason: 'deleted-file',
+          bytes: baseSource.bytes,
+          baseSource: summarizeSemanticImportBaseSource(baseSource),
+          semanticLineage: summarizeSemanticLineageEvidence(nativeDiff),
+          nativeDiff: summarizeNativeSourceChangeSet(nativeDiff),
+          mergeCandidate: summarizeSemanticMergeCandidate(nativeDiff?.mergeCandidate)
+        });
+        continue;
+      }
       records.push({ path: file.path, language: file.language, status: 'skipped', reason: 'not-a-file' });
       continue;
     }
@@ -82,12 +116,20 @@ export async function createCodexSemanticImportSidecar(input: {
         sourcePath: resolved.path,
         sourceText,
         parser: 'source-text',
-        metadata: {
-          swarmJobId: input.job.id,
-          swarmTaskId: input.job.taskId,
-          swarmLane: input.job.lane
-        }
+        metadata: semanticImportMetadata(input.job, 'after', resolved.path)
       });
+      const nativeDiff = baseSource && api.diffNativeSources
+        ? api.diffNativeSources({
+          language: file.language,
+          sourcePath: resolved.path,
+          parser: 'source-text',
+          beforeSourceText: baseSource.sourceText,
+          afterSourceText: sourceText,
+          beforeMetadata: semanticImportMetadata(input.job, 'before', baseSource.path),
+          afterMetadata: semanticImportMetadata(input.job, 'after', resolved.path),
+          metadata: semanticImportMetadata(input.job, 'diff', resolved.path)
+        })
+        : undefined;
       const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
       const semanticSidecar = api.createSemanticImportSidecar
         ? api.createSemanticImportSidecar(importResult, {
@@ -140,6 +182,7 @@ export async function createCodexSemanticImportSidecar(input: {
         language: file.language,
         status: 'imported',
         bytes: stat.size,
+        ...(baseSource ? { baseSource: summarizeSemanticImportBaseSource(baseSource) } : {}),
         importId: importResult?.id,
         universalAstHash: api.hashUniversalAstEnvelope && importResult?.universalAst
           ? api.hashUniversalAstEnvelope(importResult.universalAst)
@@ -158,7 +201,8 @@ export async function createCodexSemanticImportSidecar(input: {
         universalAstLayers: summarizeUniversalAstLayers(importResult?.universalAst, semanticSidecar),
         proofSpec: summarizeProofSpec(importResult?.universalAst?.proof, semanticSidecar),
         paradigmSemantics: summarizeParadigmSemantics(importResult?.universalAst?.paradigmSemantics, semanticSidecar),
-        semanticLineage: summarizeSemanticLineageEvidence(semanticSidecar),
+        semanticLineage: summarizeSemanticLineageEvidence(nativeDiff ?? semanticSidecar),
+        nativeDiff: summarizeNativeSourceChangeSet(nativeDiff),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),
         mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate),
@@ -178,6 +222,30 @@ export async function createCodexSemanticImportSidecar(input: {
   const sidecar = createSemanticImportSidecar(input.job, records, selection, input.semanticImportExpected === true);
   await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
   return { path: importPath, sidecar };
+}
+
+function semanticImportMetadata(job: FrontierSwarmJob, phase: string, sourcePath: string): Record<string, unknown> {
+  return {
+    swarmJobId: job.id,
+    swarmTaskId: job.taskId,
+    swarmLane: job.lane,
+    phase,
+    sourcePath
+  };
+}
+
+function summarizeSemanticImportBaseSource(baseSource: {
+  path: string;
+  source: 'coordinator-workspace' | 'git-head';
+  bytes: number;
+  foundBy: string;
+}) {
+  return {
+    path: baseSource.path,
+    source: baseSource.source,
+    bytes: baseSource.bytes,
+    foundBy: baseSource.foundBy
+  };
 }
 
 async function resolveSemanticImportWorkspacePath(workspace: string, file: string): Promise<{ path: string; absolute: string }> {

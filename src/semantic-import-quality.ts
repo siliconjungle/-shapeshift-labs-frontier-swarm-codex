@@ -33,6 +33,7 @@ export function summarizeCodexSemanticImportQuality(
   const proofSpec = semanticImportProofSpecSummary(summary);
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const semanticLineage = semanticImportLineageSummary(summary);
+  const semanticLineageExpected = semanticLineageExpectedForBeforeSourceDiff(summary, semanticLineage.beforeSymbols);
   const selection = semanticSelectionSummary(summary);
   const present = !!summary;
   const empty = present && (total === 0 || selected === 0 && eligible === 0 && imported === 0 && symbols === 0);
@@ -73,6 +74,9 @@ export function summarizeCodexSemanticImportQuality(
   if (present && selected > 0 && symbols > 1 && dependencyRelations === 0) warnings.push('semantic import has no dependency relations');
   if (present && proofSpec.failed > 0) warnings.push('semantic import has failed proof obligations');
   if (present && proofSpec.stale > 0) warnings.push('semantic import has stale proof obligations');
+  if (present && symbols > 0 && semanticLineageExpected && semanticLineage.inferredEvents === 0) {
+    warnings.push('semantic import has symbols but no inferred semantic lineage for expected before-source diff');
+  }
   if (present && semanticLineage.blocked > 0) warnings.push('semantic lineage inference is blocked');
   if (present && semanticLineage.ambiguous > 0) warnings.push('semantic lineage inference has ambiguous matches');
   return {
@@ -205,6 +209,34 @@ function semanticImportExplicitExpectedSatisfied(summary: unknown): boolean | un
     if (typeof value === 'boolean') return value;
   }
   return undefined;
+}
+
+
+function semanticLineageExpectedForBeforeSourceDiff(summary: unknown, beforeSymbols: number): boolean {
+  if (beforeSymbols > 0) return true;
+  const record = summaryRecord(summary);
+  if (!record) return false;
+  const quality = record.quality as { semanticLineageExpected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
+  const admission = record.admission as { semanticLineageExpected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
+  const lineage = record.semanticLineage as { expected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
+  const inference = record.semanticLineageInference as { expected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
+  const lineageInference = record.lineageInference as { expected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
+  return [
+    record.semanticLineageExpected,
+    record.semanticLineageInferenceExpected,
+    record.beforeSourceDiffExpected,
+    record.beforeSourceExpected,
+    quality?.semanticLineageExpected,
+    quality?.beforeSourceDiffExpected,
+    admission?.semanticLineageExpected,
+    admission?.beforeSourceDiffExpected,
+    lineage?.expected,
+    lineage?.beforeSourceDiffExpected,
+    inference?.expected,
+    inference?.beforeSourceDiffExpected,
+    lineageInference?.expected,
+    lineageInference?.beforeSourceDiffExpected
+  ].some((value) => value === true);
 }
 
 

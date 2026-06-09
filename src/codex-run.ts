@@ -44,12 +44,7 @@ import {
   snapshotWorkspaceFiles,
   writeCodexPatchFile
 } from './codex-workspace-changes.js';
-import type {
-  FrontierCodexJobPaths,
-  FrontierCodexSemanticImportSidecar,
-  FrontierCodexSwarmRunOptions,
-  FrontierCodexSwarmRunResult
-} from './index.js';
+import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions, FrontierCodexSwarmRunResult } from './index.js';
 export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {
   const outDir = path.resolve(options.cwd ?? process.cwd(), options.outDir);
   await fs.mkdir(outDir, { recursive: true });
@@ -213,6 +208,7 @@ export async function runCodexJob(
     workspace,
     changedPaths,
     evidenceDir: paths.evidenceDir,
+    baseCwd: path.resolve(options.cwd ?? process.cwd()),
     options: options.semanticImport,
     semanticImportExpected: options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport)
   });

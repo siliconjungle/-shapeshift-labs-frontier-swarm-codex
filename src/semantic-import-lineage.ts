@@ -66,6 +66,11 @@ function normalizeLineageCandidate(value: Record<string, unknown>): FrontierCode
     ...readStringArray(value.reasonCodes),
     ...readStringArray(summary.reasonCodes)
   ]);
+  const beforeSymbols = nonNegativeNumber(summary.beforeSymbols);
+  const afterSymbols = nonNegativeNumber(summary.afterSymbols);
+  const blocked = nonNegativeNumber(readiness.blocked);
+  const needsReview = nonNegativeNumber(readiness['needs-review']);
+  const ready = nonNegativeNumber(readiness.ready);
   return {
     total,
     inferredEvents,
@@ -75,16 +80,22 @@ function normalizeLineageCandidate(value: Record<string, unknown>): FrontierCode
     ambiguous: nonNegativeNumber(summary.ambiguous),
     unmatchedAdded: nonNegativeNumber(summary.unmatchedAdded),
     unchangedAnchors: nonNegativeNumber(summary.unchangedAnchors),
-    beforeSymbols: nonNegativeNumber(summary.beforeSymbols),
-    afterSymbols: nonNegativeNumber(summary.afterSymbols),
-    blocked: nonNegativeNumber(readiness.blocked),
-    needsReview: nonNegativeNumber(readiness['needs-review']),
-    ready: nonNegativeNumber(readiness.ready),
+    beforeSymbols,
+    afterSymbols,
+    blocked,
+    needsReview,
+    ready,
     reviewRequired: readReviewRequired(value, summary),
     readiness,
     eventKinds,
     reasonCodes,
-    empty: total === 0
+    empty: total === 0 &&
+      beforeSymbols === 0 &&
+      afterSymbols === 0 &&
+      blocked === 0 &&
+      needsReview === 0 &&
+      ready === 0 &&
+      reasonCodes.length === 0
   };
 }
 
@@ -121,7 +132,14 @@ function mergeSemanticLineageSummaries(
     merged.reasonCodes = uniqueStrings([...merged.reasonCodes, ...entry.reasonCodes]);
     merged.reviewRequired = merged.reviewRequired || entry.reviewRequired;
   }
-  merged.empty = merged.total === 0 && merged.inferredEvents === 0;
+  merged.empty = merged.total === 0 &&
+    merged.inferredEvents === 0 &&
+    merged.beforeSymbols === 0 &&
+    merged.afterSymbols === 0 &&
+    merged.blocked === 0 &&
+    merged.needsReview === 0 &&
+    merged.ready === 0 &&
+    merged.reasonCodes.length === 0;
   return merged;
 }
 

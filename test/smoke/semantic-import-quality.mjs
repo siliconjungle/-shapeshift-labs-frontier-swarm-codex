@@ -1,6 +1,8 @@
 import assert from 'node:assert';
 import { collectCodexSwarmRun, fs, path } from './context.mjs';
 
+const EXPECTED_ZERO_LINEAGE_WARNING = 'semantic import has symbols but no inferred semantic lineage for expected before-source diff';
+
 export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   const runDir = path.join(tmp, 'empty-semantic-run');
   const jobDir = path.join(runDir, 'empty-semantic-worker');
@@ -42,6 +44,19 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     semanticImport: factSemanticImportSummary(),
     metadata: { semanticImport: factSemanticImportSummary() }
   }, null, 2) + '\n');
+  const zeroLineageJobDir = path.join(runDir, 'zero-lineage-semantic-worker');
+  await fs.mkdir(zeroLineageJobDir, { recursive: true });
+  await fs.writeFile(path.join(zeroLineageJobDir, 'merge.json'), JSON.stringify({
+    ...mergeBundle,
+    id: 'zero-lineage-semantic-worker-bundle',
+    jobId: 'zero-lineage-semantic-worker',
+    taskId: 'zero-lineage-semantic-task',
+    changedPaths: ['src/runtime/lineage-zero.ts'],
+    evidencePaths: ['semantic-imports.json'],
+    patchPath: undefined,
+    semanticImport: zeroLineageSemanticImportSummary(),
+    metadata: { semanticImport: zeroLineageSemanticImportSummary() }
+  }, null, 2) + '\n');
   const collection = await collectCodexSwarmRun({
     run: runDir,
     checkStale: false,
@@ -53,6 +68,7 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   const emptyQuality = qualityByJob.get('empty-semantic-worker');
   const missingQuality = qualityByJob.get('missing-semantic-worker');
   const factQuality = qualityByJob.get('fact-semantic-worker');
+  const zeroLineageQuality = qualityByJob.get('zero-lineage-semantic-worker');
   assert.strictEqual(semanticImport.expectedUnsatisfiedCount, 2);
   assert.strictEqual(semanticImport.semanticFactCount, 3);
   assert.ok(semanticImport.semanticFactPredicates.includes('controlFlow'));
@@ -61,6 +77,7 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.ok(semanticImport.expectedMissingReasonCodes.includes('expected-semantic-import-missing'));
   assert.ok(semanticImport.warnings.includes('semantic import expected but empty'));
   assert.ok(semanticImport.warnings.includes('semantic import expected but missing'));
+  assert.ok(semanticImport.warnings.includes(EXPECTED_ZERO_LINEAGE_WARNING));
   assert.strictEqual(emptyQuality.expectedSatisfied, false);
   assert.ok(emptyQuality.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
   assert.ok(emptyQuality.warnings.includes('semantic import expected but empty'));
@@ -70,17 +87,26 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.strictEqual(factQuality.semanticFacts, 3);
   assert.ok(factQuality.semanticFactPredicates.includes('mutation'));
   assert.strictEqual(factQuality.semanticFactSummary.controlFlow, 1);
+  assert.strictEqual(zeroLineageQuality.expectedSatisfied, true);
+  assert.deepStrictEqual(zeroLineageQuality.expectedMissingReasonCodes, []);
+  assert.strictEqual(zeroLineageQuality.semanticLineageEvents, 0);
+  assert.ok(zeroLineageQuality.warnings.includes(EXPECTED_ZERO_LINEAGE_WARNING));
 
   const emptyEvidence = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'empty-semantic-worker', 'evidence.json'), 'utf8'));
   assert.ok(emptyEvidence.semanticImportQuality.warnings.includes('semantic import expected but empty'));
   const missingEvidence = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'missing-semantic-worker', 'evidence.json'), 'utf8'));
   assert.ok(missingEvidence.semanticImportQuality.warnings.includes('semantic import expected but missing'));
+  const zeroLineageEvidence = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'zero-lineage-semantic-worker', 'evidence.json'), 'utf8'));
+  assert.strictEqual(zeroLineageEvidence.semanticImportQuality.expectedSatisfied, true);
+  assert.ok(zeroLineageEvidence.semanticImportQuality.warnings.includes(EXPECTED_ZERO_LINEAGE_WARNING));
 
   const coordinatorQuery = JSON.parse(await fs.readFile(path.join(collection.outDir, 'coordinator-query.json'), 'utf8'));
   const queryQualityByJob = new Map(coordinatorQuery.jobs.map((entry) => [entry.jobId, entry.semanticImportQuality]));
   assert.ok(queryQualityByJob.get('empty-semantic-worker').warnings.includes('semantic import expected but empty'));
   assert.ok(queryQualityByJob.get('missing-semantic-worker').warnings.includes('semantic import expected but missing'));
   assert.strictEqual(queryQualityByJob.get('fact-semantic-worker').semanticFacts, 3);
+  assert.strictEqual(queryQualityByJob.get('zero-lineage-semantic-worker').expectedSatisfied, true);
+  assert.ok(queryQualityByJob.get('zero-lineage-semantic-worker').warnings.includes(EXPECTED_ZERO_LINEAGE_WARNING));
   assert.strictEqual(coordinatorQuery.summary.semanticImportFactCount, 3);
 }
 
@@ -115,6 +141,43 @@ function factSemanticImportSummary() {
     },
     semanticSidecars: { ownershipRegions: 1, patchHints: 1 },
     dependencies: { total: 1, predicates: ['calls'] },
+    semanticImportExpected: true,
+    semanticImportExpectedSatisfied: true,
+    semanticImportExpectedMissingReasonCodes: []
+  };
+}
+
+function zeroLineageSemanticImportSummary() {
+  return {
+    total: 1,
+    selected: 1,
+    eligible: 1,
+    imported: 1,
+    sourceMapMappingCount: 1,
+    semanticIndex: { symbols: 2, facts: 0 },
+    semanticSidecars: { ownershipRegions: 1, patchHints: 1 },
+    dependencies: { total: 1, predicates: ['calls'] },
+    universalAstLayers: { total: 1, names: ['program'], ids: ['layer:program'] },
+    semanticLineage: {
+      total: 0,
+      inferredEvents: 0,
+      moved: 0,
+      renamed: 0,
+      deleted: 0,
+      ambiguous: 0,
+      unmatchedAdded: 0,
+      unchangedAnchors: 1,
+      beforeSymbols: 2,
+      afterSymbols: 2,
+      blocked: 0,
+      needsReview: 0,
+      ready: 0,
+      readiness: {},
+      eventKinds: [],
+      reasonCodes: [],
+      reviewRequired: false,
+      empty: false
+    },
     semanticImportExpected: true,
     semanticImportExpectedSatisfied: true,
     semanticImportExpectedMissingReasonCodes: []

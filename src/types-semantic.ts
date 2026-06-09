@@ -19,6 +19,12 @@ export interface FrontierCodexSemanticImportRecord {
   status: 'imported' | 'skipped' | 'error';
   reason?: string;
   bytes?: number;
+  baseSource?: {
+    path: string;
+    source: 'coordinator-workspace' | 'git-head';
+    bytes: number;
+    foundBy: string;
+  };
   importId?: string;
   universalAstHash?: string;
   nativeAstId?: string;
@@ -42,6 +48,16 @@ export interface FrontierCodexSemanticImportRecord {
   proofSpec?: FrontierCodexProofSpecSummary;
   paradigmSemantics?: FrontierCodexParadigmSemanticsSummary;
   semanticLineage?: FrontierCodexSemanticLineageSummary;
+  nativeDiff?: {
+    kind?: string;
+    id?: string;
+    beforeHash?: string;
+    afterHash?: string;
+    changedSymbols: number;
+    changedRegions: number;
+    readiness?: string;
+    reasons: string[];
+  };
   sourceProjection?: unknown;
   nativeCompile?: unknown;
   mergeCandidate?: unknown;
