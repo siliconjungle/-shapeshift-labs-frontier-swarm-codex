@@ -34,6 +34,19 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
       metadata: { semanticImport: weakPatchHintSemanticImport(readySemanticImport) }
     }
   });
+  await writeSemanticFixture({
+    collection,
+    readyDir,
+    bundle: {
+      ...baseBundle,
+      id: 'semantic-edit-conflict-bundle',
+      jobId: 'semantic-edit-conflict-job',
+      taskId: 'semantic-edit-conflict-task',
+      queueItemIds: ['semantic-edit-conflict-task'],
+      semanticImport: semanticEditConflictImport(readySemanticImport),
+      metadata: { semanticImport: semanticEditConflictImport(readySemanticImport) }
+    }
+  });
   const score = await scoreCodexSwarmPatches({
     collection,
     cwd: applyRepo,
@@ -42,7 +55,7 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   });
   const byJob = new Map(score.entries.map((entry) => [entry.jobId, entry]));
   assert.strictEqual(score.ok, true);
-  assert.strictEqual(score.summary['accepted-needs-port'], 2);
+  assert.strictEqual(score.summary['accepted-needs-port'], 3);
   assert.strictEqual(byJob.get('empty-semantic-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('empty-semantic-job').semanticEvidence.cleanEligible, false);
   assert.strictEqual(byJob.get('empty-semantic-job').score, 40);
@@ -50,6 +63,10 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   assert.strictEqual(byJob.get('weak-semantic-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('weak-semantic-job').semanticEvidence.cleanEligible, false);
   assert.ok(byJob.get('weak-semantic-job').reasons.includes('semantic sidecar has no patch hints'));
+  assert.strictEqual(byJob.get('semantic-edit-conflict-job').status, 'accepted-needs-port');
+  assert.strictEqual(byJob.get('semantic-edit-conflict-job').semanticEvidence.cleanEligible, false);
+  assert.strictEqual(byJob.get('semantic-edit-conflict-job').semanticEvidence.semanticEditScript.conflicts, 1);
+  assert.ok(byJob.get('semantic-edit-conflict-job').reasons.includes('semantic edit script conflicts: 1'));
 }
 
 async function writeSemanticFixture({ collection, readyDir, bundle }) {
@@ -91,5 +108,32 @@ function weakPatchHintSemanticImport(readySemanticImport) {
   semanticImport.semanticImportExpected = true;
   semanticImport.semanticImportExpectedSatisfied = false;
   semanticImport.semanticImportExpectedMissingReasonCodes = ['missing-patch-hints'];
+  return semanticImport;
+}
+
+function semanticEditConflictImport(readySemanticImport) {
+  const semanticImport = JSON.parse(JSON.stringify(readySemanticImport));
+  semanticImport.semanticEditScripts = {
+    total: 1,
+    operations: 1,
+    autoMergeCandidates: 0,
+    portable: 0,
+    alreadyApplied: 0,
+    needsPort: 0,
+    conflicts: 1,
+    stale: 0,
+    blocked: 0,
+    candidates: 0,
+    reviewRequired: 1,
+    autoApplyCandidates: 0,
+    byStatus: { conflict: 1 },
+    byKind: { replaceBody: 1 },
+    admission: { conflict: 1 },
+    actions: ['block'],
+    reasonCodes: ['head-anchor-changed-since-base'],
+    conflictKeys: ['region:source#src/apply.ts#body#apply'],
+    evidenceIds: ['evidence_semantic_edit_conflict'],
+    empty: false
+  };
   return semanticImport;
 }

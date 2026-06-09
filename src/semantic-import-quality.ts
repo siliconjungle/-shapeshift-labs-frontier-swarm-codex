@@ -6,6 +6,7 @@ import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers
 import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradigm.js';
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportLineageSummary } from './semantic-import-lineage.js';
+import { summarizeSemanticEditScript } from './semantic-edit-script.js';
 
 
 export function summarizeCodexSemanticImportQuality(
@@ -33,6 +34,7 @@ export function summarizeCodexSemanticImportQuality(
   const proofSpec = semanticImportProofSpecSummary(summary);
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const semanticLineage = semanticImportLineageSummary(summary);
+  const semanticEditScript = summarizeSemanticEditScript(summary) ?? summarizeSemanticEditScript({ semanticEditScripts: (summary as { semanticEditScripts?: unknown } | undefined)?.semanticEditScripts })!;
   const semanticLineageExpected = semanticLineageExpectedForBeforeSourceDiff(summary, semanticLineage.beforeSymbols);
   const selection = semanticSelectionSummary(summary);
   const present = !!summary;
@@ -79,6 +81,9 @@ export function summarizeCodexSemanticImportQuality(
   }
   if (present && semanticLineage.blocked > 0) warnings.push('semantic lineage inference is blocked');
   if (present && semanticLineage.ambiguous > 0) warnings.push('semantic lineage inference has ambiguous matches');
+  if (present && semanticEditScript.conflicts > 0) warnings.push('semantic edit script has conflicts');
+  if (present && semanticEditScript.stale > 0) warnings.push('semantic edit script is stale against head');
+  if (present && semanticEditScript.blocked > 0) warnings.push('semantic edit script is blocked');
   return {
     expected: effectiveExpected,
     expectedSatisfied,
@@ -116,6 +121,7 @@ export function summarizeCodexSemanticImportQuality(
     semanticLineageNeedsReview: semanticLineage.needsReview,
     semanticLineageEventKinds: semanticLineage.eventKinds,
     semanticLineageReasonCodes: semanticLineage.reasonCodes,
+    semanticEditScript,
     warnings: uniqueStrings(warnings)
   };
 }

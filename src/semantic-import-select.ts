@@ -28,6 +28,7 @@ export type FrontierLangSemanticImportApi = {
   ok: true;
   importNativeSource(input: Record<string, unknown>): any;
   diffNativeSources?(input: Record<string, unknown>): any;
+  createSemanticEditScript?(input: Record<string, unknown>): any;
   inferSemanticLineageEvents?(input?: Record<string, unknown>, options?: Record<string, unknown>): any;
   createSemanticMergeCandidateFromImport(input: Record<string, unknown>): any;
   createSemanticImportSidecar?(importResult: unknown, options?: Record<string, unknown>): any;
@@ -271,6 +272,7 @@ export async function loadFrontierLangForSemanticImport(): Promise<FrontierLangS
       ok: true,
       importNativeSource: api.importNativeSource,
       ...(typeof api.diffNativeSources === 'function' ? { diffNativeSources: api.diffNativeSources } : {}),
+      ...(typeof api.createSemanticEditScript === 'function' ? { createSemanticEditScript: api.createSemanticEditScript } : {}),
       ...(typeof api.inferSemanticLineageEvents === 'function' ? { inferSemanticLineageEvents: api.inferSemanticLineageEvents } : {}),
       createSemanticMergeCandidateFromImport: api.createSemanticMergeCandidateFromImport,
       ...(typeof api.createSemanticImportSidecar === 'function' ? { createSemanticImportSidecar: api.createSemanticImportSidecar } : {}),

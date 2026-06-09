@@ -18,6 +18,7 @@ import {
 } from './semantic-import-sidecar.js';
 import { mergeSemanticFactSummaries, semanticImportFactSummary, summarizeLangSidecarSemanticFacts } from './semantic-import-facts.js';
 import { summarizeSemanticDependencies } from './semantic-import-dependencies.js';
+import { summarizeSemanticEditScript } from './semantic-edit-script.js';
 import { summarizeSemanticLineageEvidence } from './semantic-import-lineage.js';
 import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths, semanticImportPathVariants } from './semantic-import-select.js';
 import { discoverSemanticImportFallbackPaths, withSemanticImportFallback } from './semantic-import-fallback.js';
@@ -130,6 +131,18 @@ export async function createCodexSemanticImportSidecar(input: {
           metadata: semanticImportMetadata(input.job, 'diff', resolved.path)
         })
         : undefined;
+      const semanticEditScript = baseSource && api.createSemanticEditScript
+        ? api.createSemanticEditScript({
+          language: file.language,
+          sourcePath: resolved.path,
+          parser: 'source-text',
+          baseSourceText: baseSource.sourceText,
+          workerSourceText: sourceText,
+          baseMetadata: semanticImportMetadata(input.job, 'base', baseSource.path),
+          workerMetadata: semanticImportMetadata(input.job, 'worker', resolved.path),
+          metadata: semanticImportMetadata(input.job, 'semantic-edit-script', resolved.path)
+        })
+        : undefined;
       const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
       const semanticSidecar = api.createSemanticImportSidecar
         ? api.createSemanticImportSidecar(importResult, {
@@ -202,6 +215,7 @@ export async function createCodexSemanticImportSidecar(input: {
         proofSpec: summarizeProofSpec(importResult?.universalAst?.proof, semanticSidecar),
         paradigmSemantics: summarizeParadigmSemantics(importResult?.universalAst?.paradigmSemantics, semanticSidecar),
         semanticLineage: summarizeSemanticLineageEvidence(nativeDiff ?? semanticSidecar),
+        semanticEditScript: summarizeSemanticEditScript(semanticEditScript),
         nativeDiff: summarizeNativeSourceChangeSet(nativeDiff),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),

@@ -9,6 +9,7 @@ import { summarizeSemanticImportProofSpec, summarizeProofSpec } from './semantic
 import { mergeDependencySummaries, summarizeSemanticDependencies } from './semantic-import-dependencies.js';
 import { mergeSemanticFactSummaries, summarizeLangSidecarSemanticFacts } from './semantic-import-facts.js';
 import { summarizeSemanticImportLineage, summarizeSemanticLineageEvidence } from './semantic-import-lineage.js';
+import { mergeSemanticEditScriptSummaries, summarizeSemanticEditScript } from './semantic-edit-script.js';
 
 
 
@@ -43,6 +44,7 @@ export function createSemanticImportSidecar(
   const universalAstLayers = summarizeSemanticImportUniversalAstLayers(records);
   const paradigmSemantics = summarizeSemanticImportParadigmSemantics(records);
   const semanticLineage = summarizeSemanticImportLineage(records);
+  const semanticEditScripts = mergeSemanticEditScriptSummaries(records.map((record) => record.semanticEditScript));
   const sourceProjections = records.reduce((totals, record) => {
     const summary = record.sourceProjection as { mode?: string; readiness?: string } | undefined;
     if (!summary) return totals;
@@ -148,6 +150,7 @@ export function createSemanticImportSidecar(
       proofSpec,
       paradigmSemantics,
       semanticLineage,
+      semanticEditScripts,
       sourceProjections,
       nativeCompiles,
       semanticSliceAdmissions: {
@@ -244,6 +247,7 @@ export function summarizeLangSemanticImportSidecar(value: any): unknown {
     proofSpec: summarizeProofSpec(undefined, value),
     paradigmSemantics: summarizeParadigmSemantics(undefined, value),
     semanticLineage: summarizeSemanticLineageEvidence(value),
+    semanticEditScript: summarizeSemanticEditScript(value),
     semanticFacts,
     semanticFactCount: semanticFacts.total,
     semanticFactPredicates: semanticFacts.predicates,
