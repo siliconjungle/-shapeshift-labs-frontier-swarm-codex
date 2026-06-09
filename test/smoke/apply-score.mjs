@@ -141,6 +141,7 @@ export async function testApplyAndScore({ tmp }, mergeBundle) {
   assert.strictEqual(await fs.readFile(path.join(applyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
   await testScore(applyRepo, tmp);
   await testScoreIndexOnlyCollection(applyRepo, tmp, readyDir);
+  await testScoreDedupesCollectedAndIndexedBundle(applyRepo, tmp, readyDir);
   await testMissingSemanticScore(applyRepo, tmp, readyDir);
   await testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir, readySemanticImport });
   await assert.rejects(
@@ -173,6 +174,35 @@ async function testScoreIndexOnlyCollection(applyRepo, tmp, readyDir) {
   });
   assert.strictEqual(indexOnlyScore.summary.total, 1);
   assert.strictEqual(indexOnlyScore.summary['accepted-clean'], 1);
+}
+
+async function testScoreDedupesCollectedAndIndexedBundle(applyRepo, tmp, readyDir) {
+  const mixedCollection = path.join(tmp, 'mixed-score-collection');
+  const copiedDir = path.join(mixedCollection, 'ready-to-apply', 'apply-job');
+  await fs.mkdir(copiedDir, { recursive: true });
+  await fs.copyFile(path.join(readyDir, 'changes.patch'), path.join(copiedDir, 'changes.patch'));
+  await fs.copyFile(path.join(readyDir, 'merge.json'), path.join(copiedDir, 'merge.json'));
+  await fs.writeFile(path.join(mixedCollection, 'collection.json'), JSON.stringify({
+    buckets: {
+      'ready-to-apply': [{
+        bucket: 'ready-to-apply',
+        jobId: 'apply-job',
+        mergePath: path.join(readyDir, 'merge.json'),
+        outputDir: readyDir
+      }],
+      'needs-human-port': [],
+      'failed-evidence': [],
+      'stale-against-head': []
+    }
+  }, null, 2) + '\n');
+  const mixedScore = await scoreCodexSwarmPatches({
+    collection: mixedCollection,
+    cwd: applyRepo,
+    workspaceIncludes: ['src']
+  });
+  assert.strictEqual(mixedScore.summary.total, 1);
+  assert.strictEqual(mixedScore.summary['accepted-clean'], 1);
+  assert.strictEqual(mixedScore.entries[0].bundlePath, path.join(copiedDir, 'merge.json'));
 }
 
 async function testScore(applyRepo, tmp) {

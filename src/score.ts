@@ -23,10 +23,9 @@ export async function scoreCodexSwarmPatches(input: FrontierCodexPatchScoreInput
     ? collectBuckets().map((entry) => path.join(collectionDir, entry))
     : [path.join(collectionDir, bucket)];
   const wanted = new Set(input.jobIds ?? []);
-  const mergePaths = await scoreMergePaths(collectionDir, roots, bucket);
+  const mergeTargets = await scoreMergeTargets(collectionDir, await scoreMergePaths(collectionDir, roots, bucket));
   const entries: FrontierCodexPatchScoreEntry[] = [];
-  for (const mergePath of mergePaths.slice(0, input.limit ? Math.max(0, Math.floor(input.limit)) : undefined)) {
-    const bundle = JSON.parse(await fs.readFile(mergePath, 'utf8')) as FrontierSwarmMergeBundle;
+  for (const { mergePath, bundle } of mergeTargets.slice(0, input.limit ? Math.max(0, Math.floor(input.limit)) : undefined)) {
     if (wanted.size && !wanted.has(bundle.jobId)) continue;
     entries.push(await scoreCodexMergeBundle({ cwd, mergePath, bundle, outDir, input }));
   }
@@ -46,6 +45,39 @@ export async function scoreCodexSwarmPatches(input: FrontierCodexPatchScoreInput
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'patch-score.json'), JSON.stringify(result, null, 2) + '\n');
   return result;
+}
+
+
+type ScoreMergeTarget = {
+  mergePath: string;
+  bundle: FrontierSwarmMergeBundle;
+};
+
+
+async function scoreMergeTargets(collectionDir: string, mergePaths: readonly string[]): Promise<ScoreMergeTarget[]> {
+  const byJobId = new Map<string, ScoreMergeTarget>();
+  for (const mergePath of mergePaths) {
+    const bundle = JSON.parse(await fs.readFile(mergePath, 'utf8')) as FrontierSwarmMergeBundle;
+    const key = bundle.jobId || mergePath;
+    const next = { mergePath, bundle };
+    const current = byJobId.get(key);
+    if (!current || preferScoreMergeTarget(collectionDir, next, current)) byJobId.set(key, next);
+  }
+  return Array.from(byJobId.values()).sort((left, right) => left.mergePath.localeCompare(right.mergePath));
+}
+
+
+function preferScoreMergeTarget(collectionDir: string, next: ScoreMergeTarget, current: ScoreMergeTarget): boolean {
+  const nextCollected = isInsideCollection(collectionDir, next.mergePath);
+  const currentCollected = isInsideCollection(collectionDir, current.mergePath);
+  if (nextCollected !== currentCollected) return nextCollected;
+  return next.mergePath.localeCompare(current.mergePath) < 0;
+}
+
+
+function isInsideCollection(collectionDir: string, file: string): boolean {
+  const relative = path.relative(collectionDir, file).replace(/\\/g, '/');
+  return !!relative && relative !== '..' && !relative.startsWith('../') && !path.isAbsolute(relative);
 }
 
 
