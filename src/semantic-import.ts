@@ -12,6 +12,7 @@ import {
   summarizeSemanticSlice,
   summarizeSemanticSliceAdmission
 } from './semantic-import-sidecar.js';
+import { mergeSemanticFactSummaries, semanticImportFactSummary, summarizeLangSidecarSemanticFacts } from './semantic-import-facts.js';
 import { summarizeSemanticDependencies } from './semantic-import-dependencies.js';
 import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths, semanticImportPathVariants } from './semantic-import-select.js';
 import { discoverSemanticImportFallbackPaths, withSemanticImportFallback } from './semantic-import-fallback.js';
@@ -127,6 +128,11 @@ export async function createCodexSemanticImportSidecar(input: {
         : Array.isArray(importResult?.universalAst?.sourceMaps)
           ? importResult.universalAst.sourceMaps
           : [];
+      const semanticIndex = summarizeSemanticIndex(importResult?.semanticIndex);
+      const semanticFacts = mergeSemanticFactSummaries([
+        summarizeLangSidecarSemanticFacts(semanticSidecar),
+        semanticImportFactSummary({ semanticIndex })
+      ]);
       records.push({
         path: resolved.path,
         ...(resolved.path !== file.path ? { requestedPath: file.path } : {}),
@@ -144,7 +150,8 @@ export async function createCodexSemanticImportSidecar(input: {
         evidenceCount: Array.isArray(importResult?.evidence) ? importResult.evidence.length : 0,
         lossCount: Array.isArray(importResult?.losses) ? importResult.losses.length : 0,
         losses: summarizeSemanticLosses(importResult?.losses),
-        semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
+        semanticIndex,
+        semanticFacts,
         dependencies: summarizeSemanticDependencies(importResult?.semanticIndex, semanticSidecar),
         semanticSidecar: summarizeLangSemanticImportSidecar(semanticSidecar),
         universalAstLayers: summarizeUniversalAstLayers(importResult?.universalAst, semanticSidecar),

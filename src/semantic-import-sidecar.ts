@@ -7,6 +7,7 @@ import { summarizeSemanticImportUniversalAstLayers } from './semantic-import-lay
 import { summarizeSemanticImportParadigmSemantics, summarizeParadigmSemantics } from './semantic-import-paradigm.js';
 import { summarizeSemanticImportProofSpec, summarizeProofSpec } from './semantic-import-proof.js';
 import { mergeDependencySummaries, summarizeSemanticDependencies } from './semantic-import-dependencies.js';
+import { mergeSemanticFactSummaries, summarizeLangSidecarSemanticFacts } from './semantic-import-facts.js';
 
 
 
@@ -27,6 +28,7 @@ export function createSemanticImportSidecar(
   const dependencies = mergeDependencySummaries(records
     .map((record) => record.dependencies)
     .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined));
+  const semanticFacts = mergeSemanticFactSummaries(records.map((record) => record.semanticFacts));
   const semanticSidecars = records.reduce((totals, record) => {
     const summary = record.semanticSidecar as { symbols?: number; ownershipRegions?: number; patchHints?: number; emptySemanticIndex?: boolean } | undefined;
     if (!summary) return totals;
@@ -137,6 +139,7 @@ export function createSemanticImportSidecar(
       lossCount: records.reduce((sum, record) => sum + (record.lossCount ?? 0), 0),
       lossesBySeverity,
       semanticIndex,
+      semanticFacts,
       dependencies,
       semanticSidecars,
       universalAstLayers,
@@ -216,6 +219,7 @@ export function summarizeSemanticIndex(value: any): FrontierCodexSemanticImportR
 export function summarizeLangSemanticImportSidecar(value: any): unknown {
   if (!value || typeof value !== 'object') return undefined;
   const dependencies = summarizeSemanticDependencies(undefined, value);
+  const semanticFacts = summarizeLangSidecarSemanticFacts(value);
   const expectedMissingReasonCodes = readStringArray(
     value.summary?.semanticImportExpectedMissingReasonCodes ??
     value.quality?.expectedMissingReasonCodes ??
@@ -236,6 +240,10 @@ export function summarizeLangSemanticImportSidecar(value: any): unknown {
         : [],
     proofSpec: summarizeProofSpec(undefined, value),
     paradigmSemantics: summarizeParadigmSemantics(undefined, value),
+    semanticFacts,
+    semanticFactCount: semanticFacts.total,
+    semanticFactPredicates: semanticFacts.predicates,
+    semanticFactSummary: semanticFacts.byPredicate,
     dependencies,
     dependencyRelations: value.summary?.dependencyRelations ?? dependencies.total,
     dependencyPredicates: Array.isArray(value.summary?.dependencyPredicates)

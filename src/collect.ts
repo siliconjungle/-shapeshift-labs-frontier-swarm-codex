@@ -236,6 +236,8 @@ function enrichCollectedCoordinatorDashboard(
     semanticImportImportedCount: semanticQualities.reduce((sum, entry) => sum + entry.imported, 0),
     semanticImportWarningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
     semanticImportWarnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings)),
+    semanticImportFactCount: semanticQualities.reduce((sum, entry) => sum + entry.semanticFacts, 0),
+    semanticImportFactPredicates: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticFactPredicates)),
     semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
   };
   mutable.metadata = {
@@ -251,6 +253,8 @@ function enrichCollectedCoordinatorDashboard(
       importedCount: semanticQualities.reduce((sum, entry) => sum + entry.imported, 0),
       symbolCount: semanticQualities.reduce((sum, entry) => sum + entry.symbols, 0),
       ownershipRegionCount: semanticQualities.reduce((sum, entry) => sum + entry.ownershipRegions, 0),
+      semanticFactCount: semanticQualities.reduce((sum, entry) => sum + entry.semanticFacts, 0),
+      semanticFactPredicates: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticFactPredicates)),
       warningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
       warnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings))
     }

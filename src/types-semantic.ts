@@ -35,6 +35,7 @@ export interface FrontierCodexSemanticImportRecord {
     relations: number;
     facts: number;
   };
+  semanticFacts?: FrontierCodexSemanticFactSummary;
   dependencies?: FrontierCodexSemanticDependencySummary;
   semanticSidecar?: unknown;
   universalAstLayers?: FrontierCodexUniversalAstLayerSummary;
@@ -46,6 +47,12 @@ export interface FrontierCodexSemanticImportRecord {
   semanticSlice?: unknown;
   semanticSliceAdmission?: unknown;
   error?: string;
+}
+
+export interface FrontierCodexSemanticFactSummary {
+  total: number;
+  byPredicate: Record<string, number>;
+  predicates: string[];
 }
 
 export interface FrontierCodexSemanticDependencySummary {
@@ -172,6 +179,7 @@ export interface FrontierCodexSemanticImportSidecar {
       relations: number;
       facts: number;
     };
+    semanticFacts: FrontierCodexSemanticFactSummary;
     dependencies: FrontierCodexSemanticDependencySummary;
     semanticSidecars: {
       total: number;
@@ -231,6 +239,9 @@ export interface FrontierCodexSemanticImportQuality {
   symbols: number;
   ownershipRegions: number;
   patchHints: number;
+  semanticFacts: number;
+  semanticFactPredicates: string[];
+  semanticFactSummary: Record<string, number>;
   dependencyRelations: number;
   dependencyPredicates: string[];
   sourceMapMappings: number;

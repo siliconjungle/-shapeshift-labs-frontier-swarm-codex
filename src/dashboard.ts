@@ -5,6 +5,7 @@ import type {
 import { FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND, FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_VERSION } from './constants.js';
 import type { FrontierCodexCompactDashboard, FrontierCodexTraceSummary } from './index.js';
 import { uniqueStrings } from './common.js';
+import { mergeSemanticFactSummaries } from './semantic-import-facts.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { codexJobTraceSummary, summarizeCodexTraceSummaries } from './trace-summary.js';
 
@@ -21,6 +22,11 @@ export function createCodexCompactDashboard(input: {
     summarizeCodexSemanticImportQuality(job.semanticImport, input.semanticImportExpected)
   ]));
   const semanticQualities = Array.from(qualities.values());
+  const semanticFacts = mergeSemanticFactSummaries(semanticQualities.map((entry) => ({
+    total: entry.semanticFacts,
+    byPredicate: entry.semanticFactSummary,
+    predicates: entry.semanticFactPredicates
+  })));
   const traceSummaries = input.dashboard.jobs
     .map((job) => codexJobTraceSummary(job))
     .filter((entry): entry is FrontierCodexTraceSummary => Boolean(entry));
@@ -74,6 +80,9 @@ export function createCodexCompactDashboard(input: {
       symbolCount: semanticQualities.reduce((sum, entry) => sum + entry.symbols, 0),
       ownershipRegionCount: semanticQualities.reduce((sum, entry) => sum + entry.ownershipRegions, 0),
       patchHintCount: semanticQualities.reduce((sum, entry) => sum + entry.patchHints, 0),
+      semanticFactCount: semanticFacts.total,
+      semanticFactPredicates: semanticFacts.predicates,
+      semanticFactSummary: semanticFacts.byPredicate,
       dependencyRelationCount: semanticQualities.reduce((sum, entry) => sum + entry.dependencyRelations, 0),
       dependencyPredicates: uniqueStrings(semanticQualities.flatMap((entry) => entry.dependencyPredicates)),
       universalAstLayerCount: semanticQualities.reduce((sum, entry) => sum + entry.universalAstLayers, 0),

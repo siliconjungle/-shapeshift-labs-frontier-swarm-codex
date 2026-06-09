@@ -212,6 +212,9 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   semanticSymbols: number;
   ownershipRegions: number;
   patchHints: number;
+  semanticFacts: number;
+  semanticFactPredicates: string[];
+  semanticFactSummary: Record<string, number>;
   dependencyRelations: number;
   dependencyPredicates: string[];
   universalAstLayers: number;

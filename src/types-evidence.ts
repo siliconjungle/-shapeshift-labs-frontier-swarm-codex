@@ -131,6 +131,9 @@ export interface FrontierCodexCompactDashboard {
     symbolCount: number;
     ownershipRegionCount: number;
     patchHintCount: number;
+    semanticFactCount: number;
+    semanticFactPredicates: string[];
+    semanticFactSummary: Record<string, number>;
     dependencyRelationCount: number;
     dependencyPredicates: string[];
     universalAstLayerCount: number;

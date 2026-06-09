@@ -2,6 +2,7 @@ import type { FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
 import type { FrontierCodexPatchScoreSemanticEvidence } from './index.js';
 import { nonNegativeNumber, numberRecord, uniqueStrings } from './common.js';
 import { semanticImportSummaryFromBundle } from './semantic-import-quality.js';
+import { semanticImportFactSummary } from './semantic-import-facts.js';
 import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradigm.js';
 import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers.js';
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
@@ -28,6 +29,9 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
       semanticSymbols: 0,
       ownershipRegions: 0,
       patchHints: 0,
+      semanticFacts: 0,
+      semanticFactPredicates: [],
+      semanticFactSummary: {},
       dependencyRelations: 0,
       dependencyPredicates: [],
       universalAstLayers: 0,
@@ -55,6 +59,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   const semanticSymbols = nonNegativeNumber(summary.semanticIndex?.symbols);
   const ownershipRegions = nonNegativeNumber(summary.semanticSidecars?.ownershipRegions);
   const patchHints = nonNegativeNumber(summary.semanticSidecars?.patchHints);
+  const semanticFacts = semanticImportFactSummary(summary);
   const dependencyRelations = nonNegativeNumber((summary as { dependencies?: { total?: number } }).dependencies?.total);
   const dependencyPredicates = uniqueStrings(((summary as { dependencies?: { predicates?: readonly string[] } }).dependencies?.predicates ?? []).map(String));
   const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
@@ -146,6 +151,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   }
   if (patchHints > 0) scoreAdjustment += 5;
   if (dependencyRelations > 0) scoreAdjustment += 3;
+  if (semanticFacts.total > 0) scoreAdjustment += 2;
   if (proofSpec.discharged > 0 && proofSpec.failed === 0 && proofSpec.stale === 0 && proofSpec.open === 0 && proofSpec.unknown === 0) {
     scoreAdjustment += 5;
   }
@@ -162,6 +168,9 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     semanticSymbols,
     ownershipRegions,
     patchHints,
+    semanticFacts: semanticFacts.total,
+    semanticFactPredicates: semanticFacts.predicates,
+    semanticFactSummary: semanticFacts.byPredicate,
     dependencyRelations,
     dependencyPredicates,
     universalAstLayers,

@@ -1,6 +1,7 @@
 import type { FrontierSwarmJobResultInput, FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
 import type { FrontierCodexSemanticImportOptions, FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './index.js';
 import { nonNegativeNumber, readStringArray, uniqueStrings } from './common.js';
+import { semanticImportFactSummary } from './semantic-import-facts.js';
 import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers.js';
 import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradigm.js';
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
@@ -19,6 +20,7 @@ export function summarizeCodexSemanticImportQuality(
   const symbols = nonNegativeNumber(summary?.semanticIndex?.symbols);
   const ownershipRegions = nonNegativeNumber(summary?.semanticSidecars?.ownershipRegions);
   const patchHints = nonNegativeNumber(summary?.semanticSidecars?.patchHints);
+  const semanticFacts = semanticImportFactSummary(summary);
   const dependencyRelations = nonNegativeNumber((summary as { dependencies?: { total?: number } } | undefined)?.dependencies?.total);
   const dependencyPredicates = Array.isArray((summary as { dependencies?: { predicates?: unknown } } | undefined)?.dependencies?.predicates)
     ? uniqueStrings((summary as { dependencies: { predicates: string[] } }).dependencies.predicates)
@@ -84,6 +86,9 @@ export function summarizeCodexSemanticImportQuality(
     symbols,
     ownershipRegions,
     patchHints,
+    semanticFacts: semanticFacts.total,
+    semanticFactPredicates: semanticFacts.predicates,
+    semanticFactSummary: semanticFacts.byPredicate,
     dependencyRelations,
     dependencyPredicates,
     sourceMapMappings,
@@ -235,6 +240,7 @@ function semanticImportSummaryRichness(summary: FrontierSwarmMergeBundle['semant
     summary.imported,
     summary.sourceMapMappingCount,
     summary.semanticIndex?.symbols,
+    semanticImportFactSummary(summary).total,
     (summary as { dependencies?: { total?: number } }).dependencies?.total,
     summary.semanticSidecars?.ownershipRegions,
     summary.semanticSidecars?.patchHints,

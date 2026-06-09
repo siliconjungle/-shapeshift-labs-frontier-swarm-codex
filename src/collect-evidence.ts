@@ -153,6 +153,8 @@ export function createCollectedEvidenceEntries(
       semanticSymbols: semanticImportQuality.symbols,
       semanticRegions: semanticImportQuality.ownershipRegions,
       semanticPatchHints: semanticImportQuality.patchHints,
+      semanticFacts: semanticImportQuality.semanticFacts,
+      semanticFactPredicates: semanticImportQuality.semanticFactPredicates.join(','),
       semanticWarnings: semanticImportQuality.warnings.join(','),
       semanticWarningCount: semanticImportQuality.warnings.length,
       semanticDependencyRelations: semanticImportQuality.dependencyRelations,
