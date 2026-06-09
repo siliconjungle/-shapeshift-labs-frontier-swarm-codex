@@ -16,6 +16,7 @@ import {
 } from '@shapeshift-labs/frontier-swarm';
 import { isObject, uniqueStrings } from './common.js';
 import { createCodexSemanticImportSidecar } from './semantic-import.js';
+import { snapshotCodexSemanticImportBaseSources } from './semantic-import-snapshot.js';
 import { semanticImportEnabled } from './semantic-import-quality.js';
 import { writeCodexJobEvidenceSummary, writeCodexPatchIntent } from './codex-evidence.js';
 import { readAdaptiveFeedbackObservations } from './codex-adaptive-feedback.js';
@@ -129,6 +130,8 @@ export async function runCodexJob(
   const fileSnapshot = shouldSnapshotWorkspaceChanges(workspacePlan, options)
     ? await snapshotWorkspaceFiles(workspace)
     : undefined;
+  const semanticImportExpected = options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport);
+  const semanticImportBaseSources = await snapshotCodexSemanticImportBaseSources({ job, workspace, options: options.semanticImport, semanticImportExpected });
   await fs.writeFile(paths.resourceAllocationPath, JSON.stringify(resourceAllocation, null, 2) + '\n');
   const basePrompt = renderCodexPrompt(job, { workspacePath: workspace, paths, resourceAllocation });
   const prompt = options.renderJobPrompt
@@ -201,8 +204,9 @@ export async function runCodexJob(
     changedPaths,
     evidenceDir: paths.evidenceDir,
     baseCwd: path.resolve(options.cwd ?? process.cwd()),
+    baseSources: semanticImportBaseSources,
     options: options.semanticImport,
-    semanticImportExpected: options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport)
+    semanticImportExpected
   });
   const semanticImportSummary = semanticImport?.sidecar.summary;
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });
@@ -292,7 +296,7 @@ export async function runCodexJob(
     mergeBundle,
     patchPath,
     semanticImport: semanticImport?.sidecar,
-    semanticImportExpected: options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport),
+    semanticImportExpected,
     contextBudget,
     evidencePaths
   });
@@ -308,7 +312,7 @@ export async function runCodexJob(
     contextBudget,
     semanticImportPath: semanticImport?.path,
     semanticImport: semanticImport?.sidecar,
-    semanticImportExpected: options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport),
+    semanticImportExpected,
     handoffArtifacts
   });
   return result;

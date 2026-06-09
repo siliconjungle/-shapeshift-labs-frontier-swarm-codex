@@ -120,7 +120,7 @@ function semanticEditConflictImport(readySemanticImport) {
     portable: 0,
     alreadyApplied: 0,
     needsPort: 0,
-    conflicts: 1,
+    conflicts: 0,
     stale: 0,
     blocked: 0,
     candidates: 0,

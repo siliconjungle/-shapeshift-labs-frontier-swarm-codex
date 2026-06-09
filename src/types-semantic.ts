@@ -22,6 +22,12 @@ export interface FrontierCodexSemanticImportRecord {
   bytes?: number;
   baseSource?: {
     path: string;
+    source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head';
+    bytes: number;
+    foundBy: string;
+  };
+  headSource?: {
+    path: string;
     source: 'coordinator-workspace' | 'git-head';
     bytes: number;
     foundBy: string;

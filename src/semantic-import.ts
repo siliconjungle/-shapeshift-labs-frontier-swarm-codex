@@ -7,6 +7,7 @@ import { summarizeParadigmSemantics } from './semantic-import-paradigm.js';
 import { summarizeProofSpec } from './semantic-import-proof.js';
 import {
   readSemanticImportBaseSource,
+  readSemanticImportHeadSource,
   summarizeNativeSourceChangeSet
 } from './semantic-import-base.js';
 import {
@@ -20,8 +21,10 @@ import { mergeSemanticFactSummaries, semanticImportFactSummary, summarizeLangSid
 import { summarizeSemanticDependencies } from './semantic-import-dependencies.js';
 import { summarizeSemanticEditScript } from './semantic-edit-script.js';
 import { summarizeSemanticLineageEvidence } from './semantic-import-lineage.js';
-import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths, semanticImportPathVariants } from './semantic-import-select.js';
+import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths } from './semantic-import-select.js';
 import { discoverSemanticImportFallbackPaths, withSemanticImportFallback } from './semantic-import-fallback.js';
+import type { SemanticImportBaseSourceSnapshot } from './semantic-import-base.js';
+import { resolveSemanticImportWorkspacePath } from './semantic-import-path.js';
 
 export async function createCodexSemanticImportSidecar(input: {
   job: FrontierSwarmJob;
@@ -29,6 +32,7 @@ export async function createCodexSemanticImportSidecar(input: {
   changedPaths: readonly string[];
   evidenceDir: string;
   baseCwd?: string;
+  baseSources?: SemanticImportBaseSourceSnapshot;
   options?: boolean | FrontierCodexSemanticImportOptions;
   semanticImportExpected?: boolean;
 }): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
@@ -77,7 +81,8 @@ export async function createCodexSemanticImportSidecar(input: {
       baseCwd: input.baseCwd,
       workspace: input.workspace,
       file: resolved.path,
-      maxBytes: options.maxBytes
+      maxBytes: options.maxBytes,
+      snapshot: input.baseSources
     });
     if (!stat?.isFile()) {
       if (baseSource && api.diffNativeSources) {
@@ -112,6 +117,11 @@ export async function createCodexSemanticImportSidecar(input: {
     }
     try {
       const sourceText = await fs.readFile(absolute, 'utf8');
+      const headSource = await readSemanticImportHeadSource({
+        headCwd: input.baseCwd,
+        file: resolved.path,
+        maxBytes: options.maxBytes
+      });
       const importResult = api.importNativeSource({
         language: file.language,
         sourcePath: resolved.path,
@@ -138,8 +148,10 @@ export async function createCodexSemanticImportSidecar(input: {
           parser: 'source-text',
           baseSourceText: baseSource.sourceText,
           workerSourceText: sourceText,
+          ...(headSource ? { headSourceText: headSource.sourceText } : {}),
           baseMetadata: semanticImportMetadata(input.job, 'base', baseSource.path),
           workerMetadata: semanticImportMetadata(input.job, 'worker', resolved.path),
+          ...(headSource ? { headMetadata: semanticImportMetadata(input.job, 'head', headSource.path) } : {}),
           metadata: semanticImportMetadata(input.job, 'semantic-edit-script', resolved.path)
         })
         : undefined;
@@ -196,6 +208,7 @@ export async function createCodexSemanticImportSidecar(input: {
         status: 'imported',
         bytes: stat.size,
         ...(baseSource ? { baseSource: summarizeSemanticImportBaseSource(baseSource) } : {}),
+        ...(headSource ? { headSource: summarizeSemanticImportHeadSource(headSource) } : {}),
         importId: importResult?.id,
         universalAstHash: api.hashUniversalAstEnvelope && importResult?.universalAst
           ? api.hashUniversalAstEnvelope(importResult.universalAst)
@@ -250,7 +263,7 @@ function semanticImportMetadata(job: FrontierSwarmJob, phase: string, sourcePath
 
 function summarizeSemanticImportBaseSource(baseSource: {
   path: string;
-  source: 'coordinator-workspace' | 'git-head';
+  source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head';
   bytes: number;
   foundBy: string;
 }) {
@@ -262,11 +275,16 @@ function summarizeSemanticImportBaseSource(baseSource: {
   };
 }
 
-async function resolveSemanticImportWorkspacePath(workspace: string, file: string): Promise<{ path: string; absolute: string }> {
-  for (const candidate of semanticImportPathVariants(file)) {
-    const absolute = path.join(workspace, candidate);
-    const stat = await fs.stat(absolute).catch(() => undefined);
-    if (stat?.isFile()) return { path: candidate, absolute };
-  }
-  return { path: file, absolute: path.join(workspace, file) };
+function summarizeSemanticImportHeadSource(headSource: {
+  path: string;
+  source: 'coordinator-workspace' | 'git-head';
+  bytes: number;
+  foundBy: string;
+}) {
+  return {
+    path: headSource.path,
+    source: headSource.source,
+    bytes: headSource.bytes,
+    foundBy: headSource.foundBy
+  };
 }

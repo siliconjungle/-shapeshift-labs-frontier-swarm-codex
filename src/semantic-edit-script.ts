@@ -71,24 +71,25 @@ function normalizeSemanticEditScript(record: Record<string, unknown>): FrontierC
   };
   const status = typeof admission.status === 'string' ? admission.status : typeof summary.status === 'string' ? summary.status : undefined;
   const action = typeof admission.action === 'string' ? admission.action : typeof summary.action === 'string' ? summary.action : undefined;
+  const admissionCounts = { ...numberRecord(summary.admission), ...(status ? { [status]: 1 } : {}) };
   const total = nonNegativeNumber(summary.total) || (record.kind === 'frontier.lang.semanticEditScript' ? 1 : 0);
   const operationCount = nonNegativeNumber(summary.operations) || operations.length;
   return {
     total,
     operations: operationCount,
-    autoMergeCandidates: nonNegativeNumber(summary.autoMergeCandidates),
-    portable: nonNegativeNumber(summary.portable),
-    alreadyApplied: nonNegativeNumber(summary.alreadyApplied),
-    needsPort: nonNegativeNumber(summary.needsPort),
-    conflicts: nonNegativeNumber(summary.conflicts),
-    stale: nonNegativeNumber(summary.stale),
-    blocked: nonNegativeNumber(summary.blocked),
-    candidates: nonNegativeNumber(summary.candidates),
-    reviewRequired: admission.reviewRequired === true ? 1 : nonNegativeNumber(summary.reviewRequired),
-    autoApplyCandidates: admission.autoApplyCandidate === true ? 1 : nonNegativeNumber(summary.autoApplyCandidates),
+    autoMergeCandidates: maxCounter(summary.autoMergeCandidates, byStatus, admissionCounts, ['auto-merge-candidate', 'autoMergeCandidate']),
+    portable: maxCounter(summary.portable, byStatus, admissionCounts, ['portable']),
+    alreadyApplied: maxCounter(summary.alreadyApplied, byStatus, admissionCounts, ['already-applied', 'alreadyApplied']),
+    needsPort: maxCounter(summary.needsPort, byStatus, admissionCounts, ['needs-port', 'needsPort']),
+    conflicts: maxCounter(summary.conflicts, byStatus, admissionCounts, ['conflict', 'conflicts']),
+    stale: maxCounter(summary.stale, byStatus, admissionCounts, ['stale']),
+    blocked: maxCounter(summary.blocked, byStatus, admissionCounts, ['blocked']),
+    candidates: maxCounter(summary.candidates, byStatus, admissionCounts, ['candidate', 'candidates']),
+    reviewRequired: admission.reviewRequired === true ? 1 : maxCounter(summary.reviewRequired, byStatus, admissionCounts, ['needs-review', 'review-required']),
+    autoApplyCandidates: admission.autoApplyCandidate === true ? 1 : maxCounter(summary.autoApplyCandidates, byStatus, admissionCounts, ['auto-apply-candidate']),
     byStatus,
     byKind,
-    admission: status ? { [status]: 1 } : numberRecord(summary.admission),
+    admission: admissionCounts,
     actions: uniqueStrings([action, ...readStringArray(summary.actions)].filter(Boolean).map(String)),
     reasonCodes: uniqueStrings([...readStringArray(admission.reasonCodes), ...readStringArray(summary.reasonCodes)]),
     conflictKeys: uniqueStrings([...readStringArray(admission.conflictKeys), ...readStringArray(summary.conflictKeys)]),
@@ -109,4 +110,12 @@ function countStrings(values: readonly unknown[]): Record<string, number> {
 
 function mergeNumberRecord(target: Record<string, number>, source: Record<string, number>): void {
   for (const [key, value] of Object.entries(source)) target[key] = (target[key] ?? 0) + nonNegativeNumber(value);
+}
+
+function maxCounter(value: unknown, statuses: Record<string, number>, admissions: Record<string, number>, keys: readonly string[]): number {
+  return Math.max(nonNegativeNumber(value), sumKeys(statuses, keys), sumKeys(admissions, keys));
+}
+
+function sumKeys(record: Record<string, number>, keys: readonly string[]): number {
+  return keys.reduce((sum, key) => sum + nonNegativeNumber(record[key]), 0);
 }
