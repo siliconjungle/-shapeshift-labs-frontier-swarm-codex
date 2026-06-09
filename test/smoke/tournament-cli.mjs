@@ -25,6 +25,11 @@ export async function testTournamentCli({ plan, tmp }) {
   assert.strictEqual(apiQuery.semanticImport.summary.candidateCount, 1);
   assert.strictEqual(apiQuery.semanticImport.jobs[0].semanticImportQuality.selected, 1);
   assert.strictEqual(apiQuery.semanticImport.jobs[0].semanticImportQuality.candidates, 1);
+  const apiBandit = await queryCodexSwarmTournament({ collection, view: 'bandit', limit: 1 });
+  assert.strictEqual(apiBandit.view, 'bandit');
+  assert.strictEqual(apiBandit.bandit.kind, 'frontier.swarm.contextual-bandit-recommendations');
+  assert.ok(apiBandit.bandit.summary.recommendationCount >= 1);
+  assert.strictEqual(apiBandit.bandit.summary.shownRecommendationCount, 1);
 
   const history = await createCodexSwarmTournamentHistory({ tournaments: [tournamentPath] });
   assert.strictEqual(history.history.summary.tournamentCount, 1);
@@ -53,6 +58,20 @@ export async function testTournamentCli({ plan, tmp }) {
   assert.strictEqual(query.standings.length, 1);
   assert.strictEqual(query.semanticImport.summary.selectedCount, 1);
   assert.strictEqual(query.semanticImport.jobs[0].semanticImportQuality.imported, 1);
+  const banditQuery = JSON.parse((await execFileP(process.execPath, [
+    cli,
+    'tournament',
+    'query',
+    '--collection',
+    collection,
+    '--view',
+    'bandit',
+    '--limit',
+    '1'
+  ])).stdout);
+  assert.strictEqual(banditQuery.view, 'bandit');
+  assert.strictEqual(banditQuery.bandit.recommendations.length, 1);
+  assert.strictEqual(banditQuery.semanticImport.summary.importedCount, 1);
 
   const cliHistory = JSON.parse((await execFileP(process.execPath, [
     cli,

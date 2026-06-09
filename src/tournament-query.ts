@@ -18,10 +18,11 @@ import { isObject, pathExists } from './common.js';
 import type { FrontierCodexCompactDashboard } from './types-evidence.js';
 import type { FrontierCodexSemanticImportQuality } from './types-semantic.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
+import { createCodexTournamentBanditView } from './tournament-bandit-view.js';
 
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
-export type FrontierCodexTournamentView = 'summary' | 'standings' | 'matches' | 'full';
+export type FrontierCodexTournamentView = 'summary' | 'standings' | 'matches' | 'full' | 'bandit';
 
 export interface FrontierCodexTournamentQueryInput {
   tournament?: string;
@@ -143,6 +144,7 @@ function tournamentView(
   limit?: number,
   semanticImport?: FrontierCodexTournamentSemanticImportQueryRecord
 ) {
+  if (view === 'bandit') return createCodexTournamentBanditView({ tournament, tournamentPath, limit, semanticImport });
   const standings = limit ? tournament.standings.slice(0, limit) : tournament.standings;
   const matches = limit ? tournament.matches.slice(0, limit) : tournament.matches;
   return {
@@ -283,7 +285,7 @@ async function writeMaybe(args: CliArgs, value: unknown, action: string): Promis
 function viewArg(value: CliValue | undefined): FrontierCodexTournamentView | undefined {
   const view = stringArg(value);
   if (!view) return undefined;
-  if (view === 'summary' || view === 'standings' || view === 'matches' || view === 'full') return view;
+  if (view === 'summary' || view === 'standings' || view === 'matches' || view === 'full' || view === 'bandit') return view;
   throw new Error(`unsupported tournament --view ${view}`);
 }
 
