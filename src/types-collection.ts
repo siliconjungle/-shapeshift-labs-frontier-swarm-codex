@@ -22,7 +22,7 @@ import type {
   FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND,
   FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION
 } from './constants.js';
-import type { FrontierCodexCompactDashboard } from './types-evidence.js';
+import type { FrontierCodexCompactDashboard, FrontierCodexContextBudgetReport } from './types-evidence.js';
 
 export type FrontierCodexCollectBucket =
   | 'ready-to-apply'
@@ -250,6 +250,7 @@ export interface FrontierCodexPatchScoreEntry {
   changedPaths: string[];
   reasons: string[];
   semanticEvidence: FrontierCodexPatchScoreSemanticEvidence;
+  contextBudget?: FrontierCodexContextBudgetReport;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
 }
 

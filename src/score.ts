@@ -7,6 +7,7 @@ import type { FrontierCodexCollectBucket, FrontierCodexCollectResult, FrontierCo
 import { copyWorkspacePath, findFilesByName, pathExists, pathHasIgnoredSegment, resolveBundlePatchPath, runLoggedProcess, slug, uniqueStrings, uniqueWorkspacePaths } from './common.js';
 import { collectCodexSwarmRun } from './collect.js';
 import { summarizePatchScoreSemanticEvidence } from './patch-score-semantic.js';
+import { contextBudgetFromBundle } from './context-budget.js';
 
 
 export async function scoreCodexSwarmPatches(input: FrontierCodexPatchScoreInput): Promise<FrontierCodexPatchScoreResult> {
@@ -96,35 +97,39 @@ async function scoreCodexMergeBundle(input: {
   const commands: FrontierCodexPatchScoreEntry['commands'] = [];
   const patchPath = await resolveApplyPatchPath(input.bundle, input.mergePath);
   const semanticEvidence = summarizePatchScoreSemanticEvidence(input.bundle);
+  const contextBudget = contextBudgetFromBundle(input.bundle);
+  const contextReasons = contextBudgetReasons(contextBudget);
+  const contextPenalty = contextBudgetPenalty(contextBudget);
   const base = {
     jobId: input.bundle.jobId,
     bundlePath: input.mergePath,
     ...(patchPath ? { patchPath } : {}),
     changedPaths: [...input.bundle.changedPaths],
     semanticEvidence,
+    ...(contextBudget ? { contextBudget } : {}),
     commands
   };
   if (!patchPath || input.bundle.disposition === 'discovery-only' || input.bundle.changedPaths.length === 0) {
     return {
       ...base,
       status: 'evidence-only',
-      score: clampPatchScore(20 + Math.min(0, semanticEvidence.scoreAdjustment)),
-      reasons: uniqueStrings(['no patch to apply', ...semanticEvidence.reasons])
+      score: clampPatchScore(20 + Math.min(0, semanticEvidence.scoreAdjustment) - contextPenalty),
+      reasons: uniqueStrings(['no patch to apply', ...semanticEvidence.reasons, ...contextReasons])
     };
   }
   if (input.bundle.staleAgainstHead || input.bundle.disposition === 'stale-against-head') {
-    return { ...base, status: 'stale', score: 0, reasons: uniqueStrings(['stale-against-head', ...semanticEvidence.reasons]) };
+    return { ...base, status: 'stale', score: 0, reasons: uniqueStrings(['stale-against-head', ...semanticEvidence.reasons, ...contextReasons]) };
   }
   const workspacePath = await createScoreWorkspace(input.cwd, input.bundle.jobId, input.input);
   try {
     const check = await runLoggedProcess('git', ['apply', '--check', patchPath], workspacePath);
     commands.push(check);
     if (check.status !== 0) {
-      return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings(['git apply --check failed', ...semanticEvidence.reasons]) };
+      return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings(['git apply --check failed', ...semanticEvidence.reasons, ...contextReasons]) };
     }
     const apply = await runLoggedProcess('git', ['apply', patchPath], workspacePath);
     commands.push(apply);
-    if (apply.status !== 0) return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings(['git apply failed', ...semanticEvidence.reasons]) };
+    if (apply.status !== 0) return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings(['git apply failed', ...semanticEvidence.reasons, ...contextReasons]) };
     const gates = scoreCommands(input.bundle, input.input);
     for (const gate of gates) {
       const run = await runLoggedProcess(gate.command, gate.args, gate.cwd ? path.resolve(workspacePath, gate.cwd) : workspacePath);
@@ -134,26 +139,41 @@ async function scoreCodexMergeBundle(input: {
           ...base,
           workspacePath,
           status: 'test-fail',
-          score: clampPatchScore(10 + Math.min(0, semanticEvidence.scoreAdjustment)),
-          reasons: uniqueStrings([`gate failed: ${gate.name}`, ...semanticEvidence.reasons])
+          score: clampPatchScore(10 + Math.min(0, semanticEvidence.scoreAdjustment) - contextPenalty),
+          reasons: uniqueStrings([`gate failed: ${gate.name}`, ...semanticEvidence.reasons, ...contextReasons])
         };
       }
     }
     const clean = input.bundle.disposition === 'auto-mergeable' && input.bundle.autoMergeable && semanticEvidence.cleanEligible;
     const reasons = uniqueStrings([
       ...(input.bundle.disposition === 'auto-mergeable' && input.bundle.autoMergeable ? [] : ['patch applies but bundle is not auto-mergeable']),
-      ...semanticEvidence.reasons
+      ...semanticEvidence.reasons,
+      ...contextReasons
     ]);
     return {
       ...base,
       workspacePath,
       status: clean ? 'accepted-clean' : 'accepted-needs-port',
-      score: clampPatchScore((clean ? 100 : 70) + semanticEvidence.scoreAdjustment),
+      score: clampPatchScore((clean ? 100 : 70) + semanticEvidence.scoreAdjustment - contextPenalty),
       reasons
     };
   } finally {
     if (!input.input.keepWorkspaces) await fs.rm(workspacePath, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+function contextBudgetReasons(contextBudget: ReturnType<typeof contextBudgetFromBundle>): string[] {
+  if (!contextBudget) return [];
+  return uniqueStrings([
+    ...contextBudget.warnings.map((warning) => `context budget warning: ${warning}`),
+    ...contextBudget.errors.map((error) => `context budget failed: ${error}`)
+  ]);
+}
+
+function contextBudgetPenalty(contextBudget: ReturnType<typeof contextBudgetFromBundle>): number {
+  if (!contextBudget) return 0;
+  return (contextBudget.status === 'failed' ? 35 : contextBudget.status === 'warning' ? 10 : 0)
+    + Math.min(20, Math.floor((contextBudget.usage?.inputTokens ?? 0) / 500_000));
 }
 
 

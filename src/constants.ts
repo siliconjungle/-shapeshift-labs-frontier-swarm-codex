@@ -39,3 +39,5 @@ export const FRONTIER_SWARM_CODEX_CLEANUP_PLAN_KIND = 'frontier.swarm-codex.clea
 export const FRONTIER_SWARM_CODEX_CLEANUP_PLAN_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_QUERY_KIND = 'frontier.swarm-codex.query';
 export const FRONTIER_SWARM_CODEX_QUERY_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_KIND = 'frontier.swarm-codex.context-budget';
+export const FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_VERSION = 1;

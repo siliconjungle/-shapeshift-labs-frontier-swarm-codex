@@ -18,7 +18,9 @@ import { writeJsonAtomic } from './common.js';
 import { createCodexResourceScheduledPlan } from './codex-resource-schedule.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { appendFileSwarmEvent } from './codex-events.js';
+import { contextBudgetFromCoordinatorJob } from './context-budget.js';
 import type {
+  FrontierCodexContextBudgetReport,
   FrontierCodexAdaptiveConcurrencyOptions,
   FrontierCodexLogSummary
 } from './index.js';
@@ -151,7 +153,11 @@ function normalizeAdaptiveConcurrencyOptions(
 function createCodexAdaptiveObservations(results: readonly FrontierSwarmJobResultInput[]): FrontierSwarmAdaptiveObservationInput[] {
   const observations: FrontierSwarmAdaptiveObservationInput[] = [];
   for (const result of results) {
-    const metadata = result.metadata && typeof result.metadata === 'object' ? result.metadata as { logSummary?: FrontierCodexLogSummary; semanticImport?: FrontierSwarmMergeBundle['semanticImport'] } : {};
+    const metadata = result.metadata && typeof result.metadata === 'object' ? result.metadata as {
+      logSummary?: FrontierCodexLogSummary;
+      semanticImport?: FrontierSwarmMergeBundle['semanticImport'];
+      contextBudget?: FrontierCodexContextBudgetReport;
+    } : {};
     const logSummary = metadata.logSummary;
     if (logSummary && (logSummary.eventBytesTruncated > 0 || logSummary.stderrBytesTruncated > 0 || logSummary.eventBytes > 1_000_000 || logSummary.stderrBytes > 256_000)) {
       observations.push({
@@ -168,6 +174,12 @@ function createCodexAdaptiveObservations(results: readonly FrontierSwarmJobResul
     }
     if (result.mergeDisposition === 'discovery-only' || result.mergeReadiness === 'discovery-only') {
       observations.push({ kind: 'discovery-only-output', severity: 'info', jobId: result.jobId, reason: 'worker produced discovery-only output' });
+    }
+    const contextBudget = metadata.contextBudget ?? contextBudgetFromCoordinatorJob(result);
+    if (contextBudget?.status === 'failed') {
+      observations.push({ kind: 'context-budget-failed', severity: 'warning', jobId: result.jobId, reasons: contextBudget.errors, metadata: contextBudget });
+    } else if (contextBudget?.status === 'warning') {
+      observations.push({ kind: 'context-budget-warning', severity: 'info', jobId: result.jobId, reasons: contextBudget.warnings, metadata: contextBudget });
     }
     const semanticQuality = summarizeCodexSemanticImportQuality(result.semanticImport ?? metadata.semanticImport, false);
     if (semanticQuality.present && semanticQuality.empty) {

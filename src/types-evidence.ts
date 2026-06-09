@@ -1,6 +1,8 @@
 import type {
   FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND,
   FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_VERSION,
+  FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_KIND,
+  FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_VERSION,
   FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND,
   FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION,
   FRONTIER_SWARM_CODEX_PATCH_INTENT_KIND,
@@ -27,6 +29,49 @@ export interface FrontierCodexTraceSummary {
   referenceEvidenceCount: number;
   divergenceCount: number;
   openDivergenceCount: number;
+}
+
+export interface FrontierCodexContextBudgetReport {
+  kind: typeof FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_VERSION;
+  generatedAt: number;
+  jobId: string;
+  taskId: string;
+  lane: string;
+  status: 'ok' | 'warning' | 'failed';
+  action: 'allow' | 'warn' | 'fail-before-launch' | 'fail-after-run';
+  options: {
+    enabled: boolean;
+    mode: 'off' | 'warn' | 'fail';
+    warnPromptBytes?: number;
+    maxPromptBytes?: number;
+    warnEstimatedInputTokens?: number;
+    maxEstimatedInputTokens?: number;
+    warnActualInputTokens?: number;
+    maxActualInputTokens?: number;
+    maxSourceRefs?: number;
+    maxTargetRefs?: number;
+    maxWorkspaceIncludes?: number;
+  };
+  measured: {
+    promptBytes: number;
+    promptChars: number;
+    estimatedInputTokens: number;
+    sourceRefCount: number;
+    targetRefCount: number;
+    allowedWriteCount: number;
+    workspaceIncludeCount: number;
+    workspaceMode: string;
+  };
+  usage?: {
+    source: string;
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+  warnings: string[];
+  errors: string[];
 }
 
 export interface FrontierCodexJobEvidenceSummary {
@@ -57,6 +102,7 @@ export interface FrontierCodexJobEvidenceSummary {
   readyToPortHunkCount: number;
   semanticImport?: FrontierCodexSemanticImportSidecar['summary'];
   semanticImportQuality?: FrontierCodexSemanticImportQuality;
+  contextBudget?: FrontierCodexContextBudgetReport;
   traceSummary?: FrontierCodexTraceSummary;
   sourceCitations: Array<{ path: string; kind: string; language?: string; hash?: string }>;
   metadata?: Record<string, unknown>;
@@ -80,6 +126,7 @@ export interface FrontierCodexPatchIntent {
   verification: Array<{ name: string; command: string[]; status?: number; required: boolean }>;
   evidencePaths: string[];
   semanticImportQuality: FrontierCodexSemanticImportQuality;
+  contextBudget?: FrontierCodexContextBudgetReport;
   patchHunks: FrontierCodexPatchHunkSummary[];
   warnings: string[];
 }
@@ -164,6 +211,15 @@ export interface FrontierCodexCompactDashboard {
     divergenceCount: number;
     openDivergenceCount: number;
   };
+  contextBudget: {
+    warningCount: number;
+    failedCount: number;
+    jobsWithActualUsage: number;
+    maxPromptBytes: number;
+    maxEstimatedInputTokens: number;
+    maxActualInputTokens: number;
+    warnings: string[];
+  };
   evidence: {
     readyToApply: number;
     needsHumanPort: number;
@@ -177,6 +233,7 @@ export interface FrontierCodexCompactDashboard {
     mergeScore: number;
     changedPaths: string[];
     semanticImportQuality?: FrontierCodexSemanticImportQuality;
+    contextBudget?: FrontierCodexContextBudgetReport;
     traceSummary?: FrontierCodexTraceSummary;
     staleAgainstHead: boolean;
     duplicateGroupId?: string;

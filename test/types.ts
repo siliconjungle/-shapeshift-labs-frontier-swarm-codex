@@ -37,6 +37,7 @@ const args = buildCodexArgs(job, {
     lastMessagePath: 'last.md',
     evidenceDir: 'evidence',
     resourceAllocationPath: 'evidence/resource-allocation.json',
+    contextBudgetPath: 'evidence/context-budget.json',
     workspaceProofPath: 'evidence/workspace-proof.json',
     patchPath: 'evidence/changes.patch',
     mergeBundlePath: 'evidence/merge.json',
@@ -57,6 +58,7 @@ const resultPromise: Promise<FrontierCodexSwarmRunResult> = runCodexSwarm(plan, 
     fuzzerConcurrency: 1
   },
   compactLogs: true,
+  contextBudget: { mode: 'warn', warnEstimatedInputTokens: 32000 },
   semanticImportExpected: true,
   workspace: {
     mode: 'copy',

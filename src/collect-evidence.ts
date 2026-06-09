@@ -11,6 +11,7 @@ import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { codexBundleTraceSummary } from './trace-summary.js';
+import { contextBudgetFromBundle } from './context-budget.js';
 
 
 export async function copyOrWriteCollectedEvidenceSummary(input: {
@@ -27,6 +28,7 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
   const traceSummary = codexBundleTraceSummary(input.bundle);
   const semanticImport = semanticImportSummaryFromBundle(input.bundle);
   const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, input.semanticImportExpected ?? false);
+  const contextBudget = contextBudgetFromBundle(input.bundle);
   await fs.mkdir(path.dirname(input.file), { recursive: true });
   if (existing && await pathExists(existing)) {
     await fs.copyFile(existing, input.file).catch(() => {});
@@ -34,6 +36,7 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
       await augmentCollectedEvidenceSummary(input.file, {
         semanticImport,
         semanticImportQuality,
+        contextBudget,
         traceSummary: traceSummary.shardCount ? traceSummary : undefined
       });
       return;
@@ -66,6 +69,7 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
     readyToPortHunkCount: input.bucket === 'needs-human-port' || input.bucket === 'ready-to-apply' ? patchHunks.length : 0,
     ...(semanticImport ? { semanticImport: semanticImport as FrontierCodexSemanticImportSidecar['summary'] } : {}),
     semanticImportQuality,
+    ...(contextBudget ? { contextBudget } : {}),
     ...(traceSummary.shardCount ? { traceSummary } : {}),
     sourceCitations: createCodexEvidenceSourceCitations(input.bundle),
     metadata: {
@@ -86,6 +90,7 @@ async function augmentCollectedEvidenceSummary(
   input: {
     semanticImport?: unknown;
     semanticImportQuality: ReturnType<typeof summarizeCodexSemanticImportQuality>;
+    contextBudget?: FrontierCodexJobEvidenceSummary['contextBudget'];
     traceSummary?: FrontierCodexTraceSummary;
   }
 ): Promise<void> {
@@ -94,10 +99,12 @@ async function augmentCollectedEvidenceSummary(
     if (!isObject(parsed)) return;
     if (input.semanticImport) parsed.semanticImport = input.semanticImport;
     parsed.semanticImportQuality = input.semanticImportQuality;
+    if (input.contextBudget) parsed.contextBudget = input.contextBudget;
     if (input.traceSummary) parsed.traceSummary = input.traceSummary;
     parsed.metadata = {
       ...(isObject(parsed.metadata) ? parsed.metadata : {}),
-      semanticImportQuality: input.semanticImportQuality
+      semanticImportQuality: input.semanticImportQuality,
+      ...(input.contextBudget ? { contextBudget: input.contextBudget } : {})
     };
     await fs.writeFile(file, JSON.stringify(parsed, null, 2) + '\n');
   } catch {
@@ -117,6 +124,7 @@ export function createCollectedEvidenceEntries(
   const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
   const universalAstLayers = semanticImportUniversalAstLayerSummary(semanticImport);
   const traceSummary = codexBundleTraceSummary(bundle);
+  const contextBudget = contextBudgetFromBundle(bundle);
   const entries: FrontierSwarmEvidenceIndexEntryInput[] = [{
     jobId: bundle.jobId,
     queueItemId: bundle.queueItemIds[0],
@@ -131,7 +139,9 @@ export function createCollectedEvidenceEntries(
       bucket,
       ...(semanticImportQuality.expected && !semanticImportQuality.expectedSatisfied ? ['semantic-expected-unsatisfied'] : []),
       ...(semanticImportQuality.empty ? ['semantic-empty'] : []),
-      ...(semanticImportQuality.warnings.length ? ['semantic-warning'] : [])
+      ...(semanticImportQuality.warnings.length ? ['semantic-warning'] : []),
+      ...(contextBudget?.warnings.length ? ['context-budget-warning'] : []),
+      ...(contextBudget?.errors.length ? ['context-budget-failed'] : [])
     ]),
     facets: {
       bucket,
@@ -182,7 +192,13 @@ export function createCollectedEvidenceEntries(
       traceHypotheses: traceSummary.hypothesisCount,
       traceExecutableOwnershipRegions: traceSummary.executableOwnershipRegionCount,
       traceFocusedTests: traceSummary.focusedTestCount,
-      traceReferenceEvidence: traceSummary.referenceEvidenceCount
+      traceReferenceEvidence: traceSummary.referenceEvidenceCount,
+      contextBudgetStatus: contextBudget?.status ?? 'unknown',
+      contextBudgetWarnings: contextBudget?.warnings.join(',') ?? '',
+      contextBudgetErrors: contextBudget?.errors.join(',') ?? '',
+      contextBudgetPromptBytes: contextBudget?.measured.promptBytes ?? 0,
+      contextBudgetEstimatedInputTokens: contextBudget?.measured.estimatedInputTokens ?? 0,
+      contextBudgetActualInputTokens: contextBudget?.usage?.inputTokens ?? 0
     }
   }];
   for (const file of bundle.evidencePaths) {

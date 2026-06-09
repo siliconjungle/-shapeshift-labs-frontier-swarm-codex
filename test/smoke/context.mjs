@@ -107,6 +107,7 @@ export async function createSmokeContext() {
     lastMessagePath: path.join(tmp, 'last.md'),
     evidenceDir: path.join(tmp, 'evidence'),
     resourceAllocationPath: path.join(tmp, 'resource-allocation.json'),
+    contextBudgetPath: path.join(tmp, 'context-budget.json'),
     workspaceProofPath: path.join(tmp, 'workspace-proof.json'),
     patchPath: path.join(tmp, 'changes.patch'),
     mergeBundlePath: path.join(tmp, 'merge.json'),

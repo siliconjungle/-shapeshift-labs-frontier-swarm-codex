@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { applyCodexSwarmCollection, checkCodexDependencyHealth, coerceCodexSwarmManifestInput, coerceCodexSwarmTasksInput, collectCodexSwarmRun, createCodexSwarmPlan, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, writeCodexDependencyHealthReport, type FrontierCodexModelPolicy, type FrontierCodexSwarmRunOptions } from './index.js';
 import { printHelp } from './cli-help.js';
+import { contextBudgetArg } from './cli-context-budget.js';
 import { handleCodexTournamentCommand } from './tournament-query.js';
 import { handleCodexQueryCommand } from './query.js';
 import { handleCodexCleanupCommand } from './cleanup.js';
@@ -250,6 +251,7 @@ function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarmRunOpti
     maxConcurrency: numberArg(args.maxConcurrency ?? args['max-concurrency'], 1),
     adaptiveConcurrency: adaptiveConcurrencyArg(args),
     compactLogs: compactLogsArg(args),
+    contextBudget: contextBudgetArg(args),
     dependencyHealth: dependencyHealthArg(args),
     semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
     adaptiveFeedbackPath: stringArg(args.adaptiveFeedback ?? args['adaptive-feedback'] ?? args.tournamentFeedback ?? args['tournament-feedback']),

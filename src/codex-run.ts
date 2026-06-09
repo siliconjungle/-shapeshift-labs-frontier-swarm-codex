@@ -18,6 +18,7 @@ import { isObject, uniqueStrings } from './common.js';
 import { createCodexSemanticImportSidecar } from './semantic-import.js';
 import { semanticImportEnabled } from './semantic-import-quality.js';
 import { writeCodexJobEvidenceSummary, writeCodexPatchIntent } from './codex-evidence.js';
+import { readAdaptiveFeedbackObservations } from './codex-adaptive-feedback.js';
 import { discoverCodexHandoffArtifacts } from './handoff-artifacts.js';
 import {
   appendCodexPidManifest,
@@ -29,21 +30,11 @@ import { createEmptyCodexLogSummary, normalizeCompactLogOptions, spawnCodexExecu
 import { buildCodexArgs, createCodexResourceAllocation, renderCodexPrompt } from './codex-prompt.js';
 import { createCodexJobPaths } from './codex-job-paths.js';
 import { createCodexTournamentStrategyMetadata } from './codex-tournament-strategy.js';
+import { createCodexContextBudgetReport, finalizeCodexContextBudgetReport } from './context-budget.js';
 import { runCodexDependencyHealthPreflight } from './codex-run-health.js';
 import { runScheduledJobPool } from './codex-run-scheduler.js';
-import {
-  createCodexWorkspacePlan,
-  createSwarmWorkspaceProof,
-  prepareCodexWorkspace
-} from './codex-workspace.js';
-import {
-  collectChangedPaths,
-  filterWorkspaceChangedPaths,
-  runVerification,
-  shouldSnapshotWorkspaceChanges,
-  snapshotWorkspaceFiles,
-  writeCodexPatchFile
-} from './codex-workspace-changes.js';
+import { createCodexWorkspacePlan, createSwarmWorkspaceProof, prepareCodexWorkspace } from './codex-workspace.js';
+import { collectChangedPaths, filterWorkspaceChangedPaths, runVerification, shouldSnapshotWorkspaceChanges, snapshotWorkspaceFiles, writeCodexPatchFile } from './codex-workspace-changes.js';
 import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions, FrontierCodexSwarmRunResult } from './index.js';
 export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {
   const outDir = path.resolve(options.cwd ?? process.cwd(), options.outDir);
@@ -109,13 +100,6 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   return result;
 }
 
-async function readAdaptiveFeedbackObservations(options: FrontierCodexSwarmRunOptions) {
-  const observations = [...(options.adaptiveObservations ?? [])];
-  if (!options.adaptiveFeedbackPath) return observations;
-  const absolute = path.resolve(options.cwd ?? process.cwd(), options.adaptiveFeedbackPath);
-  const parsed = JSON.parse(await fs.readFile(absolute, 'utf8')) as { observations?: unknown[] };
-  return observations.concat(Array.isArray(parsed.observations) ? parsed.observations as typeof observations : []);
-}
 export async function runCodexJob(
   job: FrontierSwarmJob,
   options: FrontierCodexSwarmRunOptions,
@@ -151,6 +135,8 @@ export async function runCodexJob(
     ? await options.renderJobPrompt({ ...hookInput, prompt: basePrompt })
     : basePrompt;
   await fs.writeFile(paths.promptPath, prompt);
+  let contextBudget = createCodexContextBudgetReport({ job, prompt, workspacePlan, options: options.contextBudget });
+  await fs.writeFile(paths.contextBudgetPath, JSON.stringify(contextBudget, null, 2) + '\n');
   const args = buildCodexArgs(job, { ...options, workspacePath: workspace, paths });
   await options.onJobStarted?.({ ...hookInput, prompt, args });
   await appendFileSwarmEvent(options.eventStream, {
@@ -162,11 +148,15 @@ export async function runCodexJob(
       workspace: workspacePlan.path,
       capabilities: job.capabilities,
       resourceRequirements: job.resourceRequirements,
-      resourceAllocation
+      resourceAllocation,
+      contextBudget
     }
   });
   const startedAt = Date.now();
-  const execution = options.dryRun
+  const blockedByContextBudget = contextBudget.action === 'fail-before-launch';
+  const execution = blockedByContextBudget
+    ? { exitCode: 1, changedPaths: [], lastMessage: 'blocked by context budget', error: contextBudget.errors.join('; ') }
+    : options.dryRun
     ? { exitCode: 0, changedPaths: [] }
     : await (options.executor ?? spawnCodexExecutor)({
       job,
@@ -183,6 +173,8 @@ export async function runCodexJob(
     });
   const logSummary = execution.logSummary ?? createEmptyCodexLogSummary(paths);
   if (!execution.logSummary) await fs.writeFile(paths.logSummaryPath, JSON.stringify(logSummary, null, 2) + '\n');
+  contextBudget = await finalizeCodexContextBudgetReport(contextBudget, logSummary);
+  await fs.writeFile(paths.contextBudgetPath, JSON.stringify(contextBudget, null, 2) + '\n');
   const collected = execution.changedPaths
     ? filterWorkspaceChangedPaths(execution.changedPaths, workspacePlan)
     : options.collectGitStatus === false
@@ -222,6 +214,7 @@ export async function runCodexJob(
     paths.evidenceDir,
     evidenceSummaryPath,
     paths.resourceAllocationPath,
+    paths.contextBudgetPath,
     paths.workspaceProofPath,
     paths.mergeBundlePath,
     ...(patchPath ? [patchPath] : []),
@@ -250,6 +243,7 @@ export async function runCodexJob(
     metadata: {
       ...(lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : {}),
       resourceAllocation,
+      contextBudget,
       logSummary,
       tournamentStrategy,
       ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {}),
@@ -265,6 +259,7 @@ export async function runCodexJob(
       paths.evidenceDir,
       evidenceSummaryPath,
       paths.resourceAllocationPath,
+      paths.contextBudgetPath,
       paths.workspaceProofPath,
       paths.patchIntentPath,
       paths.logSummaryPath,
@@ -276,6 +271,7 @@ export async function runCodexJob(
     metadata: {
       tournamentStrategy,
       workspaceMode: workspacePlan.mode,
+      contextBudget,
       logSummary,
       ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {})
     }
@@ -287,6 +283,7 @@ export async function runCodexJob(
       semanticImport: semanticImportSummary
     } as unknown as FrontierSwarmMergeBundle['metadata'];
   }
+  mergeBundle.reasons = uniqueStrings([...mergeBundle.reasons, ...contextBudget.warnings, ...contextBudget.errors]);
   await fs.writeFile(paths.mergeBundlePath, JSON.stringify(mergeBundle, null, 2) + '\n');
   await writeCodexPatchIntent({
     file: paths.patchIntentPath,
@@ -296,6 +293,7 @@ export async function runCodexJob(
     patchPath,
     semanticImport: semanticImport?.sidecar,
     semanticImportExpected: options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport),
+    contextBudget,
     evidencePaths
   });
   await writeCodexJobEvidenceSummary({
@@ -307,6 +305,7 @@ export async function runCodexJob(
     patchPath,
     patchIntentPath: paths.patchIntentPath,
     logSummary,
+    contextBudget,
     semanticImportPath: semanticImport?.path,
     semanticImport: semanticImport?.sidecar,
     semanticImportExpected: options.semanticImportExpected ?? semanticImportEnabled(options.semanticImport),

@@ -6,7 +6,7 @@ import {
   FRONTIER_SWARM_CODEX_PATCH_INTENT_KIND,
   FRONTIER_SWARM_CODEX_PATCH_INTENT_VERSION
 } from './constants.js';
-import type { FrontierCodexHandoffArtifact, FrontierCodexJobEvidenceSummary, FrontierCodexLogSummary, FrontierCodexPatchHunkSummary, FrontierCodexPatchIntent, FrontierCodexSemanticImportSidecar } from './index.js';
+import type { FrontierCodexContextBudgetReport, FrontierCodexHandoffArtifact, FrontierCodexJobEvidenceSummary, FrontierCodexLogSummary, FrontierCodexPatchHunkSummary, FrontierCodexPatchIntent, FrontierCodexSemanticImportSidecar } from './index.js';
 import { firstNonEmptyLine, uniqueStrings } from './common.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 
@@ -20,6 +20,7 @@ export async function writeCodexJobEvidenceSummary(input: {
   patchPath?: string;
   patchIntentPath?: string;
   logSummary?: FrontierCodexLogSummary;
+  contextBudget?: FrontierCodexContextBudgetReport;
   semanticImportPath?: string;
   semanticImport?: FrontierCodexSemanticImportSidecar;
   semanticImportExpected?: boolean;
@@ -64,6 +65,7 @@ export async function writeCodexJobEvidenceSummary(input: {
     readyToPortHunkCount: input.mergeBundle.disposition === 'needs-port' || input.mergeBundle.disposition === 'auto-mergeable' ? patchHunks.length : 0,
     ...(input.semanticImport ? { semanticImport: input.semanticImport.summary } : {}),
     semanticImportQuality,
+    ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
     sourceCitations,
     metadata: {
       autoMergeable: input.mergeBundle.autoMergeable,
@@ -84,6 +86,7 @@ export async function writeCodexPatchIntent(input: {
   patchPath?: string;
   semanticImport?: FrontierCodexSemanticImportSidecar;
   semanticImportExpected: boolean;
+  contextBudget?: FrontierCodexContextBudgetReport;
   evidencePaths: readonly string[];
 }): Promise<void> {
   const patchHunks = input.patchPath ? await readPatchHunks(input.patchPath) : [];
@@ -93,7 +96,9 @@ export async function writeCodexPatchIntent(input: {
     ...(input.mergeBundle.staleAgainstHead ? ['stale against coordinator head'] : []),
     ...(input.mergeBundle.ownershipViolations.length ? ['ownership violations present'] : []),
     ...(input.mergeBundle.commandsFailed.length ? ['verification commands failed'] : []),
-    ...(input.mergeBundle.disposition === 'discovery-only' ? ['discovery-only output'] : [])
+    ...(input.mergeBundle.disposition === 'discovery-only' ? ['discovery-only output'] : []),
+    ...(input.contextBudget?.warnings ?? []),
+    ...(input.contextBudget?.errors ?? [])
   ]);
   const intent: FrontierCodexPatchIntent = {
     kind: FRONTIER_SWARM_CODEX_PATCH_INTENT_KIND,
@@ -124,6 +129,7 @@ export async function writeCodexPatchIntent(input: {
     })),
     evidencePaths: uniqueStrings(input.evidencePaths),
     semanticImportQuality,
+    ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
     patchHunks,
     warnings
   };

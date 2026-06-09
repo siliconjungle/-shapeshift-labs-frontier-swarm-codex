@@ -1,4 +1,5 @@
 import type { FrontierSwarmCoordinatorDashboard } from '@shapeshift-labs/frontier-swarm';
+import type { FrontierCodexContextBudgetReport } from './index.js';
 import { uniqueStrings } from './common.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 
@@ -6,17 +7,22 @@ import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.j
 export function enrichCollectedCoordinatorDashboard(
   dashboard: FrontierSwarmCoordinatorDashboard,
   qualities: ReadonlyMap<string, ReturnType<typeof summarizeCodexSemanticImportQuality>>,
-  semanticImportExpected: boolean
+  semanticImportExpected: boolean,
+  contextBudgets: ReadonlyMap<string, FrontierCodexContextBudgetReport> = new Map()
 ): FrontierSwarmCoordinatorDashboard {
   const mutable = dashboard as FrontierSwarmCoordinatorDashboard & {
-    jobs: Array<FrontierSwarmCoordinatorDashboard['jobs'][number] & { semanticImportQuality?: ReturnType<typeof summarizeCodexSemanticImportQuality> }>;
+    jobs: Array<FrontierSwarmCoordinatorDashboard['jobs'][number] & {
+      semanticImportQuality?: ReturnType<typeof summarizeCodexSemanticImportQuality>;
+      contextBudget?: FrontierCodexContextBudgetReport;
+    }>;
     summary: FrontierSwarmCoordinatorDashboard['summary'] & Record<string, unknown>;
     metadata?: Record<string, unknown>;
   };
   const semanticQualities = dashboard.jobs.map((job) => qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected));
   mutable.jobs = dashboard.jobs.map((job) => ({
     ...job,
-    semanticImportQuality: qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected)
+    semanticImportQuality: qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected),
+    ...(contextBudgets.get(job.jobId) ? { contextBudget: contextBudgets.get(job.jobId) } : {})
   }));
   mutable.summary = {
     ...dashboard.summary,

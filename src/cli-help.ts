@@ -32,6 +32,8 @@ export function printHelp(): void {
     '  --adaptive-feedback <tournament-adaptive-feedback.json>',
     '  --adaptive-min-concurrency <n> --adaptive-max-concurrency <n>',
     '  --compact-logs --max-event-bytes <n> --max-stderr-bytes <n>',
+    '  --context-budget-mode warn|fail|off --max-estimated-input-tokens <n>',
+    '  --max-prompt-bytes <n> --max-actual-input-tokens <n>',
     '  --focused-command <cmd> --global-command <cmd>',
     '  --q <text> --symbol <name> --path <substring> --bucket <name> --semantic --lineage --readiness <view>',
     '  --max-age-hours <n> --keep-failed --keep-active --write',

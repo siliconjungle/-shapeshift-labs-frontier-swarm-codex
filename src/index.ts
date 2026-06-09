@@ -16,6 +16,8 @@ import {
   FRONTIER_SWARM_CODEX_COLLECTION_VERSION,
   FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND,
   FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_VERSION,
+  FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_KIND,
+  FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_VERSION,
   FRONTIER_SWARM_CODEX_DEFAULT_MODEL,
   FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT,
   FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_KIND,
@@ -61,6 +63,8 @@ export {
   FRONTIER_SWARM_CODEX_COLLECTION_VERSION,
   FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND,
   FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_VERSION,
+  FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_KIND,
+  FRONTIER_SWARM_CODEX_CONTEXT_BUDGET_VERSION,
   FRONTIER_SWARM_CODEX_DEFAULT_MODEL,
   FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT,
   FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_KIND,
@@ -94,6 +98,12 @@ export { createCodexCleanupPlan } from './cleanup.js';
 export { queryCodexSwarmCollection } from './query.js';
 export { applyCodexSwarmCollection } from './apply.js';
 export { scoreCodexSwarmPatches } from './score.js';
+export {
+  contextBudgetFromBundle,
+  createCodexContextBudgetReport,
+  finalizeCodexContextBudgetReport,
+  normalizeContextBudgetOptions
+} from './context-budget.js';
 export { checkCodexDependencyHealth, writeCodexDependencyHealthReport } from './dependency-health.js';
 export {
   createCodexResumeOverlay,

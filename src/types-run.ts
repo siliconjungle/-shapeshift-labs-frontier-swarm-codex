@@ -62,6 +62,20 @@ export interface FrontierCodexCompactLogOptions {
   maxStderrBytes?: number;
 }
 
+export interface FrontierCodexContextBudgetOptions {
+  enabled?: boolean;
+  mode?: 'off' | 'warn' | 'fail';
+  warnPromptBytes?: number;
+  maxPromptBytes?: number;
+  warnEstimatedInputTokens?: number;
+  maxEstimatedInputTokens?: number;
+  warnActualInputTokens?: number;
+  maxActualInputTokens?: number;
+  maxSourceRefs?: number;
+  maxTargetRefs?: number;
+  maxWorkspaceIncludes?: number;
+}
+
 export interface FrontierCodexBrowserAllocation {
   required: boolean;
   portPool: string[];
@@ -85,6 +99,7 @@ export interface FrontierCodexJobPaths {
   lastMessagePath: string;
   evidenceDir: string;
   resourceAllocationPath: string;
+  contextBudgetPath: string;
   workspaceProofPath: string;
   patchPath: string;
   mergeBundlePath: string;
@@ -166,6 +181,7 @@ export interface FrontierCodexSwarmRunOptions {
   adaptiveConcurrency?: boolean | FrontierCodexAdaptiveConcurrencyOptions;
   resourceScheduling?: boolean | FrontierCodexResourceSchedulingOptions;
   compactLogs?: boolean | FrontierCodexCompactLogOptions;
+  contextBudget?: boolean | FrontierCodexContextBudgetOptions;
   dependencyHealth?: boolean | FrontierCodexDependencyHealthOptions;
   semanticImportExpected?: boolean;
   adaptiveFeedbackPath?: string;

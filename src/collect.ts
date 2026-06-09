@@ -30,6 +30,7 @@ import { copyOrWriteCollectedEvidenceSummary, createCollectedEvidenceEntries } f
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { createCodexArtifactStore } from './artifact-store.js';
 import { enrichCollectedCoordinatorDashboard } from './collect-dashboard.js';
+import { contextBudgetFromBundle } from './context-budget.js';
 
 
 export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Promise<FrontierCodexCollectResult> {
@@ -48,6 +49,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const patchStatuses: Record<string, FrontierSwarmPatchStatus> = {};
   const semanticImportExpected = input.semanticImportExpected ?? false;
   const semanticImportQualities = new Map<string, ReturnType<typeof summarizeCodexSemanticImportQuality>>();
+  const contextBudgets = new Map<string, NonNullable<ReturnType<typeof contextBudgetFromBundle>>>();
   const processes = await readCodexPidProcesses(path.join(runDir, 'pids.json')).catch(() => []);
   const mergePaths = (await findFilesByName(runDir, 'merge.json'))
     .filter((mergePath) => !pathHasIgnoredSegment(path.relative(runDir, mergePath), [
@@ -81,6 +83,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     const semanticImport = semanticImportSummaryFromBundle(bundle);
     const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
     semanticImportQualities.set(bundle.jobId, semanticImportQuality);
+    const contextBudget = contextBudgetFromBundle(bundle);
+    if (contextBudget) contextBudgets.set(bundle.jobId, contextBudget);
     const collectReasons = normalizeCollectedReasons(bundle.reasons, staleness.reasons, staleness.patchStatus, staleAgainstHead, bundle);
     const nextBundle: FrontierSwarmMergeBundle = {
       ...bundle,
@@ -165,7 +169,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     processes,
     generatedAt,
     metadata: { runDir, outDir }
-  }), semanticImportQualities, semanticImportExpected);
+  }), semanticImportQualities, semanticImportExpected, contextBudgets);
   const compactDashboard = createCodexCompactDashboard({
     runDir,
     dashboard,

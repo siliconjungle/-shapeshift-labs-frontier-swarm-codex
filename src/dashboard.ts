@@ -8,6 +8,7 @@ import { uniqueStrings } from './common.js';
 import { mergeSemanticFactSummaries } from './semantic-import-facts.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { codexJobTraceSummary, summarizeCodexTraceSummaries } from './trace-summary.js';
+import { contextBudgetFromCoordinatorJob } from './context-budget.js';
 
 
 export function createCodexCompactDashboard(input: {
@@ -31,6 +32,7 @@ export function createCodexCompactDashboard(input: {
     .map((job) => codexJobTraceSummary(job))
     .filter((entry): entry is FrontierCodexTraceSummary => Boolean(entry));
   const traceSummary = summarizeCodexTraceSummaries(traceSummaries);
+  const contextBudget = summarizeContextBudget(input.dashboard);
   const usefulPatchJobs = input.dashboard.jobs.filter((job) => (
     (job.disposition === 'auto-mergeable' || job.disposition === 'needs-port')
     && job.changedPaths.length > 0
@@ -47,6 +49,7 @@ export function createCodexCompactDashboard(input: {
       mergeScore: job.mergeScore,
       changedPaths: job.changedPaths.slice(0, 12),
       semanticImportQuality: qualities.get(job.jobId),
+      ...(contextBudgetFromCoordinatorJob(job) ? { contextBudget: contextBudgetFromCoordinatorJob(job) } : {}),
       ...(codexJobTraceSummary(job) ? { traceSummary: codexJobTraceSummary(job) } : {}),
       staleAgainstHead: job.staleAgainstHead,
       ...(job.duplicateGroupId ? { duplicateGroupId: job.duplicateGroupId } : {}),
@@ -113,6 +116,7 @@ export function createCodexCompactDashboard(input: {
       divergenceCount: traceSummary.divergenceCount,
       openDivergenceCount: traceSummary.openDivergenceCount
     },
+    contextBudget,
     evidence: {
       readyToApply: input.dashboard.summary.readyToApplyCount,
       needsHumanPort: input.dashboard.summary.needsHumanPortCount,
@@ -120,6 +124,24 @@ export function createCodexCompactDashboard(input: {
       averageMergeScore: input.dashboard.summary.averageMergeScore
     },
     topJobs
+  };
+}
+
+function summarizeContextBudget(dashboard: FrontierSwarmCoordinatorDashboard): FrontierCodexCompactDashboard['contextBudget'] {
+  const entries = dashboard.evidenceIndex?.entries ?? [];
+  const facets = entries.map((entry) => entry.facets ?? {});
+  const statuses = facets.map((entry) => String(entry.contextBudgetStatus ?? 'unknown'));
+  const promptBytes = facets.map((entry) => Number(entry.contextBudgetPromptBytes ?? 0));
+  const estimatedTokens = facets.map((entry) => Number(entry.contextBudgetEstimatedInputTokens ?? 0));
+  const actualTokens = facets.map((entry) => Number(entry.contextBudgetActualInputTokens ?? 0));
+  return {
+    warningCount: statuses.filter((status) => status === 'warning').length,
+    failedCount: statuses.filter((status) => status === 'failed').length,
+    jobsWithActualUsage: actualTokens.filter((value) => value > 0).length,
+    maxPromptBytes: Math.max(0, ...promptBytes),
+    maxEstimatedInputTokens: Math.max(0, ...estimatedTokens),
+    maxActualInputTokens: Math.max(0, ...actualTokens),
+    warnings: uniqueStrings(facets.flatMap((entry) => String(entry.contextBudgetWarnings ?? '').split(',').filter(Boolean)))
   };
 }
 

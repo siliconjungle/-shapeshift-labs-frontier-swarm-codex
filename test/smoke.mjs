@@ -19,12 +19,14 @@ import { testSemanticImportQuality } from './smoke/semantic-import-quality.mjs';
 import { testSemanticLineageCollection } from './smoke/semantic-lineage-collection.mjs';
 import { testSwarmRunCollection } from './smoke/swarm-run-collection.mjs';
 import { testTournamentCli } from './smoke/tournament-cli.mjs';
+import { testContextBudget } from './smoke/context-budget.mjs';
 
 const context = await createSmokeContext();
 
 await testPlanningAndLinks(context);
 await testResourceAwareScheduling(context);
 await testCompactLogTruncation(context);
+await testContextBudget(context);
 await testSemanticImportSelection(context);
 await testSemanticImportBaseLineage(context);
 const { mergeBundle } = await testSwarmRunCollection(context);

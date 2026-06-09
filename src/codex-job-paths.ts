@@ -17,6 +17,7 @@ export async function createCodexJobPaths(
     lastMessagePath: path.join(jobDir, 'last-message.md'),
     evidenceDir: path.join(jobDir, 'evidence'),
     resourceAllocationPath: path.join(jobDir, 'evidence', 'resource-allocation.json'),
+    contextBudgetPath: path.join(jobDir, 'evidence', 'context-budget.json'),
     workspaceProofPath: path.join(jobDir, 'evidence', 'workspace-proof.json'),
     patchPath: path.join(jobDir, 'evidence', 'changes.patch'),
     mergeBundlePath: path.join(jobDir, 'evidence', 'merge.json'),
