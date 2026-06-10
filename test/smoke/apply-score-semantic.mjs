@@ -47,6 +47,19 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
       metadata: { semanticImport: semanticEditConflictImport(readySemanticImport) }
     }
   });
+  await writeSemanticFixture({
+    collection,
+    readyDir,
+    bundle: {
+      ...baseBundle,
+      id: 'semantic-edit-portable-bundle',
+      jobId: 'semantic-edit-portable-job',
+      taskId: 'semantic-edit-portable-task',
+      queueItemIds: ['semantic-edit-portable-task'],
+      semanticImport: semanticEditPortableImport(readySemanticImport),
+      metadata: { semanticImport: semanticEditPortableImport(readySemanticImport) }
+    }
+  });
   const score = await scoreCodexSwarmPatches({
     collection,
     cwd: applyRepo,
@@ -55,6 +68,7 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   });
   const byJob = new Map(score.entries.map((entry) => [entry.jobId, entry]));
   assert.strictEqual(score.ok, true);
+  assert.strictEqual(score.summary['accepted-clean'], 1);
   assert.strictEqual(score.summary['accepted-needs-port'], 3);
   assert.strictEqual(byJob.get('empty-semantic-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('empty-semantic-job').semanticEvidence.cleanEligible, false);
@@ -67,6 +81,10 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   assert.strictEqual(byJob.get('semantic-edit-conflict-job').semanticEvidence.cleanEligible, false);
   assert.strictEqual(byJob.get('semantic-edit-conflict-job').semanticEvidence.semanticEditScript.conflicts, 1);
   assert.ok(byJob.get('semantic-edit-conflict-job').reasons.includes('semantic edit script conflicts: 1'));
+  assert.strictEqual(byJob.get('semantic-edit-portable-job').status, 'accepted-clean');
+  assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.cleanEligible, true);
+  assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.semanticEditScript.portable, 1);
+  assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.semanticEditScript.autoMergeCandidates, 1);
 }
 
 async function writeSemanticFixture({ collection, readyDir, bundle }) {
@@ -133,6 +151,33 @@ function semanticEditConflictImport(readySemanticImport) {
     reasonCodes: ['head-anchor-changed-since-base'],
     conflictKeys: ['region:source#src/apply.ts#body#apply'],
     evidenceIds: ['evidence_semantic_edit_conflict'],
+    empty: false
+  };
+  return semanticImport;
+}
+
+function semanticEditPortableImport(readySemanticImport) {
+  const semanticImport = JSON.parse(JSON.stringify(readySemanticImport));
+  semanticImport.semanticEditScripts = {
+    total: 1,
+    operations: 1,
+    autoMergeCandidates: 1,
+    portable: 1,
+    alreadyApplied: 0,
+    needsPort: 0,
+    conflicts: 0,
+    stale: 0,
+    blocked: 0,
+    candidates: 0,
+    reviewRequired: 0,
+    autoApplyCandidates: 1,
+    byStatus: { portable: 1 },
+    byKind: { replaceBody: 1 },
+    admission: { 'auto-merge-candidate': 1, portable: 1 },
+    actions: ['apply'],
+    reasonCodes: [],
+    conflictKeys: [],
+    evidenceIds: ['evidence_semantic_edit_portable'],
     empty: false
   };
   return semanticImport;

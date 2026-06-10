@@ -256,6 +256,27 @@ export interface FrontierCodexPatchScoreEntry {
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
 }
 
+export interface FrontierCodexPatchScoreCalibration {
+  source: 'apply-ledger' | 'none';
+  applyLedgerPath?: string;
+  landedJobIds: string[];
+  predictedCleanJobIds: string[];
+  truePositiveCleanJobIds: string[];
+  falsePositiveCleanJobIds: string[];
+  falseNegativeCleanJobIds: string[];
+  landedNeedsPortJobIds: string[];
+  precision: number;
+  recall: number;
+  summary: {
+    landed: number;
+    predictedClean: number;
+    truePositiveClean: number;
+    falsePositiveClean: number;
+    falseNegativeClean: number;
+    landedNeedsPort: number;
+  };
+}
+
 export interface FrontierCodexPatchScoreResult {
   kind: typeof FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND;
   version: typeof FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION;
@@ -266,6 +287,7 @@ export interface FrontierCodexPatchScoreResult {
   generatedAt: number;
   entries: FrontierCodexPatchScoreEntry[];
   summary: Record<FrontierCodexPatchScoreStatus, number> & { total: number };
+  calibration: FrontierCodexPatchScoreCalibration;
 }
 
 export type FrontierCodexHandoffArtifactKind =

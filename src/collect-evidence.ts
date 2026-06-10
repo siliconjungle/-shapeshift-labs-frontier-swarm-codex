@@ -10,6 +10,7 @@ import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradi
 import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers.js';
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
+import { semanticEditScriptFacets, semanticEditScriptTags } from './semantic-edit-admission.js';
 import { codexBundleTraceSummary } from './trace-summary.js';
 import { contextBudgetFromBundle } from './context-budget.js';
 
@@ -104,6 +105,7 @@ async function augmentCollectedEvidenceSummary(
     parsed.metadata = {
       ...(isObject(parsed.metadata) ? parsed.metadata : {}),
       semanticImportQuality: input.semanticImportQuality,
+      semanticEditScript: input.semanticImportQuality.semanticEditScript,
       ...(input.contextBudget ? { contextBudget: input.contextBudget } : {})
     };
     await fs.writeFile(file, JSON.stringify(parsed, null, 2) + '\n');
@@ -140,6 +142,7 @@ export function createCollectedEvidenceEntries(
       ...(semanticImportQuality.expected && !semanticImportQuality.expectedSatisfied ? ['semantic-expected-unsatisfied'] : []),
       ...(semanticImportQuality.empty ? ['semantic-empty'] : []),
       ...(semanticImportQuality.warnings.length ? ['semantic-warning'] : []),
+      ...semanticEditScriptTags(semanticImportQuality.semanticEditScript),
       ...(contextBudget?.warnings.length ? ['context-budget-warning'] : []),
       ...(contextBudget?.errors.length ? ['context-budget-failed'] : [])
     ]),
@@ -185,6 +188,7 @@ export function createCollectedEvidenceEntries(
       semanticLineageNeedsReview: semanticImportQuality.semanticLineageNeedsReview,
       semanticLineageEventKinds: semanticImportQuality.semanticLineageEventKinds.join(','),
       semanticLineageReasonCodes: semanticImportQuality.semanticLineageReasonCodes.join(','),
+      ...semanticEditScriptFacets(semanticImportQuality.semanticEditScript),
       traceShards: traceSummary.shardCount,
       traceDivergences: traceSummary.divergenceCount,
       traceOpenDivergences: traceSummary.openDivergenceCount,

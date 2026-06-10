@@ -36,6 +36,7 @@ export function printHelp(): void {
     '  --max-prompt-bytes <n> --max-actual-input-tokens <n>',
     '  --focused-command <cmd> --global-command <cmd>',
     '  --q <text> --symbol <name> --path <substring> --bucket <name> --semantic --lineage --readiness <view>',
+    '  --semantic-edit-status conflict|portable|stale --semantic-edit-admission auto-merge-candidate|needs-port',
     '  --max-age-hours <n> --keep-failed --keep-active --write',
     '  --package-root <dir> --exclude-package <name> --write --replace',
     '  --resume-overlay <file> --include-failed=false --include-blocked=false',

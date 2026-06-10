@@ -4,6 +4,11 @@ import { FRONTIER_SWARM_CODEX_QUERY_KIND, FRONTIER_SWARM_CODEX_QUERY_VERSION } f
 import type { FrontierCodexArtifactRecord } from './index.js';
 import { isObject, pathExists, uniqueStrings } from './common.js';
 import { readCodexArtifactRecords } from './artifact-store.js';
+import {
+  semanticEditScriptFromUnknown,
+  semanticEditScriptHasAdmission,
+  semanticEditScriptHasStatus
+} from './semantic-edit-admission.js';
 
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
@@ -21,6 +26,8 @@ export interface FrontierCodexQueryInput {
   stale?: boolean;
   semantic?: boolean;
   lineage?: boolean;
+  semanticEditStatus?: string;
+  semanticEditAdmission?: string;
   readiness?: string;
   passedTests?: boolean;
   limit?: number;
@@ -76,6 +83,8 @@ export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
     stale: optionalBoolArg(args.stale),
     semantic: optionalBoolArg(args.semantic),
     lineage: optionalBoolArg(args.lineage ?? args['semantic-lineage']),
+    semanticEditStatus: stringArg(args.semanticEditStatus ?? args['semantic-edit-status']),
+    semanticEditAdmission: stringArg(args.semanticEditAdmission ?? args['semantic-edit-admission']),
     readiness: stringArg(args.readiness ?? args.view),
     passedTests: optionalBoolArg(args.passedTests ?? args['passed-tests']),
     limit: numberArg(args.limit)
@@ -108,6 +117,7 @@ function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput
     && (input.stale === undefined || Boolean(job.staleAgainstHead) === input.stale)
     && (input.semantic === undefined || Boolean(job.semanticImport) === input.semantic || Boolean(job.semanticImportQuality) === input.semantic)
     && (input.lineage === undefined || jobHasLineage(job) === input.lineage)
+    && matchesSemanticEdit(jobSemanticEditScript(job), input, haystack)
     && (input.readiness === undefined || matchesReadiness(job, input.readiness))
     && (input.passedTests === undefined || testsPassed(job) === input.passedTests);
 }
@@ -122,7 +132,8 @@ function matchesArtifact(record: FrontierCodexArtifactRecord, input: FrontierCod
     && (input.symbol === undefined || haystack.includes(input.symbol.toLowerCase()))
     && (input.tag === undefined || record.tags.includes(input.tag))
     && (input.semantic === undefined || record.tags.includes('semantic-sidecar') === input.semantic)
-    && (input.lineage === undefined || textHasLineage(haystack) === input.lineage);
+    && (input.lineage === undefined || textHasLineage(haystack) === input.lineage)
+    && matchesSemanticEdit(undefined, input, haystack);
 }
 
 function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQueryInput): boolean {
@@ -134,7 +145,8 @@ function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQue
     && (input.pathIncludes === undefined || String(entry.path ?? '').includes(input.pathIncludes))
     && (input.symbol === undefined || haystack.includes(input.symbol.toLowerCase()))
     && (input.tag === undefined || Array.isArray(entry.tags) && entry.tags.includes(input.tag))
-    && (input.lineage === undefined || textHasLineage(haystack) === input.lineage);
+    && (input.lineage === undefined || textHasLineage(haystack) === input.lineage)
+    && matchesEvidenceSemanticEdit(entry, input, haystack);
 }
 
 function matchesText(haystack: string, input: FrontierCodexQueryInput): boolean {
@@ -152,6 +164,55 @@ function jobHasLineage(job: Record<string, unknown>): boolean {
     Number(quality.semanticLineageMoved ?? 0) > 0 ||
     Number(quality.semanticLineageRenamed ?? 0) > 0 ||
     Number(quality.semanticLineageDeleted ?? 0) > 0;
+}
+
+function jobSemanticEditScript(job: Record<string, unknown>): unknown {
+  const quality = isObject(job.semanticImportQuality) ? job.semanticImportQuality : {};
+  const semanticImport = isObject(job.semanticImport) ? job.semanticImport : {};
+  return quality.semanticEditScript ?? semanticImport.semanticEditScripts ?? semanticImport.semanticEditScript;
+}
+
+function matchesSemanticEdit(scriptValue: unknown, input: FrontierCodexQueryInput, haystack: string): boolean {
+  if (input.semanticEditStatus === undefined && input.semanticEditAdmission === undefined) return true;
+  const hasScript = scriptValue !== undefined;
+  const script = scriptValue === undefined ? undefined : semanticEditScriptFromUnknown(scriptValue);
+  return (input.semanticEditStatus === undefined || semanticEditScriptHasStatus(script, input.semanticEditStatus) || !hasScript && semanticEditTextMatch(haystack, input.semanticEditStatus))
+    && (input.semanticEditAdmission === undefined || semanticEditScriptHasAdmission(script, input.semanticEditAdmission) || !hasScript && semanticEditTextMatch(haystack, input.semanticEditAdmission));
+}
+
+function matchesEvidenceSemanticEdit(entry: Record<string, unknown>, input: FrontierCodexQueryInput, haystack: string): boolean {
+  const facets = isObject(entry.facets) ? entry.facets : {};
+  return matchesSemanticEdit(facetsToSemanticEditScript(facets), input, haystack);
+}
+
+function facetsToSemanticEditScript(facets: Record<string, unknown>): unknown {
+  return {
+    total: facets.semanticEditScriptTotal,
+    operations: facets.semanticEditScriptOperations,
+    autoMergeCandidates: facets.semanticEditScriptAutoMergeCandidates,
+    portable: facets.semanticEditScriptPortable,
+    alreadyApplied: facets.semanticEditScriptAlreadyApplied,
+    needsPort: facets.semanticEditScriptNeedsPort,
+    conflicts: facets.semanticEditScriptConflicts,
+    stale: facets.semanticEditScriptStale,
+    blocked: facets.semanticEditScriptBlocked,
+    candidates: facets.semanticEditScriptCandidates,
+    reviewRequired: facets.semanticEditScriptReviewRequired,
+    autoApplyCandidates: facets.semanticEditScriptAutoApplyCandidates,
+    byStatus: csvRecord(facets.semanticEditScriptStatuses),
+    admission: csvRecord(facets.semanticEditScriptAdmissions)
+  };
+}
+
+function csvRecord(value: unknown): Record<string, number> {
+  return String(value ?? '').split(',').filter(Boolean).reduce<Record<string, number>>((out, key) => {
+    out[key] = 1;
+    return out;
+  }, {});
+}
+
+function semanticEditTextMatch(haystack: string, value: string): boolean {
+  return haystack.includes(value.toLowerCase()) || haystack.includes(value.toLowerCase().replace(/-/g, ''));
 }
 
 function textHasLineage(haystack: string): boolean {

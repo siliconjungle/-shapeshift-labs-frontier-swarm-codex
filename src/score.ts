@@ -8,6 +8,7 @@ import { copyWorkspacePath, findFilesByName, pathExists, pathHasIgnoredSegment, 
 import { collectCodexSwarmRun } from './collect.js';
 import { summarizePatchScoreSemanticEvidence } from './patch-score-semantic.js';
 import { contextBudgetFromBundle } from './context-budget.js';
+import { calibratePatchScores } from './score-calibration.js';
 
 
 export async function scoreCodexSwarmPatches(input: FrontierCodexPatchScoreInput): Promise<FrontierCodexPatchScoreResult> {
@@ -31,6 +32,8 @@ export async function scoreCodexSwarmPatches(input: FrontierCodexPatchScoreInput
   }
   const statuses: FrontierCodexPatchScoreStatus[] = ['accepted-clean', 'accepted-needs-port', 'conflict', 'test-fail', 'stale', 'evidence-only'];
   const summary = Object.fromEntries(statuses.map((status) => [status, entries.filter((entry) => entry.status === status).length])) as Record<FrontierCodexPatchScoreStatus, number>;
+  const sortedEntries = entries.sort((left, right) => right.score - left.score || left.jobId.localeCompare(right.jobId));
+  const calibration = await calibratePatchScores({ collectionDir, entries: sortedEntries });
   const result: FrontierCodexPatchScoreResult = {
     kind: FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND,
     version: FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION,
@@ -39,8 +42,9 @@ export async function scoreCodexSwarmPatches(input: FrontierCodexPatchScoreInput
     collectionDir,
     outDir,
     generatedAt,
-    entries: entries.sort((left, right) => right.score - left.score || left.jobId.localeCompare(right.jobId)),
-    summary: { ...summary, total: entries.length }
+    entries: sortedEntries,
+    summary: { ...summary, total: entries.length },
+    calibration
   };
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'patch-score.json'), JSON.stringify(result, null, 2) + '\n');

@@ -9,6 +9,7 @@ import type {
   FRONTIER_SWARM_CODEX_PATCH_INTENT_VERSION
 } from './constants.js';
 import type { FrontierCodexHandoffArtifact } from './types-collection.js';
+import type { FrontierCodexSemanticEditScriptSummary } from './types-semantic-edit.js';
 import type { FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './types-semantic.js';
 
 export interface FrontierCodexPatchHunkSummary {
@@ -199,6 +200,7 @@ export interface FrontierCodexCompactDashboard {
     semanticLineageNeedsReview: number;
     semanticLineageEventKinds: string[];
     semanticLineageReasonCodes: string[];
+    semanticEditScripts: FrontierCodexSemanticEditScriptSummary;
   };
   trace: {
     shardCount: number;

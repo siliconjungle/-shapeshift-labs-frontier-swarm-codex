@@ -149,6 +149,7 @@ export async function testApplyAndScore({ tmp }, mergeBundle) {
     /dirty worktree/
   );
   await testCommitApply(tmp);
+  await testScoreCalibration(applyRepo, tmp);
 }
 
 async function testScoreIndexOnlyCollection(applyRepo, tmp, readyDir) {
@@ -294,4 +295,17 @@ async function testCommitApply(tmp) {
   assert.strictEqual(await fs.readFile(path.join(cleanApplyRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
   assert.strictEqual((await execFileP('git', ['branch', '--show-current'], { cwd: cleanApplyRepo })).stdout.trim(), 'codex/tiny/apply-job');
   assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: cleanApplyRepo })).stdout, '');
+}
+
+async function testScoreCalibration(applyRepo, tmp) {
+  const patchScore = await scoreCodexSwarmPatches({
+    collection: path.join(tmp, 'ready-collection'),
+    cwd: applyRepo,
+    workspaceIncludes: ['src']
+  });
+  assert.strictEqual(patchScore.calibration.source, 'apply-ledger');
+  assert.deepStrictEqual(patchScore.calibration.landedJobIds, ['apply-job']);
+  assert.deepStrictEqual(patchScore.calibration.truePositiveCleanJobIds, ['apply-job']);
+  assert.strictEqual(patchScore.calibration.precision, 1);
+  assert.strictEqual(patchScore.calibration.recall, 1);
 }

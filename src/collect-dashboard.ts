@@ -2,6 +2,7 @@ import type { FrontierSwarmCoordinatorDashboard } from '@shapeshift-labs/frontie
 import type { FrontierCodexContextBudgetReport } from './index.js';
 import { uniqueStrings } from './common.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
+import { mergeSemanticEditScriptSummaries } from './semantic-edit-script.js';
 
 
 export function enrichCollectedCoordinatorDashboard(
@@ -19,6 +20,7 @@ export function enrichCollectedCoordinatorDashboard(
     metadata?: Record<string, unknown>;
   };
   const semanticQualities = dashboard.jobs.map((job) => qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected));
+  const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
   mutable.jobs = dashboard.jobs.map((job) => ({
     ...job,
     semanticImportQuality: qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected),
@@ -42,6 +44,11 @@ export function enrichCollectedCoordinatorDashboard(
     semanticLineageRenamed: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageRenamed, 0),
     semanticLineageDeleted: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageDeleted, 0),
     semanticLineageBlocked: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageBlocked, 0),
+    semanticEditScriptAutoMergeCandidates: semanticEditScripts.autoMergeCandidates,
+    semanticEditScriptConflicts: semanticEditScripts.conflicts,
+    semanticEditScriptStale: semanticEditScripts.stale,
+    semanticEditScriptNeedsPort: semanticEditScripts.needsPort,
+    semanticEditScriptPortable: semanticEditScripts.portable,
     semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
   };
   mutable.metadata = {
@@ -74,6 +81,7 @@ function semanticImportMetadata(
     semanticLineageRenamed: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageRenamed, 0),
     semanticLineageDeleted: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageDeleted, 0),
     semanticLineageBlocked: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageBlocked, 0),
+    semanticEditScripts: { ...mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript)) },
     semanticLineageEventKinds: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageEventKinds)),
     warningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
     warnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings))

@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { collectCodexSwarmRun, fs, path } from './context.mjs';
+import { collectCodexSwarmRun, fs, path, queryCodexSwarmCollection } from './context.mjs';
 
 const EXPECTED_ZERO_LINEAGE_WARNING = 'semantic import has symbols but no inferred semantic lineage for expected before-source diff';
 
@@ -57,6 +57,19 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     semanticImport: zeroLineageSemanticImportSummary(),
     metadata: { semanticImport: zeroLineageSemanticImportSummary() }
   }, null, 2) + '\n');
+  const editScriptJobDir = path.join(runDir, 'semantic-edit-script-worker');
+  await fs.mkdir(editScriptJobDir, { recursive: true });
+  await fs.writeFile(path.join(editScriptJobDir, 'merge.json'), JSON.stringify({
+    ...mergeBundle,
+    id: 'semantic-edit-script-worker-bundle',
+    jobId: 'semantic-edit-script-worker',
+    taskId: 'semantic-edit-script-task',
+    changedPaths: ['src/runtime/edit-script.ts'],
+    evidencePaths: ['semantic-imports.json'],
+    patchPath: undefined,
+    semanticImport: editScriptSemanticImportSummary(),
+    metadata: { semanticImport: editScriptSemanticImportSummary() }
+  }, null, 2) + '\n');
   const collection = await collectCodexSwarmRun({
     run: runDir,
     checkStale: false,
@@ -70,14 +83,17 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   const factQuality = qualityByJob.get('fact-semantic-worker');
   const zeroLineageQuality = qualityByJob.get('zero-lineage-semantic-worker');
   assert.strictEqual(semanticImport.expectedUnsatisfiedCount, 2);
-  assert.strictEqual(semanticImport.semanticFactCount, 3);
+  assert.strictEqual(semanticImport.semanticFactCount, 6);
   assert.ok(semanticImport.semanticFactPredicates.includes('controlFlow'));
-  assert.strictEqual(semanticImport.semanticFactSummary.effect, 1);
+  assert.strictEqual(semanticImport.semanticFactSummary.effect, 2);
   assert.ok(semanticImport.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
   assert.ok(semanticImport.expectedMissingReasonCodes.includes('expected-semantic-import-missing'));
   assert.ok(semanticImport.warnings.includes('semantic import expected but empty'));
   assert.ok(semanticImport.warnings.includes('semantic import expected but missing'));
   assert.ok(semanticImport.warnings.includes(EXPECTED_ZERO_LINEAGE_WARNING));
+  assert.strictEqual(semanticImport.semanticEditScripts.conflicts, 1);
+  assert.strictEqual(semanticImport.semanticEditScripts.autoMergeCandidates, 1);
+  assert.strictEqual(semanticImport.semanticEditScripts.portable, 1);
   assert.strictEqual(emptyQuality.expectedSatisfied, false);
   assert.ok(emptyQuality.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
   assert.ok(emptyQuality.warnings.includes('semantic import expected but empty'));
@@ -107,7 +123,22 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.strictEqual(queryQualityByJob.get('fact-semantic-worker').semanticFacts, 3);
   assert.strictEqual(queryQualityByJob.get('zero-lineage-semantic-worker').expectedSatisfied, true);
   assert.ok(queryQualityByJob.get('zero-lineage-semantic-worker').warnings.includes(EXPECTED_ZERO_LINEAGE_WARNING));
-  assert.strictEqual(coordinatorQuery.summary.semanticImportFactCount, 3);
+  assert.strictEqual(coordinatorQuery.summary.semanticImportFactCount, 6);
+  assert.strictEqual(coordinatorQuery.summary.semanticEditScriptConflicts, 1);
+
+  const conflictQuery = await queryCodexSwarmCollection({
+    collection: collection.outDir,
+    semanticEditStatus: 'conflict'
+  });
+  assert.strictEqual(conflictQuery.jobs.length, 1);
+  assert.strictEqual(conflictQuery.jobs[0].jobId, 'semantic-edit-script-worker');
+  assert.ok(conflictQuery.evidence.some((entry) => entry.jobId === 'semantic-edit-script-worker'));
+  const admissionQuery = await queryCodexSwarmCollection({
+    collection: collection.outDir,
+    semanticEditAdmission: 'auto-merge-candidate'
+  });
+  assert.strictEqual(admissionQuery.jobs.length, 1);
+  assert.strictEqual(admissionQuery.jobs[0].jobId, 'semantic-edit-script-worker');
 }
 
 function emptyExpectedSemanticImportSummary() {
@@ -181,5 +212,33 @@ function zeroLineageSemanticImportSummary() {
     semanticImportExpected: true,
     semanticImportExpectedSatisfied: true,
     semanticImportExpectedMissingReasonCodes: []
+  };
+}
+
+function editScriptSemanticImportSummary() {
+  return {
+    ...factSemanticImportSummary(),
+    semanticEditScripts: {
+      total: 2,
+      operations: 2,
+      autoMergeCandidates: 1,
+      portable: 1,
+      alreadyApplied: 0,
+      needsPort: 0,
+      conflicts: 1,
+      stale: 0,
+      blocked: 0,
+      candidates: 0,
+      reviewRequired: 1,
+      autoApplyCandidates: 1,
+      byStatus: { conflict: 1, portable: 1 },
+      byKind: { replaceBody: 2 },
+      admission: { conflict: 1, 'auto-merge-candidate': 1 },
+      actions: ['block', 'apply'],
+      reasonCodes: ['head-anchor-changed-since-base'],
+      conflictKeys: ['region:source#src/runtime/edit-script.ts#body#run'],
+      evidenceIds: ['evidence_semantic_edit_script'],
+      empty: false
+    }
   };
 }
