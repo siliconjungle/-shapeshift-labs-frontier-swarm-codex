@@ -172,6 +172,8 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.editCount, 1);
   assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.appliedEditCount, 1);
   assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.replacementBytes, 4);
+  assert.deepStrictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.symbolNames, ['apply']);
+  assert.deepStrictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.sourcePaths, ['src/apply.ts']);
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').semanticEvidence.semanticEditOperationCleanEligible, false);
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').semanticEvidence.semanticEditProjection.blocked, 1);

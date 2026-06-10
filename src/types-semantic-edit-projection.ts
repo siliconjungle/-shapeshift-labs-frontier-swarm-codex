@@ -10,6 +10,10 @@ export interface FrontierCodexSemanticEditProjectionSummary {
   alreadyAppliedEditCount: number;
   deletedBytes: number;
   replacementBytes: number;
+  anchorKeys: string[];
+  conflictKeys: string[];
+  symbolNames: string[];
+  sourcePaths: string[];
   projectedSourceMatchesWorker: number;
   projectedSourceMismatchesWorker: number;
   projectedSourceMatchUnknown: number;

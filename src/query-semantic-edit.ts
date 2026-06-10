@@ -1,4 +1,4 @@
-import { isObject, nonNegativeNumber } from './common.js';
+import { isObject, nonNegativeNumber, readStringArray, uniqueStrings } from './common.js';
 import {
   canonicalSemanticEditStatus,
   classifySemanticEditScriptAdmission,
@@ -23,6 +23,10 @@ export interface SemanticEditProjectionQuerySummary {
   alreadyAppliedEdits: number;
   deletedBytes: number;
   replacementBytes: number;
+  anchorKeys: string[];
+  conflictKeys: string[];
+  symbolNames: string[];
+  sourcePaths: string[];
   workerMatches: number;
   workerMismatches: number;
   workerUnknown: number;
@@ -115,6 +119,10 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     out.alreadyAppliedEdits += nonNegativeNumber(projection.alreadyAppliedEditCount);
     out.deletedBytes += nonNegativeNumber(projection.deletedBytes);
     out.replacementBytes += nonNegativeNumber(projection.replacementBytes);
+    out.anchorKeys = uniqueStrings([...out.anchorKeys, ...readStringArray(projection.anchorKeys)]);
+    out.conflictKeys = uniqueStrings([...out.conflictKeys, ...readStringArray(projection.conflictKeys)]);
+    out.symbolNames = uniqueStrings([...out.symbolNames, ...readStringArray(projection.symbolNames)]);
+    out.sourcePaths = uniqueStrings([...out.sourcePaths, ...readStringArray(projection.sourcePaths)]);
     out.workerMatches += nonNegativeNumber(projection.projectedSourceMatchesWorker);
     out.workerMismatches += nonNegativeNumber(projection.projectedSourceMismatchesWorker);
     out.workerUnknown += nonNegativeNumber(projection.projectedSourceMatchUnknown);
@@ -127,6 +135,10 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     alreadyAppliedEdits: 0,
     deletedBytes: 0,
     replacementBytes: 0,
+    anchorKeys: [],
+    conflictKeys: [],
+    symbolNames: [],
+    sourcePaths: [],
     workerMatches: 0,
     workerMismatches: 0,
     workerUnknown: 0

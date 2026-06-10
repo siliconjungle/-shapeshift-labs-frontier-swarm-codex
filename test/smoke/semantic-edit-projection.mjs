@@ -21,6 +21,10 @@ export async function testSemanticEditProjectionSummary() {
       headEnd: 14,
       workerStart: 10,
       workerEnd: 18,
+      anchorKey: 'source#src/runtime.ts#function#run',
+      conflictKey: 'region:source#src/runtime.ts#function#run',
+      symbolName: 'run',
+      sourcePath: 'src/runtime.ts',
       deletedBytes: 4,
       replacementBytes: 8,
       replacementTextHash: 'hash:replacement'
@@ -33,9 +37,14 @@ export async function testSemanticEditProjectionSummary() {
   assert.strictEqual(summary.alreadyAppliedEditCount, 0);
   assert.strictEqual(summary.deletedBytes, 4);
   assert.strictEqual(summary.replacementBytes, 8);
+  assert.deepStrictEqual(summary.anchorKeys, ['source#src/runtime.ts#function#run']);
+  assert.deepStrictEqual(summary.conflictKeys, ['region:source#src/runtime.ts#function#run']);
+  assert.deepStrictEqual(summary.symbolNames, ['run']);
+  assert.deepStrictEqual(summary.sourcePaths, ['src/runtime.ts']);
   assert.strictEqual(summary.projectedSourceMatchesWorker, 1);
   const merged = mergeSemanticEditProjectionSummaries([emptySemanticEditProjectionSummary(), summary]);
   assert.strictEqual(merged.editCount, 1);
   assert.strictEqual(merged.replacementBytes, 8);
+  assert.deepStrictEqual(merged.anchorKeys, ['source#src/runtime.ts#function#run']);
   assert.strictEqual(merged.empty, false);
 }

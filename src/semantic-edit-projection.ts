@@ -36,6 +36,10 @@ export function mergeSemanticEditProjectionSummaries(
     }
     mergeNumberRecord(merged.statusCounts, entry.statusCounts);
     mergeNumberRecord(merged.admission, entry.admission);
+    merged.anchorKeys = uniqueStrings([...merged.anchorKeys, ...entry.anchorKeys]);
+    merged.conflictKeys = uniqueStrings([...merged.conflictKeys, ...entry.conflictKeys]);
+    merged.symbolNames = uniqueStrings([...merged.symbolNames, ...entry.symbolNames]);
+    merged.sourcePaths = uniqueStrings([...merged.sourcePaths, ...entry.sourcePaths]);
     merged.reasonCodes = uniqueStrings([...merged.reasonCodes, ...entry.reasonCodes]);
   }
   merged.empty = merged.total === 0;
@@ -55,6 +59,10 @@ export function emptySemanticEditProjectionSummary(): FrontierCodexSemanticEditP
     alreadyAppliedEditCount: 0,
     deletedBytes: 0,
     replacementBytes: 0,
+    anchorKeys: [],
+    conflictKeys: [],
+    symbolNames: [],
+    sourcePaths: [],
     projectedSourceMatchesWorker: 0,
     projectedSourceMismatchesWorker: 0,
     projectedSourceMatchUnknown: 0,
@@ -75,6 +83,7 @@ function normalizeProjectionRecord(record: Record<string, unknown>): FrontierCod
   const projected = nonNegativeNumber(record.projected) || nonNegativeNumber(statusCounts.projected);
   const workerMatch = projectedWorkerMatchCounts(record, status, projected);
   const editSummary = projectionEditSummary(record);
+  const editIdentity = projectionEditIdentity(record);
   return {
     total,
     projected,
@@ -87,6 +96,10 @@ function normalizeProjectionRecord(record: Record<string, unknown>): FrontierCod
     alreadyAppliedEditCount: editSummary.alreadyAppliedEditCount,
     deletedBytes: editSummary.deletedBytes,
     replacementBytes: editSummary.replacementBytes,
+    anchorKeys: editIdentity.anchorKeys,
+    conflictKeys: editIdentity.conflictKeys,
+    symbolNames: editIdentity.symbolNames,
+    sourcePaths: editIdentity.sourcePaths,
     projectedSourceMatchesWorker: workerMatch.matches,
     projectedSourceMismatchesWorker: workerMatch.mismatches,
     projectedSourceMatchUnknown: workerMatch.unknown,
@@ -105,6 +118,8 @@ function isProjectionSummaryLike(record: Record<string, unknown>): boolean {
     record.appliedOperations !== undefined ||
     record.edits !== undefined ||
     record.editCount !== undefined ||
+    record.anchorKeys !== undefined ||
+    record.conflictKeys !== undefined ||
     record.projectedSourceMatchesWorker !== undefined ||
     record.projectedSourceMismatchesWorker !== undefined ||
     record.projectedSourceMatchUnknown !== undefined;
@@ -112,6 +127,29 @@ function isProjectionSummaryLike(record: Record<string, unknown>): boolean {
 
 function mergeNumberRecord(target: Record<string, number>, source: Record<string, number>): void {
   for (const [key, value] of Object.entries(source)) target[key] = (target[key] ?? 0) + nonNegativeNumber(value);
+}
+
+function projectionEditIdentity(record: Record<string, unknown>): {
+  anchorKeys: string[];
+  conflictKeys: string[];
+  symbolNames: string[];
+  sourcePaths: string[];
+} {
+  const edits = Array.isArray(record.edits) ? record.edits.filter(isObject) : [];
+  if (!edits.length) {
+    return {
+      anchorKeys: readStringArray(record.anchorKeys),
+      conflictKeys: readStringArray(record.conflictKeys),
+      symbolNames: readStringArray(record.symbolNames),
+      sourcePaths: readStringArray(record.sourcePaths)
+    };
+  }
+  return {
+    anchorKeys: uniqueStrings(edits.flatMap((edit) => stringField(edit.anchorKey))),
+    conflictKeys: uniqueStrings(edits.flatMap((edit) => stringField(edit.conflictKey))),
+    symbolNames: uniqueStrings(edits.flatMap((edit) => stringField(edit.symbolName))),
+    sourcePaths: uniqueStrings(edits.flatMap((edit) => stringField(edit.sourcePath)))
+  };
 }
 
 function projectionEditSummary(record: Record<string, unknown>): {
@@ -140,6 +178,10 @@ function projectionEditSummary(record: Record<string, unknown>): {
     out.replacementBytes += nonNegativeNumber(edit.replacementBytes);
     return out;
   }, { ...empty });
+}
+
+function stringField(value: unknown): string[] {
+  return typeof value === 'string' && value.length ? [value] : [];
 }
 
 function projectedWorkerMatchCounts(
