@@ -5,6 +5,11 @@ export interface FrontierCodexSemanticEditProjectionSummary {
   autoMergeCandidates: number;
   appliedOperations: number;
   skippedOperations: number;
+  editCount: number;
+  appliedEditCount: number;
+  alreadyAppliedEditCount: number;
+  deletedBytes: number;
+  replacementBytes: number;
   projectedSourceMatchesWorker: number;
   projectedSourceMismatchesWorker: number;
   projectedSourceMatchUnknown: number;

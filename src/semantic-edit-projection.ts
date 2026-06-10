@@ -23,6 +23,11 @@ export function mergeSemanticEditProjectionSummaries(
       'autoMergeCandidates',
       'appliedOperations',
       'skippedOperations',
+      'editCount',
+      'appliedEditCount',
+      'alreadyAppliedEditCount',
+      'deletedBytes',
+      'replacementBytes',
       'projectedSourceMatchesWorker',
       'projectedSourceMismatchesWorker',
       'projectedSourceMatchUnknown'
@@ -45,6 +50,11 @@ export function emptySemanticEditProjectionSummary(): FrontierCodexSemanticEditP
     autoMergeCandidates: 0,
     appliedOperations: 0,
     skippedOperations: 0,
+    editCount: 0,
+    appliedEditCount: 0,
+    alreadyAppliedEditCount: 0,
+    deletedBytes: 0,
+    replacementBytes: 0,
     projectedSourceMatchesWorker: 0,
     projectedSourceMismatchesWorker: 0,
     projectedSourceMatchUnknown: 0,
@@ -64,6 +74,7 @@ function normalizeProjectionRecord(record: Record<string, unknown>): FrontierCod
   const total = nonNegativeNumber(record.total) || (record.kind === 'frontier.lang.semanticEditProjection' ? 1 : 0);
   const projected = nonNegativeNumber(record.projected) || nonNegativeNumber(statusCounts.projected);
   const workerMatch = projectedWorkerMatchCounts(record, status, projected);
+  const editSummary = projectionEditSummary(record);
   return {
     total,
     projected,
@@ -71,6 +82,11 @@ function normalizeProjectionRecord(record: Record<string, unknown>): FrontierCod
     autoMergeCandidates: nonNegativeNumber(record.autoMergeCandidates) || nonNegativeNumber(admissionCounts['auto-merge-candidate']),
     appliedOperations: nonNegativeNumber(record.appliedOperations) || (Array.isArray(record.appliedOperations) ? record.appliedOperations.length : 0),
     skippedOperations: nonNegativeNumber(record.skippedOperations) || (Array.isArray(record.skippedOperations) ? record.skippedOperations.length : 0),
+    editCount: editSummary.editCount,
+    appliedEditCount: editSummary.appliedEditCount,
+    alreadyAppliedEditCount: editSummary.alreadyAppliedEditCount,
+    deletedBytes: editSummary.deletedBytes,
+    replacementBytes: editSummary.replacementBytes,
     projectedSourceMatchesWorker: workerMatch.matches,
     projectedSourceMismatchesWorker: workerMatch.mismatches,
     projectedSourceMatchUnknown: workerMatch.unknown,
@@ -87,6 +103,8 @@ function isProjectionSummaryLike(record: Record<string, unknown>): boolean {
     record.statusCounts !== undefined ||
     record.skippedOperations !== undefined ||
     record.appliedOperations !== undefined ||
+    record.edits !== undefined ||
+    record.editCount !== undefined ||
     record.projectedSourceMatchesWorker !== undefined ||
     record.projectedSourceMismatchesWorker !== undefined ||
     record.projectedSourceMatchUnknown !== undefined;
@@ -94,6 +112,34 @@ function isProjectionSummaryLike(record: Record<string, unknown>): boolean {
 
 function mergeNumberRecord(target: Record<string, number>, source: Record<string, number>): void {
   for (const [key, value] of Object.entries(source)) target[key] = (target[key] ?? 0) + nonNegativeNumber(value);
+}
+
+function projectionEditSummary(record: Record<string, unknown>): {
+  editCount: number;
+  appliedEditCount: number;
+  alreadyAppliedEditCount: number;
+  deletedBytes: number;
+  replacementBytes: number;
+} {
+  const edits = Array.isArray(record.edits) ? record.edits.filter(isObject) : [];
+  const empty = { editCount: 0, appliedEditCount: 0, alreadyAppliedEditCount: 0, deletedBytes: 0, replacementBytes: 0 };
+  if (!edits.length) {
+    return {
+      editCount: nonNegativeNumber(record.editCount),
+      appliedEditCount: nonNegativeNumber(record.appliedEditCount),
+      alreadyAppliedEditCount: nonNegativeNumber(record.alreadyAppliedEditCount),
+      deletedBytes: nonNegativeNumber(record.deletedBytes),
+      replacementBytes: nonNegativeNumber(record.replacementBytes)
+    };
+  }
+  return edits.reduce<typeof empty>((out, edit) => {
+    out.editCount += 1;
+    if (edit.status === 'already-applied') out.alreadyAppliedEditCount += 1;
+    else out.appliedEditCount += 1;
+    out.deletedBytes += nonNegativeNumber(edit.deletedBytes);
+    out.replacementBytes += nonNegativeNumber(edit.replacementBytes);
+    return out;
+  }, { ...empty });
 }
 
 function projectedWorkerMatchCounts(

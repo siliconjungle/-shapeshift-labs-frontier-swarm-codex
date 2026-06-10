@@ -18,6 +18,11 @@ export interface SemanticEditQuery {
 export interface SemanticEditProjectionQuerySummary {
   projected: number;
   blocked: number;
+  edits: number;
+  appliedEdits: number;
+  alreadyAppliedEdits: number;
+  deletedBytes: number;
+  replacementBytes: number;
   workerMatches: number;
   workerMismatches: number;
   workerUnknown: number;
@@ -61,6 +66,9 @@ export function matchesSemanticEditProjection(value: unknown, wanted: string | u
   const number = (key: string) => Number(projection[key] ?? 0);
   if (lowered === 'projected') return number('projected') > 0;
   if (lowered === 'blocked') return number('blocked') > 0;
+  if (lowered === 'edits' || lowered === 'has-edits') return number('editCount') > 0;
+  if (lowered === 'applied-edits') return number('appliedEditCount') > 0;
+  if (lowered === 'already-applied-edits') return number('alreadyAppliedEditCount') > 0;
   if (lowered === 'worker-match' || lowered === 'match') return number('projectedSourceMatchesWorker') > 0;
   if (lowered === 'worker-mismatch' || lowered === 'mismatch') return number('projectedSourceMismatchesWorker') > 0;
   if (lowered === 'worker-unknown' || lowered === 'unknown') return number('projectedSourceMatchUnknown') > 0;
@@ -102,11 +110,27 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     const projection = isObject(jobSemanticEditProjection(job)) ? jobSemanticEditProjection(job) as Record<string, unknown> : {};
     out.projected += nonNegativeNumber(projection.projected);
     out.blocked += nonNegativeNumber(projection.blocked);
+    out.edits += nonNegativeNumber(projection.editCount);
+    out.appliedEdits += nonNegativeNumber(projection.appliedEditCount);
+    out.alreadyAppliedEdits += nonNegativeNumber(projection.alreadyAppliedEditCount);
+    out.deletedBytes += nonNegativeNumber(projection.deletedBytes);
+    out.replacementBytes += nonNegativeNumber(projection.replacementBytes);
     out.workerMatches += nonNegativeNumber(projection.projectedSourceMatchesWorker);
     out.workerMismatches += nonNegativeNumber(projection.projectedSourceMismatchesWorker);
     out.workerUnknown += nonNegativeNumber(projection.projectedSourceMatchUnknown);
     return out;
-  }, { projected: 0, blocked: 0, workerMatches: 0, workerMismatches: 0, workerUnknown: 0 });
+  }, {
+    projected: 0,
+    blocked: 0,
+    edits: 0,
+    appliedEdits: 0,
+    alreadyAppliedEdits: 0,
+    deletedBytes: 0,
+    replacementBytes: 0,
+    workerMatches: 0,
+    workerMismatches: 0,
+    workerUnknown: 0
+  });
 }
 
 function semanticEditAdmissionFromUnknown(value: unknown, script: ReturnType<typeof semanticEditScriptFromUnknown> | undefined): FrontierCodexSemanticEditAdmissionDecision {
@@ -164,6 +188,11 @@ function facetsToSemanticEditProjection(facets: Record<string, unknown>): unknow
   return {
     projected: facets.semanticEditProjectionProjected,
     blocked: facets.semanticEditProjectionBlocked,
+    editCount: facets.semanticEditProjectionEdits,
+    appliedEditCount: facets.semanticEditProjectionAppliedEdits,
+    alreadyAppliedEditCount: facets.semanticEditProjectionAlreadyAppliedEdits,
+    deletedBytes: facets.semanticEditProjectionDeletedBytes,
+    replacementBytes: facets.semanticEditProjectionReplacementBytes,
     projectedSourceMatchesWorker: facets.semanticEditProjectionMatchesWorker,
     projectedSourceMismatchesWorker: facets.semanticEditProjectionMismatchesWorker,
     projectedSourceMatchUnknown: facets.semanticEditProjectionMatchUnknown

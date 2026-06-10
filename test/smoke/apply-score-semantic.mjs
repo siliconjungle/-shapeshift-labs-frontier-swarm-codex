@@ -169,9 +169,13 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.cleanEligible, true);
   assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditOperationCleanEligible, true);
   assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.projectedSourceMatchesWorker, 1);
+  assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.editCount, 1);
+  assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.appliedEditCount, 1);
+  assert.strictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.replacementBytes, 4);
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').semanticEvidence.semanticEditOperationCleanEligible, false);
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').semanticEvidence.semanticEditProjection.blocked, 1);
+  assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').semanticEvidence.semanticEditProjection.editCount, 0);
   assert.ok(byJob.get('semantic-edit-blocked-projection-job').reasons.includes('semantic edit projection blocked: 1'));
   assert.strictEqual(byJob.get('semantic-edit-mismatch-projection-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('semantic-edit-mismatch-projection-job').semanticEvidence.semanticEditOperationCleanEligible, false);
