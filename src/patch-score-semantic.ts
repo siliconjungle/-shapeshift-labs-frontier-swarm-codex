@@ -55,6 +55,8 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
       semanticLineageReasonCodes: [],
       semanticEditScript: emptySemanticEditScriptSummary(),
       semanticEditAdmission: classifySemanticEditScriptAdmission(undefined),
+      semanticEditOperationAutoMergeCandidate: false,
+      semanticEditOperationCleanEligible: false,
       readiness: {},
       lossesBySeverity: {},
       scoreAdjustment,
@@ -84,6 +86,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   const semanticLineage = semanticImportLineageSummary(summary);
   const semanticEditScript = summarizeSemanticEditScript(summary) ?? emptySemanticEditScriptSummary();
   const semanticEditAdmission = classifySemanticEditScriptAdmission(semanticEditScript);
+  const semanticEditOperationCleanEligible = isCleanSemanticEditOperationScript(semanticEditScript);
   const errorLosses = nonNegativeNumber(lossesBySeverity.error);
   const warningLosses = nonNegativeNumber(lossesBySeverity.warning);
   const blocked = nonNegativeNumber(readiness.blocked);
@@ -254,10 +257,26 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     semanticLineageReasonCodes: semanticLineage.reasonCodes,
     semanticEditScript,
     semanticEditAdmission,
+    semanticEditOperationAutoMergeCandidate: semanticEditOperationCleanEligible,
+    semanticEditOperationCleanEligible,
     readiness,
     lossesBySeverity,
     scoreAdjustment: Math.max(-60, Math.min(15, scoreAdjustment)),
     cleanEligible,
     reasons: uniqueStrings(reasons)
   };
+}
+
+function isCleanSemanticEditOperationScript(
+  script: ReturnType<typeof summarizeSemanticEditScript>
+): boolean {
+  if (!script || script.operations <= 0) return false;
+  return script.autoMergeCandidates >= script.operations &&
+    script.portable >= script.operations &&
+    script.conflicts === 0 &&
+    script.stale === 0 &&
+    script.blocked === 0 &&
+    script.needsPort === 0 &&
+    script.candidates === 0 &&
+    (script.admission['auto-merge-candidate'] ?? 0) > 0;
 }

@@ -28,7 +28,10 @@ export async function calibratePatchScores(input: {
   const statusByJob = new Map(input.entries.map((entry) => [entry.jobId, entry.status]));
   const landedNeedsPort = landed.filter((jobId) => statusByJob.get(jobId) === 'accepted-needs-port');
   const semanticAutoMergeCandidates = uniqueStrings(input.entries
-    .filter((entry) => entry.status === 'accepted-clean' && entry.semanticEvidence.semanticEditAdmission.autoMergeCandidate)
+    .filter((entry) => entry.status === 'accepted-clean' && (
+      entry.semanticEvidence.semanticEditAdmission.autoMergeCandidate ||
+      entry.semanticEvidence.semanticEditOperationAutoMergeCandidate
+    ))
     .map((entry) => entry.jobId));
   const landedSemanticAutoMergeCandidates = semanticAutoMergeCandidates.filter((jobId) => landedSet.has(jobId));
   const falsePositiveSemanticAutoMergeCandidates = semanticAutoMergeCandidates.filter((jobId) => !landedSet.has(jobId));

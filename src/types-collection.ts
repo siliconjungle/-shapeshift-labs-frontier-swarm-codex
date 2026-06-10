@@ -240,6 +240,8 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   semanticLineageReasonCodes: string[];
   semanticEditScript: FrontierCodexSemanticEditScriptSummary;
   semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision;
+  semanticEditOperationAutoMergeCandidate: boolean;
+  semanticEditOperationCleanEligible: boolean;
   readiness: Record<string, number>;
   lossesBySeverity: Record<string, number>;
   scoreAdjustment: number;

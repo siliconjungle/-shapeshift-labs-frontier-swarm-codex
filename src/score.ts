@@ -182,13 +182,20 @@ async function scoreCodexMergeBundle(input: {
     }
     const bundleAutoMergeable = input.bundle.disposition === 'auto-mergeable' && input.bundle.autoMergeable;
     const semanticAutoMergeable = semanticEvidence.semanticEditAdmission.autoMergeCandidate && semanticEvidence.semanticEditAdmission.cleanEligible;
-    const clean = semanticEvidence.cleanEligible && (bundleAutoMergeable || semanticAutoMergeable);
+    const operationAutoMergeable = semanticEvidence.semanticEditOperationCleanEligible;
+    const clean = (semanticEvidence.cleanEligible || operationAutoMergeable)
+      && (bundleAutoMergeable || semanticAutoMergeable || operationAutoMergeable);
     const reasons = uniqueStrings([
+      ...(operationAutoMergeable && !semanticEvidence.cleanEligible
+        ? ['semantic edit operation auto-merge candidate accepted with review-only sidecar records']
+        : []),
       ...(bundleAutoMergeable
         ? []
         : semanticAutoMergeable
           ? ['semantic edit script promoted bundle to auto-merge candidate']
-          : ['patch applies but bundle is not auto-mergeable']),
+          : operationAutoMergeable
+            ? ['semantic edit operation promoted bundle to auto-merge candidate']
+            : ['patch applies but bundle is not auto-mergeable']),
       ...semanticEvidence.reasons,
       ...contextReasons
     ]);

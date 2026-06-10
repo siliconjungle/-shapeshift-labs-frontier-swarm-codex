@@ -65,6 +65,19 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
     readyDir,
     bundle: {
       ...baseBundle,
+      id: 'semantic-edit-mixed-review-bundle',
+      jobId: 'semantic-edit-mixed-review-job',
+      taskId: 'semantic-edit-mixed-review-task',
+      queueItemIds: ['semantic-edit-mixed-review-task'],
+      semanticImport: semanticEditMixedReviewImport(readySemanticImport),
+      metadata: { semanticImport: semanticEditMixedReviewImport(readySemanticImport) }
+    }
+  });
+  await writeSemanticFixture({
+    collection,
+    readyDir,
+    bundle: {
+      ...baseBundle,
       id: 'semantic-edit-needs-port-portable-bundle',
       jobId: 'semantic-edit-needs-port-portable-job',
       taskId: 'semantic-edit-needs-port-portable-task',
@@ -84,7 +97,7 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   });
   const byJob = new Map(score.entries.map((entry) => [entry.jobId, entry]));
   assert.strictEqual(score.ok, true);
-  assert.strictEqual(score.summary['accepted-clean'], 2);
+  assert.strictEqual(score.summary['accepted-clean'], 3);
   assert.strictEqual(score.summary['accepted-needs-port'], 3);
   assert.strictEqual(byJob.get('empty-semantic-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('empty-semantic-job').semanticEvidence.cleanEligible, false);
@@ -101,6 +114,10 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.cleanEligible, true);
   assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.semanticEditScript.portable, 1);
   assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.semanticEditScript.autoMergeCandidates, 1);
+  assert.strictEqual(byJob.get('semantic-edit-mixed-review-job').status, 'accepted-clean');
+  assert.strictEqual(byJob.get('semantic-edit-mixed-review-job').semanticEvidence.cleanEligible, false);
+  assert.strictEqual(byJob.get('semantic-edit-mixed-review-job').semanticEvidence.semanticEditOperationCleanEligible, true);
+  assert.ok(byJob.get('semantic-edit-mixed-review-job').reasons.includes('semantic edit operation auto-merge candidate accepted with review-only sidecar records'));
   assert.strictEqual(byJob.get('semantic-edit-needs-port-portable-job').status, 'accepted-clean');
   assert.strictEqual(byJob.get('semantic-edit-needs-port-portable-job').semanticEvidence.semanticEditAdmission.status, 'auto-merge-candidate');
   assert.strictEqual(byJob.get('semantic-edit-needs-port-portable-job').semanticEvidence.semanticEditAdmission.autoMergeCandidate, true);
@@ -117,7 +134,7 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   });
   assert.ok(calibrated.calibration.semanticAutoMergeCandidateJobIds.includes('semantic-edit-needs-port-portable-job'));
   assert.ok(calibrated.calibration.landedSemanticAutoMergeCandidateJobIds.includes('semantic-edit-needs-port-portable-job'));
-  assert.strictEqual(calibrated.calibration.semanticAutoMergeCandidatePrecision, 0.5);
+  assert.strictEqual(calibrated.calibration.semanticAutoMergeCandidatePrecision, 0.3333);
 }
 
 async function writeSemanticFixture({ collection, readyDir, bundle }) {
@@ -213,5 +230,18 @@ function semanticEditPortableImport(readySemanticImport) {
     evidenceIds: ['evidence_semantic_edit_portable'],
     empty: false
   };
+  return semanticImport;
+}
+
+function semanticEditMixedReviewImport(readySemanticImport) {
+  const semanticImport = semanticEditPortableImport(readySemanticImport);
+  semanticImport.semanticEditScripts.total = 4;
+  semanticImport.semanticEditScripts.reviewRequired = 3;
+  semanticImport.semanticEditScripts.admission = {
+    'auto-merge-candidate': 1,
+    'evidence-only': 3
+  };
+  semanticImport.semanticEditScripts.actions = ['run-gates-and-apply', 'record-evidence'];
+  semanticImport.semanticEditScripts.reasonCodes = ['head-source-matches-base'];
   return semanticImport;
 }
