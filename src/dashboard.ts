@@ -70,6 +70,8 @@ export function createCodexCompactDashboard(input: {
     usefulPatchCount: usefulPatchJobs.length,
     stalePatchCount: input.dashboard.summary.staleAgainstHeadCount,
     duplicateDiscoveryCount: input.dashboard.duplicateGroups.length,
+    semanticEditAdmission,
+    semanticEditScriptAdmission,
     tournament: summarizeTournament(input.strategyTournament),
     semanticImport: {
       expected: input.semanticImportExpected,

@@ -9,6 +9,8 @@ export function collectResultForCli(result: FrontierCodexCollectResult, full: bo
     outDir: result.outDir,
     summary: result.summary,
     semanticImport: result.semanticImport,
+    semanticEditAdmission: result.semanticEditAdmission,
+    semanticEditScriptAdmission: result.semanticEditScriptAdmission,
     artifactStore: result.artifactStore?.summary,
     outputs: {
       collection: `${result.outDir}/collection.json`,

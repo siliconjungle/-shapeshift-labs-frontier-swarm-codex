@@ -202,6 +202,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     dashboard,
     compactDashboard,
     semanticImport: compactDashboard.semanticImport,
+    semanticEditAdmission: compactDashboard.semanticEditAdmission,
+    semanticEditScriptAdmission: compactDashboard.semanticEditScriptAdmission,
     summary
   };
   await fs.mkdir(outDir, { recursive: true });

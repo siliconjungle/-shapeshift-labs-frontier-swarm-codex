@@ -148,6 +148,13 @@ export interface FrontierCodexLogSummary {
   stderrBytesTruncated: number;
 }
 
+export interface FrontierCodexSemanticEditAdmissionSummary {
+  statusCounts: Record<string, number>;
+  statuses: string[];
+  autoMergeCandidateCount: number;
+  cleanEligibleCount: number;
+}
+
 export interface FrontierCodexCompactDashboard {
   kind: typeof FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND;
   version: typeof FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_VERSION;
@@ -158,6 +165,8 @@ export interface FrontierCodexCompactDashboard {
   usefulPatchCount: number;
   stalePatchCount: number;
   duplicateDiscoveryCount: number;
+  semanticEditAdmission: FrontierCodexSemanticEditAdmissionSummary;
+  semanticEditScriptAdmission: FrontierCodexSemanticEditScriptAdmissionSummary;
   tournament: {
     strategyCount: number;
     gameCount: number;
@@ -206,12 +215,7 @@ export interface FrontierCodexCompactDashboard {
     semanticLineageEventKinds: string[];
     semanticLineageReasonCodes: string[];
     semanticEditScripts: FrontierCodexSemanticEditScriptSummary;
-    semanticEditAdmission: {
-      statusCounts: Record<string, number>;
-      statuses: string[];
-      autoMergeCandidateCount: number;
-      cleanEligibleCount: number;
-    };
+    semanticEditAdmission: FrontierCodexSemanticEditAdmissionSummary;
     semanticEditScriptAdmission: FrontierCodexSemanticEditScriptAdmissionSummary;
   };
   trace: {

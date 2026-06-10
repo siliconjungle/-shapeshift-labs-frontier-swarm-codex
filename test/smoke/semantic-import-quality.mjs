@@ -112,6 +112,10 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.strictEqual(semanticImport.semanticEditAdmission.autoMergeCandidateCount, 1);
   assert.strictEqual(semanticImport.semanticEditScriptAdmission.autoMergeCandidateCount, 2);
   assert.strictEqual(semanticImport.semanticEditScriptAdmission.cleanEligibleCandidateCount, 2);
+  assert.deepStrictEqual(collection.semanticEditAdmission, semanticImport.semanticEditAdmission);
+  assert.deepStrictEqual(collection.semanticEditScriptAdmission, semanticImport.semanticEditScriptAdmission);
+  assert.deepStrictEqual(collection.compactDashboard.semanticEditAdmission, semanticImport.semanticEditAdmission);
+  assert.deepStrictEqual(collection.compactDashboard.semanticEditScriptAdmission, semanticImport.semanticEditScriptAdmission);
   assert.strictEqual(emptyQuality.expectedSatisfied, false);
   assert.ok(emptyQuality.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
   assert.ok(emptyQuality.warnings.includes('semantic import expected but empty'));

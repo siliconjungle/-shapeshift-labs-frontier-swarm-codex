@@ -70,6 +70,8 @@ export interface FrontierCodexCollectResult {
   dashboard: FrontierSwarmCoordinatorDashboard;
   compactDashboard: FrontierCodexCompactDashboard;
   semanticImport: FrontierCodexCompactDashboard['semanticImport'];
+  semanticEditAdmission: FrontierCodexCompactDashboard['semanticEditAdmission'];
+  semanticEditScriptAdmission: FrontierCodexCompactDashboard['semanticEditScriptAdmission'];
   artifactStore?: FrontierCodexArtifactStoreResult;
   summary: Record<FrontierCodexCollectBucket, number> & { total: number };
 }
