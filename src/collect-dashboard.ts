@@ -23,6 +23,7 @@ export function enrichCollectedCoordinatorDashboard(
   const semanticQualities = dashboard.jobs.map((job) => qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected));
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
+  const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
   mutable.jobs = dashboard.jobs.map((job) => {
     const quality = qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected);
     return {
@@ -56,6 +57,7 @@ export function enrichCollectedCoordinatorDashboard(
     semanticEditScriptNeedsPort: semanticEditScripts.needsPort,
     semanticEditScriptPortable: semanticEditScripts.portable,
     semanticEditAdmission,
+    semanticEditScriptAdmission,
     semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
   };
   mutable.metadata = {
@@ -90,9 +92,22 @@ function semanticImportMetadata(
     semanticLineageBlocked: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageBlocked, 0),
     semanticEditScripts: { ...mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript)) },
     semanticEditAdmission: semanticEditAdmissionSummary(semanticQualities),
+    semanticEditScriptAdmission: semanticEditScriptAdmissionSummary(mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript))),
     semanticLineageEventKinds: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageEventKinds)),
     warningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
     warnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings))
+  };
+}
+
+function semanticEditScriptAdmissionSummary(
+  semanticEditScripts: ReturnType<typeof mergeSemanticEditScriptSummaries>
+) {
+  return {
+    statusCounts: { ...semanticEditScripts.admission },
+    statuses: Object.keys(semanticEditScripts.admission).filter((key) => semanticEditScripts.admission[key] > 0).sort(),
+    autoMergeCandidateCount: semanticEditScripts.admission['auto-merge-candidate'] ?? 0,
+    portableCount: semanticEditScripts.portable,
+    cleanEligibleCandidateCount: Math.min(semanticEditScripts.admission['auto-merge-candidate'] ?? 0, semanticEditScripts.portable)
   };
 }
 

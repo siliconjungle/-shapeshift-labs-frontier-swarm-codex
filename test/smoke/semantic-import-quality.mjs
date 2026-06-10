@@ -110,6 +110,8 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.strictEqual(semanticImport.semanticEditAdmission.statusCounts.conflict, 1);
   assert.strictEqual(semanticImport.semanticEditAdmission.statusCounts['auto-merge-candidate'], 1);
   assert.strictEqual(semanticImport.semanticEditAdmission.autoMergeCandidateCount, 1);
+  assert.strictEqual(semanticImport.semanticEditScriptAdmission.autoMergeCandidateCount, 2);
+  assert.strictEqual(semanticImport.semanticEditScriptAdmission.cleanEligibleCandidateCount, 2);
   assert.strictEqual(emptyQuality.expectedSatisfied, false);
   assert.ok(emptyQuality.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
   assert.ok(emptyQuality.warnings.includes('semantic import expected but empty'));
@@ -143,6 +145,8 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.strictEqual(coordinatorQuery.summary.semanticEditScriptConflicts, 1);
   assert.strictEqual(coordinatorQuery.summary.semanticEditAdmission.statusCounts.conflict, 1);
   assert.strictEqual(coordinatorQuery.summary.semanticEditAdmission.statusCounts['auto-merge-candidate'], 1);
+  assert.strictEqual(coordinatorQuery.summary.semanticEditScriptAdmission.autoMergeCandidateCount, 2);
+  assert.strictEqual(coordinatorQuery.summary.semanticEditScriptAdmission.cleanEligibleCandidateCount, 2);
   assert.strictEqual(queryQualityByJob.get('semantic-edit-script-worker').semanticEditAdmission.status, 'conflict');
   assert.strictEqual(queryQualityByJob.get('semantic-edit-clean-worker').semanticEditAdmission.status, 'auto-merge-candidate');
   assert.strictEqual(coordinatorQuery.jobs.find((entry) => entry.jobId === 'semantic-edit-clean-worker').semanticEditAdmission.status, 'auto-merge-candidate');
@@ -158,9 +162,13 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     collection: collection.outDir,
     semanticEditAdmission: 'auto-merge-candidate'
   });
-  assert.strictEqual(admissionQuery.jobs.length, 1);
-  assert.strictEqual(admissionQuery.jobs[0].jobId, 'semantic-edit-clean-worker');
+  assert.strictEqual(admissionQuery.jobs.length, 2);
+  assert.deepStrictEqual(admissionQuery.jobs.map((entry) => entry.jobId).sort(), [
+    'semantic-edit-clean-worker',
+    'semantic-edit-script-worker'
+  ]);
   assert.strictEqual(admissionQuery.summary.semanticEditAdmission.autoMergeCandidateCount, 1);
+  assert.strictEqual(admissionQuery.summary.semanticEditScriptAdmission.autoMergeCandidateCount, 2);
 }
 
 function emptyExpectedSemanticImportSummary() {

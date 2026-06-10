@@ -11,6 +11,7 @@ import type {
 import type { FrontierCodexHandoffArtifact } from './types-collection.js';
 import type {
   FrontierCodexSemanticEditAdmissionDecision,
+  FrontierCodexSemanticEditScriptAdmissionSummary,
   FrontierCodexSemanticEditScriptSummary
 } from './types-semantic-edit.js';
 import type { FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './types-semantic.js';
@@ -211,6 +212,7 @@ export interface FrontierCodexCompactDashboard {
       autoMergeCandidateCount: number;
       cleanEligibleCount: number;
     };
+    semanticEditScriptAdmission: FrontierCodexSemanticEditScriptAdmissionSummary;
   };
   trace: {
     shardCount: number;

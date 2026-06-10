@@ -31,6 +31,7 @@ export function createCodexCompactDashboard(input: {
   })));
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
+  const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
   const traceSummaries = input.dashboard.jobs
     .map((job) => codexJobTraceSummary(job))
     .filter((entry): entry is FrontierCodexTraceSummary => Boolean(entry));
@@ -109,7 +110,8 @@ export function createCodexCompactDashboard(input: {
       semanticLineageEventKinds: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageEventKinds)),
       semanticLineageReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageReasonCodes)),
       semanticEditScripts,
-      semanticEditAdmission
+      semanticEditAdmission,
+      semanticEditScriptAdmission
     },
     trace: {
       shardCount: traceSummary.shardCount,
@@ -130,6 +132,18 @@ export function createCodexCompactDashboard(input: {
       averageMergeScore: input.dashboard.summary.averageMergeScore
     },
     topJobs
+  };
+}
+
+function semanticEditScriptAdmissionSummary(
+  semanticEditScripts: ReturnType<typeof mergeSemanticEditScriptSummaries>
+) {
+  return {
+    statusCounts: { ...semanticEditScripts.admission },
+    statuses: Object.keys(semanticEditScripts.admission).filter((key) => semanticEditScripts.admission[key] > 0).sort(),
+    autoMergeCandidateCount: semanticEditScripts.admission['auto-merge-candidate'] ?? 0,
+    portableCount: semanticEditScripts.portable,
+    cleanEligibleCandidateCount: Math.min(semanticEditScripts.admission['auto-merge-candidate'] ?? 0, semanticEditScripts.portable)
   };
 }
 

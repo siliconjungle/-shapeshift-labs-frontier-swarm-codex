@@ -21,6 +21,14 @@ export interface FrontierCodexSemanticEditScriptSummary {
   empty: boolean;
 }
 
+export interface FrontierCodexSemanticEditScriptAdmissionSummary {
+  statusCounts: Record<string, number>;
+  statuses: string[];
+  autoMergeCandidateCount: number;
+  portableCount: number;
+  cleanEligibleCandidateCount: number;
+}
+
 export type FrontierCodexSemanticEditAdmissionStatus =
   | 'auto-merge-candidate'
   | 'needs-port'
