@@ -14,6 +14,7 @@ export function enrichCollectedCoordinatorDashboard(
   const mutable = dashboard as FrontierSwarmCoordinatorDashboard & {
     jobs: Array<FrontierSwarmCoordinatorDashboard['jobs'][number] & {
       semanticImportQuality?: ReturnType<typeof summarizeCodexSemanticImportQuality>;
+      semanticEditAdmission?: ReturnType<typeof summarizeCodexSemanticImportQuality>['semanticEditAdmission'];
       contextBudget?: FrontierCodexContextBudgetReport;
     }>;
     summary: FrontierSwarmCoordinatorDashboard['summary'] & Record<string, unknown>;
@@ -21,11 +22,16 @@ export function enrichCollectedCoordinatorDashboard(
   };
   const semanticQualities = dashboard.jobs.map((job) => qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected));
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
-  mutable.jobs = dashboard.jobs.map((job) => ({
-    ...job,
-    semanticImportQuality: qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected),
-    ...(contextBudgets.get(job.jobId) ? { contextBudget: contextBudgets.get(job.jobId) } : {})
-  }));
+  const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
+  mutable.jobs = dashboard.jobs.map((job) => {
+    const quality = qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected);
+    return {
+      ...job,
+      semanticImportQuality: quality,
+      semanticEditAdmission: quality.semanticEditAdmission,
+      ...(contextBudgets.get(job.jobId) ? { contextBudget: contextBudgets.get(job.jobId) } : {})
+    };
+  });
   mutable.summary = {
     ...dashboard.summary,
     semanticImportExpectedCount: semanticQualities.filter((entry) => entry.expected).length,
@@ -49,6 +55,7 @@ export function enrichCollectedCoordinatorDashboard(
     semanticEditScriptStale: semanticEditScripts.stale,
     semanticEditScriptNeedsPort: semanticEditScripts.needsPort,
     semanticEditScriptPortable: semanticEditScripts.portable,
+    semanticEditAdmission,
     semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
   };
   mutable.metadata = {
@@ -82,8 +89,25 @@ function semanticImportMetadata(
     semanticLineageDeleted: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageDeleted, 0),
     semanticLineageBlocked: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageBlocked, 0),
     semanticEditScripts: { ...mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript)) },
+    semanticEditAdmission: semanticEditAdmissionSummary(semanticQualities),
     semanticLineageEventKinds: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageEventKinds)),
     warningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
     warnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings))
+  };
+}
+
+function semanticEditAdmissionSummary(
+  semanticQualities: ReturnType<typeof summarizeCodexSemanticImportQuality>[]
+) {
+  const statusCounts = semanticQualities.reduce<Record<string, number>>((out, entry) => {
+    const status = entry.semanticEditAdmission.status;
+    out[status] = (out[status] ?? 0) + 1;
+    return out;
+  }, {});
+  return {
+    statusCounts,
+    statuses: Object.keys(statusCounts).sort(),
+    autoMergeCandidateCount: semanticQualities.filter((entry) => entry.semanticEditAdmission.autoMergeCandidate).length,
+    cleanEligibleCount: semanticQualities.filter((entry) => entry.semanticEditAdmission.cleanEligible).length
   };
 }

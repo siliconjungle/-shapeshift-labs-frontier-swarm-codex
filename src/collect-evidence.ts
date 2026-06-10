@@ -70,6 +70,7 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
     readyToPortHunkCount: input.bucket === 'needs-human-port' || input.bucket === 'ready-to-apply' ? patchHunks.length : 0,
     ...(semanticImport ? { semanticImport: semanticImport as FrontierCodexSemanticImportSidecar['summary'] } : {}),
     semanticImportQuality,
+    semanticEditAdmission: semanticImportQuality.semanticEditAdmission,
     ...(contextBudget ? { contextBudget } : {}),
     ...(traceSummary.shardCount ? { traceSummary } : {}),
     sourceCitations: createCodexEvidenceSourceCitations(input.bundle),
@@ -100,12 +101,14 @@ async function augmentCollectedEvidenceSummary(
     if (!isObject(parsed)) return;
     if (input.semanticImport) parsed.semanticImport = input.semanticImport;
     parsed.semanticImportQuality = input.semanticImportQuality;
+    parsed.semanticEditAdmission = input.semanticImportQuality.semanticEditAdmission;
     if (input.contextBudget) parsed.contextBudget = input.contextBudget;
     if (input.traceSummary) parsed.traceSummary = input.traceSummary;
     parsed.metadata = {
       ...(isObject(parsed.metadata) ? parsed.metadata : {}),
       semanticImportQuality: input.semanticImportQuality,
       semanticEditScript: input.semanticImportQuality.semanticEditScript,
+      semanticEditAdmission: input.semanticImportQuality.semanticEditAdmission,
       ...(input.contextBudget ? { contextBudget: input.contextBudget } : {})
     };
     await fs.writeFile(file, JSON.stringify(parsed, null, 2) + '\n');
@@ -143,6 +146,9 @@ export function createCollectedEvidenceEntries(
       ...(semanticImportQuality.empty ? ['semantic-empty'] : []),
       ...(semanticImportQuality.warnings.length ? ['semantic-warning'] : []),
       ...semanticEditScriptTags(semanticImportQuality.semanticEditScript),
+      `semantic-edit-admission-${semanticImportQuality.semanticEditAdmission.status}`,
+      ...(semanticImportQuality.semanticEditAdmission.autoMergeCandidate ? ['semantic-edit-admission-auto-merge-candidate'] : []),
+      ...(semanticImportQuality.semanticEditAdmission.cleanEligible ? ['semantic-edit-admission-clean-eligible'] : []),
       ...(contextBudget?.warnings.length ? ['context-budget-warning'] : []),
       ...(contextBudget?.errors.length ? ['context-budget-failed'] : [])
     ]),
@@ -170,6 +176,10 @@ export function createCollectedEvidenceEntries(
       semanticFactPredicates: semanticImportQuality.semanticFactPredicates.join(','),
       semanticWarnings: semanticImportQuality.warnings.join(','),
       semanticWarningCount: semanticImportQuality.warnings.length,
+      semanticEditAdmissionStatus: semanticImportQuality.semanticEditAdmission.status,
+      semanticEditAdmissionAutoMergeCandidate: semanticImportQuality.semanticEditAdmission.autoMergeCandidate,
+      semanticEditAdmissionCleanEligible: semanticImportQuality.semanticEditAdmission.cleanEligible,
+      semanticEditAdmissionReasons: semanticImportQuality.semanticEditAdmission.reasons.join(','),
       semanticDependencyRelations: semanticImportQuality.dependencyRelations,
       semanticDependencyPredicates: semanticImportQuality.dependencyPredicates.join(','),
       universalAstLayers: universalAstLayers.total,

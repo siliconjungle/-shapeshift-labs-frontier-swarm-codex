@@ -7,6 +7,7 @@ import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradi
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportLineageSummary } from './semantic-import-lineage.js';
 import { summarizeSemanticEditScript } from './semantic-edit-script.js';
+import { classifySemanticEditScriptAdmission } from './semantic-edit-admission.js';
 
 
 export function summarizeCodexSemanticImportQuality(
@@ -35,6 +36,7 @@ export function summarizeCodexSemanticImportQuality(
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const semanticLineage = semanticImportLineageSummary(summary);
   const semanticEditScript = summarizeSemanticEditScript(summary) ?? summarizeSemanticEditScript({ semanticEditScripts: (summary as { semanticEditScripts?: unknown } | undefined)?.semanticEditScripts })!;
+  const semanticEditAdmission = classifySemanticEditScriptAdmission(semanticEditScript);
   const semanticLineageExpected = semanticLineageExpectedForBeforeSourceDiff(summary, semanticLineage.beforeSymbols);
   const selection = semanticSelectionSummary(summary);
   const present = !!summary;
@@ -122,6 +124,7 @@ export function summarizeCodexSemanticImportQuality(
     semanticLineageEventKinds: semanticLineage.eventKinds,
     semanticLineageReasonCodes: semanticLineage.reasonCodes,
     semanticEditScript,
+    semanticEditAdmission,
     warnings: uniqueStrings(warnings)
   };
 }

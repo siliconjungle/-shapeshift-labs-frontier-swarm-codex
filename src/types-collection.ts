@@ -23,6 +23,7 @@ import type {
   FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION
 } from './constants.js';
 import type { FrontierCodexCompactDashboard, FrontierCodexContextBudgetReport } from './types-evidence.js';
+import type { FrontierCodexPatchScoreCalibration } from './types-score-calibration.js';
 import type {
   FrontierCodexSemanticEditAdmissionDecision,
   FrontierCodexSemanticEditScriptSummary
@@ -258,27 +259,6 @@ export interface FrontierCodexPatchScoreEntry {
   semanticEvidence: FrontierCodexPatchScoreSemanticEvidence;
   contextBudget?: FrontierCodexContextBudgetReport;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
-}
-
-export interface FrontierCodexPatchScoreCalibration {
-  source: 'apply-ledger' | 'none';
-  applyLedgerPath?: string;
-  landedJobIds: string[];
-  predictedCleanJobIds: string[];
-  truePositiveCleanJobIds: string[];
-  falsePositiveCleanJobIds: string[];
-  falseNegativeCleanJobIds: string[];
-  landedNeedsPortJobIds: string[];
-  precision: number;
-  recall: number;
-  summary: {
-    landed: number;
-    predictedClean: number;
-    truePositiveClean: number;
-    falsePositiveClean: number;
-    falseNegativeClean: number;
-    landedNeedsPort: number;
-  };
 }
 
 export interface FrontierCodexPatchScoreResult {

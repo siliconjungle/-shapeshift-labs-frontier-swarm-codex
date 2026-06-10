@@ -30,6 +30,7 @@ export function createCodexCompactDashboard(input: {
     predicates: entry.semanticFactPredicates
   })));
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
+  const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
   const traceSummaries = input.dashboard.jobs
     .map((job) => codexJobTraceSummary(job))
     .filter((entry): entry is FrontierCodexTraceSummary => Boolean(entry));
@@ -51,6 +52,7 @@ export function createCodexCompactDashboard(input: {
       mergeScore: job.mergeScore,
       changedPaths: job.changedPaths.slice(0, 12),
       semanticImportQuality: qualities.get(job.jobId),
+      ...(qualities.get(job.jobId)?.semanticEditAdmission ? { semanticEditAdmission: qualities.get(job.jobId)?.semanticEditAdmission } : {}),
       ...(contextBudgetFromCoordinatorJob(job) ? { contextBudget: contextBudgetFromCoordinatorJob(job) } : {}),
       ...(codexJobTraceSummary(job) ? { traceSummary: codexJobTraceSummary(job) } : {}),
       staleAgainstHead: job.staleAgainstHead,
@@ -106,7 +108,8 @@ export function createCodexCompactDashboard(input: {
       semanticLineageNeedsReview: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageNeedsReview, 0),
       semanticLineageEventKinds: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageEventKinds)),
       semanticLineageReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageReasonCodes)),
-      semanticEditScripts
+      semanticEditScripts,
+      semanticEditAdmission
     },
     trace: {
       shardCount: traceSummary.shardCount,
@@ -127,6 +130,22 @@ export function createCodexCompactDashboard(input: {
       averageMergeScore: input.dashboard.summary.averageMergeScore
     },
     topJobs
+  };
+}
+
+function semanticEditAdmissionSummary(
+  semanticQualities: ReturnType<typeof summarizeCodexSemanticImportQuality>[]
+) {
+  const statusCounts = semanticQualities.reduce<Record<string, number>>((out, entry) => {
+    const status = entry.semanticEditAdmission.status;
+    out[status] = (out[status] ?? 0) + 1;
+    return out;
+  }, {});
+  return {
+    statusCounts,
+    statuses: Object.keys(statusCounts).sort(),
+    autoMergeCandidateCount: semanticQualities.filter((entry) => entry.semanticEditAdmission.autoMergeCandidate).length,
+    cleanEligibleCount: semanticQualities.filter((entry) => entry.semanticEditAdmission.cleanEligible).length
   };
 }
 

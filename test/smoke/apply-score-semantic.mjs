@@ -105,6 +105,19 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   assert.strictEqual(byJob.get('semantic-edit-needs-port-portable-job').semanticEvidence.semanticEditAdmission.status, 'auto-merge-candidate');
   assert.strictEqual(byJob.get('semantic-edit-needs-port-portable-job').semanticEvidence.semanticEditAdmission.autoMergeCandidate, true);
   assert.ok(byJob.get('semantic-edit-needs-port-portable-job').reasons.includes('semantic edit script promoted bundle to auto-merge candidate'));
+  await fs.mkdir(path.join(collection, 'apply-ledger'), { recursive: true });
+  await fs.writeFile(path.join(collection, 'apply-ledger', 'apply-ledger.json'), JSON.stringify({
+    entries: [{ jobId: 'semantic-edit-needs-port-portable-job', status: 'applied' }]
+  }, null, 2) + '\n');
+  const calibrated = await scoreCodexSwarmPatches({
+    collection,
+    cwd: applyRepo,
+    workspaceIncludes: ['src'],
+    focusedCommands: [{ name: 'assert-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
+  });
+  assert.ok(calibrated.calibration.semanticAutoMergeCandidateJobIds.includes('semantic-edit-needs-port-portable-job'));
+  assert.ok(calibrated.calibration.landedSemanticAutoMergeCandidateJobIds.includes('semantic-edit-needs-port-portable-job'));
+  assert.strictEqual(calibrated.calibration.semanticAutoMergeCandidatePrecision, 0.5);
 }
 
 async function writeSemanticFixture({ collection, readyDir, bundle }) {

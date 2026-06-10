@@ -9,7 +9,10 @@ import type {
   FRONTIER_SWARM_CODEX_PATCH_INTENT_VERSION
 } from './constants.js';
 import type { FrontierCodexHandoffArtifact } from './types-collection.js';
-import type { FrontierCodexSemanticEditScriptSummary } from './types-semantic-edit.js';
+import type {
+  FrontierCodexSemanticEditAdmissionDecision,
+  FrontierCodexSemanticEditScriptSummary
+} from './types-semantic-edit.js';
 import type { FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './types-semantic.js';
 
 export interface FrontierCodexPatchHunkSummary {
@@ -103,6 +106,7 @@ export interface FrontierCodexJobEvidenceSummary {
   readyToPortHunkCount: number;
   semanticImport?: FrontierCodexSemanticImportSidecar['summary'];
   semanticImportQuality?: FrontierCodexSemanticImportQuality;
+  semanticEditAdmission?: FrontierCodexSemanticEditAdmissionDecision;
   contextBudget?: FrontierCodexContextBudgetReport;
   traceSummary?: FrontierCodexTraceSummary;
   sourceCitations: Array<{ path: string; kind: string; language?: string; hash?: string }>;
@@ -201,6 +205,12 @@ export interface FrontierCodexCompactDashboard {
     semanticLineageEventKinds: string[];
     semanticLineageReasonCodes: string[];
     semanticEditScripts: FrontierCodexSemanticEditScriptSummary;
+    semanticEditAdmission: {
+      statusCounts: Record<string, number>;
+      statuses: string[];
+      autoMergeCandidateCount: number;
+      cleanEligibleCount: number;
+    };
   };
   trace: {
     shardCount: number;
@@ -235,6 +245,7 @@ export interface FrontierCodexCompactDashboard {
     mergeScore: number;
     changedPaths: string[];
     semanticImportQuality?: FrontierCodexSemanticImportQuality;
+    semanticEditAdmission?: FrontierCodexSemanticEditAdmissionDecision;
     contextBudget?: FrontierCodexContextBudgetReport;
     traceSummary?: FrontierCodexTraceSummary;
     staleAgainstHead: boolean;

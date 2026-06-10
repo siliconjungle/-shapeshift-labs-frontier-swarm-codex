@@ -5,10 +5,12 @@ import type { FrontierCodexArtifactRecord } from './index.js';
 import { isObject, pathExists, uniqueStrings } from './common.js';
 import { readCodexArtifactRecords } from './artifact-store.js';
 import {
+  canonicalSemanticEditStatus,
+  classifySemanticEditScriptAdmission,
   semanticEditScriptFromUnknown,
-  semanticEditScriptHasAdmission,
   semanticEditScriptHasStatus
 } from './semantic-edit-admission.js';
+import type { FrontierCodexSemanticEditAdmissionDecision } from './types-semantic-edit.js';
 
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
@@ -60,7 +62,8 @@ export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) 
       jobs: jobs.length,
       artifacts: artifactRows.length,
       evidence: evidenceRows.length,
-      touchedPaths: uniqueStrings(jobs.flatMap((job) => Array.isArray(job.changedPaths) ? job.changedPaths.filter((entry): entry is string => typeof entry === 'string') : []))
+      touchedPaths: uniqueStrings(jobs.flatMap((job) => Array.isArray(job.changedPaths) ? job.changedPaths.filter((entry): entry is string => typeof entry === 'string') : [])),
+      semanticEditAdmission: semanticEditAdmissionSummary(jobs)
     },
     jobs,
     artifacts: artifactRows,
@@ -117,7 +120,7 @@ function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput
     && (input.stale === undefined || Boolean(job.staleAgainstHead) === input.stale)
     && (input.semantic === undefined || Boolean(job.semanticImport) === input.semantic || Boolean(job.semanticImportQuality) === input.semantic)
     && (input.lineage === undefined || jobHasLineage(job) === input.lineage)
-    && matchesSemanticEdit(jobSemanticEditScript(job), input, haystack)
+    && matchesSemanticEdit(jobSemanticEditScript(job), input, haystack, jobSemanticEditAdmission(job))
     && (input.readiness === undefined || matchesReadiness(job, input.readiness))
     && (input.passedTests === undefined || testsPassed(job) === input.passedTests);
 }
@@ -172,17 +175,58 @@ function jobSemanticEditScript(job: Record<string, unknown>): unknown {
   return quality.semanticEditScript ?? semanticImport.semanticEditScripts ?? semanticImport.semanticEditScript;
 }
 
-function matchesSemanticEdit(scriptValue: unknown, input: FrontierCodexQueryInput, haystack: string): boolean {
+function jobSemanticEditAdmission(job: Record<string, unknown>): unknown {
+  const quality = isObject(job.semanticImportQuality) ? job.semanticImportQuality : {};
+  return job.semanticEditAdmission ?? quality.semanticEditAdmission;
+}
+
+function matchesSemanticEdit(scriptValue: unknown, input: FrontierCodexQueryInput, haystack: string, admissionValue?: unknown): boolean {
   if (input.semanticEditStatus === undefined && input.semanticEditAdmission === undefined) return true;
   const hasScript = scriptValue !== undefined;
   const script = scriptValue === undefined ? undefined : semanticEditScriptFromUnknown(scriptValue);
+  const admission = semanticEditAdmissionFromUnknown(admissionValue, script);
   return (input.semanticEditStatus === undefined || semanticEditScriptHasStatus(script, input.semanticEditStatus) || !hasScript && semanticEditTextMatch(haystack, input.semanticEditStatus))
-    && (input.semanticEditAdmission === undefined || semanticEditScriptHasAdmission(script, input.semanticEditAdmission) || !hasScript && semanticEditTextMatch(haystack, input.semanticEditAdmission));
+    && (input.semanticEditAdmission === undefined || semanticEditAdmissionMatches(admission, input.semanticEditAdmission) || !hasScript && semanticEditTextMatch(haystack, input.semanticEditAdmission));
 }
 
 function matchesEvidenceSemanticEdit(entry: Record<string, unknown>, input: FrontierCodexQueryInput, haystack: string): boolean {
   const facets = isObject(entry.facets) ? entry.facets : {};
-  return matchesSemanticEdit(facetsToSemanticEditScript(facets), input, haystack);
+  return matchesSemanticEdit(facetsToSemanticEditScript(facets), input, haystack, facetsToSemanticEditAdmission(facets));
+}
+
+function semanticEditAdmissionSummary(jobs: Record<string, unknown>[]) {
+  const statusCounts = jobs.reduce<Record<string, number>>((out, job) => {
+    const admission = semanticEditAdmissionFromUnknown(jobSemanticEditAdmission(job), semanticEditScriptFromUnknown(jobSemanticEditScript(job)));
+    out[admission.status] = (out[admission.status] ?? 0) + 1;
+    return out;
+  }, {});
+  return {
+    statusCounts,
+    statuses: Object.keys(statusCounts).sort(),
+    autoMergeCandidateCount: jobs.filter((job) => semanticEditAdmissionFromUnknown(jobSemanticEditAdmission(job), semanticEditScriptFromUnknown(jobSemanticEditScript(job))).autoMergeCandidate).length,
+    cleanEligibleCount: jobs.filter((job) => semanticEditAdmissionFromUnknown(jobSemanticEditAdmission(job), semanticEditScriptFromUnknown(jobSemanticEditScript(job))).cleanEligible).length
+  };
+}
+
+function semanticEditAdmissionFromUnknown(value: unknown, script: ReturnType<typeof semanticEditScriptFromUnknown> | undefined): FrontierCodexSemanticEditAdmissionDecision {
+  if (isObject(value) && typeof value.status === 'string') {
+    return {
+      status: value.status as FrontierCodexSemanticEditAdmissionDecision['status'],
+      autoMergeCandidate: value.autoMergeCandidate === true,
+      cleanEligible: value.cleanEligible === true,
+      reasons: Array.isArray(value.reasons) ? value.reasons.filter((entry): entry is string => typeof entry === 'string') : []
+    };
+  }
+  return classifySemanticEditScriptAdmission(script);
+}
+
+function semanticEditAdmissionMatches(admission: FrontierCodexSemanticEditAdmissionDecision, value: string): boolean {
+  const wanted = canonicalSemanticEditStatus(value);
+  const actual = canonicalSemanticEditStatus(admission.status);
+  return actual === wanted ||
+    wanted === 'auto-merge-candidate' && admission.autoMergeCandidate ||
+    wanted === 'cleaneligible' && admission.cleanEligible ||
+    admission.reasons.some((reason) => semanticEditTextMatch(reason.toLowerCase(), value));
 }
 
 function facetsToSemanticEditScript(facets: Record<string, unknown>): unknown {
@@ -201,6 +245,17 @@ function facetsToSemanticEditScript(facets: Record<string, unknown>): unknown {
     autoApplyCandidates: facets.semanticEditScriptAutoApplyCandidates,
     byStatus: csvRecord(facets.semanticEditScriptStatuses),
     admission: csvRecord(facets.semanticEditScriptAdmissions)
+  };
+}
+
+function facetsToSemanticEditAdmission(facets: Record<string, unknown>): unknown {
+  const status = facets.semanticEditAdmissionStatus;
+  if (typeof status !== 'string') return undefined;
+  return {
+    status,
+    autoMergeCandidate: facets.semanticEditAdmissionAutoMergeCandidate === true || String(facets.semanticEditAdmissionAutoMergeCandidate) === 'true',
+    cleanEligible: facets.semanticEditAdmissionCleanEligible === true || String(facets.semanticEditAdmissionCleanEligible) === 'true',
+    reasons: String(facets.semanticEditAdmissionReasons ?? '').split(',').filter(Boolean)
   };
 }
 
