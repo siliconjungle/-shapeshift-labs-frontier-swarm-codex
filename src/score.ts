@@ -181,8 +181,10 @@ async function scoreCodexMergeBundle(input: {
       }
     }
     const bundleAutoMergeable = input.bundle.disposition === 'auto-mergeable' && input.bundle.autoMergeable;
-    const semanticAutoMergeable = semanticEvidence.semanticEditAdmission.autoMergeCandidate && semanticEvidence.semanticEditAdmission.cleanEligible;
     const operationAutoMergeable = semanticEvidence.semanticEditOperationCleanEligible;
+    const semanticAutoMergeable = semanticEvidence.semanticEditAdmission.autoMergeCandidate &&
+      semanticEvidence.semanticEditAdmission.cleanEligible &&
+      operationAutoMergeable;
     const clean = (semanticEvidence.cleanEligible || operationAutoMergeable)
       && (bundleAutoMergeable || semanticAutoMergeable || operationAutoMergeable);
     const reasons = uniqueStrings([

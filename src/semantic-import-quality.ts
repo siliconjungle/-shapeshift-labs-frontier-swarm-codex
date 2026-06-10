@@ -7,8 +7,8 @@ import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradi
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportLineageSummary } from './semantic-import-lineage.js';
 import { summarizeSemanticEditScript } from './semantic-edit-script.js';
+import { summarizeSemanticEditProjection, emptySemanticEditProjectionSummary } from './semantic-edit-projection.js';
 import { classifySemanticEditScriptAdmission } from './semantic-edit-admission.js';
-
 
 export function summarizeCodexSemanticImportQuality(
   summary: FrontierSwarmMergeBundle['semanticImport'] | FrontierCodexSemanticImportSidecar['summary'] | FrontierSwarmJobResultInput['semanticImport'] | undefined,
@@ -36,6 +36,7 @@ export function summarizeCodexSemanticImportQuality(
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const semanticLineage = semanticImportLineageSummary(summary);
   const semanticEditScript = summarizeSemanticEditScript(summary) ?? summarizeSemanticEditScript({ semanticEditScripts: (summary as { semanticEditScripts?: unknown } | undefined)?.semanticEditScripts })!;
+  const semanticEditProjection = summarizeSemanticEditProjection(summary) ?? emptySemanticEditProjectionSummary();
   const semanticEditAdmission = classifySemanticEditScriptAdmission(semanticEditScript);
   const semanticLineageExpected = semanticLineageExpectedForBeforeSourceDiff(summary, semanticLineage.beforeSymbols);
   const selection = semanticSelectionSummary(summary);
@@ -86,6 +87,16 @@ export function summarizeCodexSemanticImportQuality(
   if (present && semanticEditScript.conflicts > 0) warnings.push('semantic edit script has conflicts');
   if (present && semanticEditScript.stale > 0) warnings.push('semantic edit script is stale against head');
   if (present && semanticEditScript.blocked > 0) warnings.push('semantic edit script is blocked');
+  if (present && semanticEditScript.autoMergeCandidates > 0 && semanticEditProjection.total === 0) {
+    warnings.push('semantic edit projection is missing');
+  }
+  if (present && semanticEditProjection.blocked > 0) warnings.push('semantic edit projection is blocked');
+  if (present && semanticEditProjection.projectedSourceMismatchesWorker > 0) {
+    warnings.push('semantic edit projection does not match worker source');
+  }
+  if (present && semanticEditProjection.projectedSourceMatchUnknown > 0) {
+    warnings.push('semantic edit projection worker match is unknown');
+  }
   return {
     expected: effectiveExpected,
     expectedSatisfied,
@@ -124,6 +135,7 @@ export function summarizeCodexSemanticImportQuality(
     semanticLineageEventKinds: semanticLineage.eventKinds,
     semanticLineageReasonCodes: semanticLineage.reasonCodes,
     semanticEditScript,
+    semanticEditProjection,
     semanticEditAdmission,
     warnings: uniqueStrings(warnings)
   };
@@ -143,7 +155,6 @@ function semanticImportExpected(summary: unknown, fallback: boolean): boolean {
     (record.quality as { expected?: unknown } | undefined)?.expected === true ||
     (record.admission as { expected?: unknown } | undefined)?.expected === true;
 }
-
 
 function semanticImportExpectedSatisfied(
   summary: unknown,
@@ -169,7 +180,6 @@ function semanticImportExpectedSatisfied(
     input.patchHints > 0 &&
     input.reasonCodes.length === 0;
 }
-
 
 function semanticImportExpectedMissingReasonCodes(
   summary: unknown,
@@ -206,7 +216,6 @@ function semanticImportExpectedMissingReasonCodes(
   return uniqueStrings([...explicitCodes, ...inferredCodes]);
 }
 
-
 function semanticImportExplicitExpectedSatisfied(summary: unknown): boolean | undefined {
   const record = summaryRecord(summary);
   const candidates = [
@@ -219,7 +228,6 @@ function semanticImportExplicitExpectedSatisfied(summary: unknown): boolean | un
   }
   return undefined;
 }
-
 
 function semanticLineageExpectedForBeforeSourceDiff(summary: unknown, beforeSymbols: number): boolean {
   if (beforeSymbols > 0) return true;
@@ -248,13 +256,11 @@ function semanticLineageExpectedForBeforeSourceDiff(summary: unknown, beforeSymb
   ].some((value) => value === true);
 }
 
-
 function summaryRecord(summary: unknown): Record<string, unknown> | undefined {
   return summary && typeof summary === 'object' && !Array.isArray(summary)
     ? summary as Record<string, unknown>
     : undefined;
 }
-
 
 function semanticSelectionSummary(summary: unknown): {
   includeFiltered: number;
@@ -269,12 +275,10 @@ function semanticSelectionSummary(summary: unknown): {
   };
 }
 
-
 export function semanticImportSummaryFromBundle(bundle: FrontierSwarmMergeBundle): FrontierSwarmMergeBundle['semanticImport'] | undefined {
   const metadata = bundle.metadata as { semanticImport?: FrontierSwarmMergeBundle['semanticImport'] } | undefined;
   return richerSemanticImportSummary(bundle.semanticImport, metadata?.semanticImport);
 }
-
 
 function richerSemanticImportSummary(
   first: FrontierSwarmMergeBundle['semanticImport'] | undefined,
@@ -284,7 +288,6 @@ function richerSemanticImportSummary(
   if (!second) return first;
   return semanticImportSummaryRichness(second) > semanticImportSummaryRichness(first) ? second : first;
 }
-
 
 function semanticImportSummaryRichness(summary: FrontierSwarmMergeBundle['semanticImport'] | undefined): number {
   if (!summary) return 0;
@@ -305,7 +308,6 @@ function semanticImportSummaryRichness(summary: FrontierSwarmMergeBundle['semant
   ];
   return values.reduce<number>((sum, value) => sum + nonNegativeNumber(value), 0);
 }
-
 
 export function semanticImportEnabled(input: boolean | FrontierCodexSemanticImportOptions | undefined): boolean {
   if (input === true) return true;

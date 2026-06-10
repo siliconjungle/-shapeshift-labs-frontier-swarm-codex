@@ -3,6 +3,7 @@ import type { FrontierCodexContextBudgetReport } from './index.js';
 import { uniqueStrings } from './common.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { mergeSemanticEditScriptSummaries } from './semantic-edit-script.js';
+import { mergeSemanticEditProjectionSummaries } from './semantic-edit-projection.js';
 
 
 export function enrichCollectedCoordinatorDashboard(
@@ -22,6 +23,7 @@ export function enrichCollectedCoordinatorDashboard(
   };
   const semanticQualities = dashboard.jobs.map((job) => qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected));
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
+  const semanticEditProjections = mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
   const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
   mutable.jobs = dashboard.jobs.map((job) => {
@@ -56,6 +58,11 @@ export function enrichCollectedCoordinatorDashboard(
     semanticEditScriptStale: semanticEditScripts.stale,
     semanticEditScriptNeedsPort: semanticEditScripts.needsPort,
     semanticEditScriptPortable: semanticEditScripts.portable,
+    semanticEditProjectionProjected: semanticEditProjections.projected,
+    semanticEditProjectionBlocked: semanticEditProjections.blocked,
+    semanticEditProjectionMatchesWorker: semanticEditProjections.projectedSourceMatchesWorker,
+    semanticEditProjectionMismatchesWorker: semanticEditProjections.projectedSourceMismatchesWorker,
+    semanticEditProjectionMatchUnknown: semanticEditProjections.projectedSourceMatchUnknown,
     semanticEditAdmission,
     semanticEditScriptAdmission,
     semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
@@ -91,6 +98,9 @@ function semanticImportMetadata(
     semanticLineageDeleted: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageDeleted, 0),
     semanticLineageBlocked: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageBlocked, 0),
     semanticEditScripts: { ...mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript)) },
+    semanticEditProjections: {
+      ...mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection))
+    },
     semanticEditAdmission: semanticEditAdmissionSummary(semanticQualities),
     semanticEditScriptAdmission: semanticEditScriptAdmissionSummary(mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript))),
     semanticLineageEventKinds: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageEventKinds)),

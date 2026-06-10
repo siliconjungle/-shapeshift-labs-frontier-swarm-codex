@@ -20,6 +20,7 @@ import {
 import { mergeSemanticFactSummaries, semanticImportFactSummary, summarizeLangSidecarSemanticFacts } from './semantic-import-facts.js';
 import { summarizeSemanticDependencies } from './semantic-import-dependencies.js';
 import { summarizeSemanticEditScript } from './semantic-edit-script.js';
+import { summarizeSemanticEditProjection } from './semantic-edit-projection.js';
 import { summarizeSemanticLineageEvidence } from './semantic-import-lineage.js';
 import { loadFrontierLangForSemanticImport, normalizeSemanticImportOptions, selectSemanticImportPaths, semanticImportCandidatePaths } from './semantic-import-select.js';
 import { discoverSemanticImportFallbackPaths, withSemanticImportFallback } from './semantic-import-fallback.js';
@@ -155,6 +156,14 @@ export async function createCodexSemanticImportSidecar(input: {
           metadata: semanticImportMetadata(input.job, 'semantic-edit-script', resolved.path)
         })
         : undefined;
+      const semanticEditProjection = semanticEditScript && headSource && api.projectSemanticEditScriptToSource
+        ? api.projectSemanticEditScriptToSource({
+          script: semanticEditScript,
+          workerSourceText: sourceText,
+          headSourceText: headSource.sourceText,
+          metadata: semanticImportMetadata(input.job, 'semantic-edit-projection', resolved.path)
+        })
+        : undefined;
       const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
       const semanticSidecar = api.createSemanticImportSidecar
         ? api.createSemanticImportSidecar(importResult, {
@@ -229,6 +238,7 @@ export async function createCodexSemanticImportSidecar(input: {
         paradigmSemantics: summarizeParadigmSemantics(importResult?.universalAst?.paradigmSemantics, semanticSidecar),
         semanticLineage: summarizeSemanticLineageEvidence(nativeDiff ?? semanticSidecar),
         semanticEditScript: summarizeSemanticEditScript(semanticEditScript),
+        semanticEditProjection: summarizeSemanticEditProjection(semanticEditProjection),
         nativeDiff: summarizeNativeSourceChangeSet(nativeDiff),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),

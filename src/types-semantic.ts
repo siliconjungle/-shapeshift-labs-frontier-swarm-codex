@@ -1,11 +1,6 @@
-import type {
-  FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND,
-  FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION
-} from './constants.js';
-import type {
-  FrontierCodexSemanticEditAdmissionDecision,
-  FrontierCodexSemanticEditScriptSummary
-} from './types-semantic-edit.js';
+import type { FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND, FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION } from './constants.js';
+import type { FrontierCodexSemanticEditAdmissionDecision, FrontierCodexSemanticEditScriptSummary } from './types-semantic-edit.js';
+import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
 
 export interface FrontierCodexSemanticImportOptions {
   enabled?: boolean;
@@ -59,6 +54,7 @@ export interface FrontierCodexSemanticImportRecord {
   paradigmSemantics?: FrontierCodexParadigmSemanticsSummary;
   semanticLineage?: FrontierCodexSemanticLineageSummary;
   semanticEditScript?: FrontierCodexSemanticEditScriptSummary;
+  semanticEditProjection?: FrontierCodexSemanticEditProjectionSummary;
   nativeDiff?: {
     kind?: string;
     id?: string;
@@ -242,6 +238,7 @@ export interface FrontierCodexSemanticImportSidecar {
     paradigmSemantics: FrontierCodexParadigmSemanticsSummary;
     semanticLineage: FrontierCodexSemanticLineageSummary;
     semanticEditScripts: FrontierCodexSemanticEditScriptSummary;
+    semanticEditProjections: FrontierCodexSemanticEditProjectionSummary;
     sourceProjections: {
       total: number;
       preserved: number;
@@ -313,6 +310,7 @@ export interface FrontierCodexSemanticImportQuality {
   semanticLineageEventKinds: string[];
   semanticLineageReasonCodes: string[];
   semanticEditScript: FrontierCodexSemanticEditScriptSummary;
+  semanticEditProjection: FrontierCodexSemanticEditProjectionSummary;
   semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision;
   warnings: string[];
 }

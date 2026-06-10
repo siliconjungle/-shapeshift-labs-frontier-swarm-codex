@@ -94,6 +94,7 @@ export {
 } from './constants.js';
 export { collectCodexSwarmRun } from './collect.js';
 export { createCodexArtifactStore, readCodexArtifactRecords } from './artifact-store.js';
+export { createSemanticCompactSummary } from './semantic-compact-summary.js';
 export { createCodexCleanupPlan } from './cleanup.js';
 export { queryCodexSwarmCollection } from './query.js';
 export { applyCodexSwarmCollection } from './apply.js';
@@ -152,6 +153,11 @@ export {
   semanticEditScriptStatusCount,
   semanticEditScriptTags
 } from './semantic-edit-admission.js';
+export {
+  emptySemanticEditProjectionSummary,
+  mergeSemanticEditProjectionSummaries,
+  summarizeSemanticEditProjection
+} from './semantic-edit-projection.js';
 
 export type * from './types.js';
 

@@ -204,6 +204,9 @@ async function testChangedPathDiscovery(plan, tmp) {
     executor: async (input) => {
       await fs.mkdir(path.join(input.workspacePath, 'src/runtime'), { recursive: true });
       await fs.writeFile(path.join(input.workspacePath, 'src/runtime/action.ts'), 'export const ok = true;\n');
+      await fs.writeFile(path.join(input.workspacePath, 'loom.json'), '{}\n');
+      await fs.writeFile(path.join(input.workspacePath, '.loomignore'), '.loom\n');
+      await fs.writeFile(path.join(input.workspacePath, '.gitignore'), '.loom\n');
       await fs.mkdir(path.join(input.workspacePath, 'agent-runs/noisy'), { recursive: true });
       await fs.writeFile(path.join(input.workspacePath, 'agent-runs/noisy/evidence.json'), '{}\n');
       await fs.mkdir(path.join(input.workspacePath, 'packages/frontier-swarm/dist'), { recursive: true });
@@ -228,8 +231,29 @@ async function testChangedPathDiscovery(plan, tmp) {
   const changedWorkspaceProofPath = changedResult.run.results[0].evidencePaths.find((entry) => entry.endsWith('workspace-proof.json'));
   const changedWorkspaceProof = JSON.parse(await fs.readFile(changedWorkspaceProofPath, 'utf8'));
   assert.deepStrictEqual(changedWorkspaceProof.ignoredChangedPaths, [
+    '.gitignore',
+    '.loomignore',
     'agent-runs/noisy/evidence.json',
+    'loom.json',
     'packages/frontier-swarm/dist/index.js',
     'packages/frontier-swarm/node_modules/.cache/tsconfig.tsbuildinfo'
   ]);
+
+  const explicitSetupResult = await runCodexSwarm(plan, {
+    outDir: path.join(tmp, 'explicit-setup-run'),
+    cwd: tmp,
+    workspace: {
+      mode: 'copy',
+      root: path.join(tmp, 'explicit-setup-workspaces'),
+      replace: true,
+      includes: ['.gitignore'],
+      linkNodeModules: false
+    },
+    executor: async (input) => {
+      await fs.writeFile(path.join(input.workspacePath, '.gitignore'), '.loom\n');
+      await fs.writeFile(input.paths.lastMessagePath, 'explicit setup\n');
+      return { exitCode: 0, lastMessage: 'explicit setup' };
+    }
+  });
+  assert.deepStrictEqual(explicitSetupResult.run.results[0].changedPaths, ['.gitignore']);
 }

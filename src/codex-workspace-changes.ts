@@ -166,6 +166,7 @@ function rewriteNoIndexPatchPaths(
 function isIgnoredWorkspaceChangedPath(file: string, plan: FrontierCodexWorkspacePlan): boolean {
   if (plan.mode !== 'copy' && plan.mode !== 'snapshot') return false;
   if (pathHasIgnoredSegment(file, ['node_modules', 'dist', 'coverage', '.frontier-framework', 'agent-runs'])) return true;
+  if (isGeneratedWorkspaceSetupFile(file) && !isExplicitWorkspaceInput(file, plan)) return true;
   const ignored = [
     ...plan.excludes,
     ...plan.artifactIncludes,
@@ -177,6 +178,15 @@ function isIgnoredWorkspaceChangedPath(file: string, plan: FrontierCodexWorkspac
     'coverage'
   ];
   return ignored.some((entry) => file === entry || file.startsWith(entry.replace(/\/$/, '') + '/'));
+}
+
+function isGeneratedWorkspaceSetupFile(file: string): boolean {
+  return file === 'loom.json' || file === '.loomignore' || file === '.gitignore';
+}
+
+function isExplicitWorkspaceInput(file: string, plan: FrontierCodexWorkspacePlan): boolean {
+  const inputs = [...plan.includes, ...plan.artifactIncludes, ...plan.requiredIncludes, ...plan.optionalIncludes];
+  return inputs.some((entry) => file === entry || file.startsWith(entry.replace(/\/$/, '') + '/'));
 }
 
 async function walkWorkspaceFiles(root: string, current: string, snapshot: FrontierCodexWorkspaceFileSnapshot): Promise<void> {

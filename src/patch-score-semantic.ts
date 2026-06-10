@@ -8,7 +8,9 @@ import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportLineageSummary } from './semantic-import-lineage.js';
 import { emptySemanticEditScriptSummary, summarizeSemanticEditScript } from './semantic-edit-script.js';
+import { emptySemanticEditProjectionSummary, summarizeSemanticEditProjection } from './semantic-edit-projection.js';
 import { classifySemanticEditScriptAdmission } from './semantic-edit-admission.js';
+import { isCleanSemanticEditOperationScript, isCleanSemanticEditProjection } from './semantic-edit-clean-eligibility.js';
 
 
 export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): FrontierCodexPatchScoreSemanticEvidence {
@@ -54,6 +56,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
       semanticLineageEventKinds: [],
       semanticLineageReasonCodes: [],
       semanticEditScript: emptySemanticEditScriptSummary(),
+      semanticEditProjection: emptySemanticEditProjectionSummary(),
       semanticEditAdmission: classifySemanticEditScriptAdmission(undefined),
       semanticEditOperationAutoMergeCandidate: false,
       semanticEditOperationCleanEligible: false,
@@ -85,8 +88,10 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const semanticLineage = semanticImportLineageSummary(summary);
   const semanticEditScript = summarizeSemanticEditScript(summary) ?? emptySemanticEditScriptSummary();
+  const semanticEditProjection = summarizeSemanticEditProjection(summary) ?? emptySemanticEditProjectionSummary();
   const semanticEditAdmission = classifySemanticEditScriptAdmission(semanticEditScript);
-  const semanticEditOperationCleanEligible = isCleanSemanticEditOperationScript(semanticEditScript);
+  const cleanSemanticEditScript = isCleanSemanticEditOperationScript(semanticEditScript);
+  const semanticEditOperationCleanEligible = cleanSemanticEditScript && isCleanSemanticEditProjection(semanticEditProjection);
   const errorLosses = nonNegativeNumber(lossesBySeverity.error);
   const warningLosses = nonNegativeNumber(lossesBySeverity.warning);
   const blocked = nonNegativeNumber(readiness.blocked);
@@ -206,6 +211,36 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     scoreAdjustment -= 5;
     cleanEligible = false;
   }
+  if (cleanSemanticEditScript && semanticEditProjection.total === 0) {
+    reasons.push('semantic edit projection missing');
+    scoreAdjustment -= 10;
+    cleanEligible = false;
+  }
+  if (semanticEditProjection.blocked > 0) {
+    reasons.push(`semantic edit projection blocked: ${semanticEditProjection.blocked}`);
+    scoreAdjustment -= 15;
+    cleanEligible = false;
+  }
+  if (semanticEditProjection.total > 0 && semanticEditProjection.projected === 0 && semanticEditScript.autoMergeCandidates > 0) {
+    reasons.push('semantic edit projection has no projected source');
+    scoreAdjustment -= 10;
+    cleanEligible = false;
+  }
+  if (semanticEditProjection.skippedOperations > 0) {
+    reasons.push(`semantic edit projection skipped operations: ${semanticEditProjection.skippedOperations}`);
+    scoreAdjustment -= 5;
+    cleanEligible = false;
+  }
+  if (semanticEditProjection.projectedSourceMismatchesWorker > 0) {
+    reasons.push(`semantic edit projection worker mismatch: ${semanticEditProjection.projectedSourceMismatchesWorker}`);
+    scoreAdjustment -= 15;
+    cleanEligible = false;
+  }
+  if (semanticEditProjection.projectedSourceMatchUnknown > 0) {
+    reasons.push(`semantic edit projection worker match unknown: ${semanticEditProjection.projectedSourceMatchUnknown}`);
+    scoreAdjustment -= 5;
+    cleanEligible = false;
+  }
   if (sourceMapMappings > 0 && semanticSymbols > 0 && ownershipRegions > 0 && universalAstLayers > 0) {
     scoreAdjustment += 10;
   }
@@ -256,6 +291,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     semanticLineageEventKinds: semanticLineage.eventKinds,
     semanticLineageReasonCodes: semanticLineage.reasonCodes,
     semanticEditScript,
+    semanticEditProjection,
     semanticEditAdmission,
     semanticEditOperationAutoMergeCandidate: semanticEditOperationCleanEligible,
     semanticEditOperationCleanEligible,
@@ -265,18 +301,4 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     cleanEligible,
     reasons: uniqueStrings(reasons)
   };
-}
-
-function isCleanSemanticEditOperationScript(
-  script: ReturnType<typeof summarizeSemanticEditScript>
-): boolean {
-  if (!script || script.operations <= 0) return false;
-  return script.autoMergeCandidates >= script.operations &&
-    script.portable >= script.operations &&
-    script.conflicts === 0 &&
-    script.stale === 0 &&
-    script.blocked === 0 &&
-    script.needsPort === 0 &&
-    script.candidates === 0 &&
-    (script.admission['auto-merge-candidate'] ?? 0) > 0;
 }

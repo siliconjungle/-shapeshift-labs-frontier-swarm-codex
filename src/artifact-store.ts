@@ -10,9 +10,8 @@ import type { FrontierCodexArtifactRecord, FrontierCodexArtifactStoreResult, Fro
 import { isObject, pathExists, uniqueStrings } from './common.js';
 import { compressArtifactBytes } from './artifact-compression.js';
 import { readSqliteArtifactIndex, writeSqliteArtifactIndex } from './artifact-sqlite.js';
-
+import { createSemanticCompactSummary } from './semantic-compact-summary.js';
 const COMPRESS_EXTENSIONS = new Set(['.json', '.jsonl', '.log', '.txt', '.patch', '.md']);
-
 export async function createCodexArtifactStore(input: {
   collection: FrontierCodexCollectResult;
   compress?: boolean;
@@ -157,6 +156,12 @@ async function readArtifactMetadata(file: string): Promise<Record<string, unknow
     if (!isObject(parsed)) return {};
     const semanticImport = semanticImportSummaryForArtifact(parsed, file);
     const lineage = semanticLineageForArtifact(parsed, semanticImport);
+    const semanticCompactSummary = createSemanticCompactSummary({
+      summary: semanticImport,
+      sidecar: parsed,
+      expected: semanticExpectedForArtifact(semanticImport)
+    });
+    const semanticEdit = semanticCompactSummary?.semanticEdit;
     return isObject(parsed) ? {
       artifactKind: typeof parsed.kind === 'string' ? parsed.kind : undefined,
       disposition: parsed.disposition,
@@ -179,6 +184,22 @@ async function readArtifactMetadata(file: string): Promise<Record<string, unknow
       semanticLineageRenamed: numberField(lineage, 'renamed'),
       semanticLineageDeleted: numberField(lineage, 'deleted'),
       lineagePresent: Boolean(lineage) && numberField(lineage, 'inferredEvents') > 0,
+      semanticCompactSummary,
+      semanticEditScript: semanticEdit?.script,
+      semanticEditAdmission: semanticEdit?.admission,
+      semanticEditAdmissionStatus: semanticEdit?.status,
+      semanticEditAdmissionAutoMergeCandidate: semanticEdit?.autoMergeCandidate,
+      semanticEditAdmissionCleanEligible: semanticEdit?.cleanEligible,
+      semanticEditScriptPortable: semanticEdit?.script.portable,
+      semanticEditScriptConflicts: semanticEdit?.script.conflicts,
+      semanticEditScriptStale: semanticEdit?.script.stale,
+      semanticEditScriptNeedsPort: semanticEdit?.script.needsPort,
+      semanticEditProjectionProjected: semanticEdit?.projection?.projected,
+      semanticEditProjectionBlocked: semanticEdit?.projection?.blocked,
+      semanticEditProjectionMatchesWorker: semanticEdit?.projection?.projectedSourceMatchesWorker,
+      semanticEditProjectionMismatchesWorker: semanticEdit?.projection?.projectedSourceMismatchesWorker,
+      semanticEditProjectionMatchUnknown: semanticEdit?.projection?.projectedSourceMatchUnknown,
+      semanticSourceCount: semanticCompactSummary?.sourceCount,
       traceShards: Array.isArray(parsed.traceShards) ? parsed.traceShards.length : undefined
     } : {};
   } catch {
@@ -196,6 +217,18 @@ function artifactTags(candidate: { bucket?: string; kind: string }, metadata: Re
     semanticPresent ? 'semantic-import' : '',
     candidate.kind === 'semantic-imports' ? 'semantic-imports' : '',
     lineagePresent ? 'semantic-lineage' : '',
+    typeof metadata.semanticEditAdmissionStatus === 'string' ? `semantic-edit-admission-${metadata.semanticEditAdmissionStatus}` : '',
+    metadata.semanticEditAdmissionAutoMergeCandidate ? 'semantic-edit-admission-auto-merge-candidate' : '',
+    metadata.semanticEditAdmissionCleanEligible ? 'semantic-edit-admission-clean-eligible' : '',
+    Number(metadata.semanticEditScriptPortable ?? 0) > 0 ? 'semantic-edit-portable' : '',
+    Number(metadata.semanticEditProjectionProjected ?? 0) > 0 ? 'semantic-edit-projected' : '',
+    Number(metadata.semanticEditProjectionBlocked ?? 0) > 0 ? 'semantic-edit-projection-blocked' : '',
+    Number(metadata.semanticEditProjectionMatchesWorker ?? 0) > 0 ? 'semantic-edit-projection-worker-match' : '',
+    Number(metadata.semanticEditProjectionMismatchesWorker ?? 0) > 0 ? 'semantic-edit-projection-worker-mismatch' : '',
+    Number(metadata.semanticEditProjectionMatchUnknown ?? 0) > 0 ? 'semantic-edit-projection-worker-unknown' : '',
+    Number(metadata.semanticEditScriptConflicts ?? 0) > 0 ? 'semantic-edit-conflict' : '',
+    Number(metadata.semanticEditScriptStale ?? 0) > 0 ? 'semantic-edit-stale' : '',
+    Number(metadata.semanticEditScriptNeedsPort ?? 0) > 0 ? 'semantic-edit-needs-port' : '',
     metadata.staleAgainstHead ? 'stale' : '',
     Number(metadata.traceShards ?? 0) > 0 ? 'trace' : '',
     Number(metadata.semanticDependencyRelations ?? 0) > 0 ? 'semantic-dependencies' : ''
@@ -258,6 +291,13 @@ function semanticLineageForArtifact(
   return readObject(parsed.semanticLineage) ??
     readObject(semanticImport?.semanticLineage) ??
     readObject(semanticImport?.semanticLineageInference);
+}
+
+function semanticExpectedForArtifact(semanticImport: Record<string, unknown> | undefined): boolean {
+  return semanticImport?.semanticImportExpected === true ||
+    semanticImport?.expected === true ||
+    readObject(semanticImport?.quality)?.expected === true ||
+    readObject(semanticImport?.admission)?.expected === true;
 }
 
 function readObject(value: unknown): Record<string, unknown> | undefined {

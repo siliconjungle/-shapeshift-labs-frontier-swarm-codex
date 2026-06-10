@@ -14,6 +14,7 @@ import type {
   FrontierCodexSemanticEditScriptAdmissionSummary,
   FrontierCodexSemanticEditScriptSummary
 } from './types-semantic-edit.js';
+import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
 import type { FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './types-semantic.js';
 
 export interface FrontierCodexPatchHunkSummary {
@@ -215,6 +216,7 @@ export interface FrontierCodexCompactDashboard {
     semanticLineageEventKinds: string[];
     semanticLineageReasonCodes: string[];
     semanticEditScripts: FrontierCodexSemanticEditScriptSummary;
+    semanticEditProjections: FrontierCodexSemanticEditProjectionSummary;
     semanticEditAdmission: FrontierCodexSemanticEditAdmissionSummary;
     semanticEditScriptAdmission: FrontierCodexSemanticEditScriptAdmissionSummary;
   };

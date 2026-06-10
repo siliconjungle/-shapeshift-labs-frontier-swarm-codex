@@ -1,4 +1,4 @@
-import { isObject } from './common.js';
+import { isObject, nonNegativeNumber } from './common.js';
 import {
   canonicalSemanticEditStatus,
   classifySemanticEditScriptAdmission,
@@ -12,6 +12,15 @@ import type { FrontierCodexSemanticEditAdmissionDecision } from './types-semanti
 export interface SemanticEditQuery {
   semanticEditStatus?: string;
   semanticEditAdmission?: string;
+  semanticEditProjection?: string;
+}
+
+export interface SemanticEditProjectionQuerySummary {
+  projected: number;
+  blocked: number;
+  workerMatches: number;
+  workerMismatches: number;
+  workerUnknown: number;
 }
 
 export function jobSemanticEditScript(job: Record<string, unknown>): unknown {
@@ -23,6 +32,14 @@ export function jobSemanticEditScript(job: Record<string, unknown>): unknown {
 export function jobSemanticEditAdmission(job: Record<string, unknown>): unknown {
   const quality = isObject(job.semanticImportQuality) ? job.semanticImportQuality : {};
   return job.semanticEditAdmission ?? quality.semanticEditAdmission;
+}
+
+export function jobSemanticEditProjection(job: Record<string, unknown>): unknown {
+  const quality = isObject(job.semanticImportQuality) ? job.semanticImportQuality : {};
+  const semanticImport = isObject(job.semanticImport) ? job.semanticImport : {};
+  const compact = isObject(job.semanticCompactSummary) ? job.semanticCompactSummary : {};
+  const semanticEdit = isObject(compact.semanticEdit) ? compact.semanticEdit : {};
+  return quality.semanticEditProjection ?? semanticEdit.projection ?? semanticImport.semanticEditProjections;
 }
 
 export function matchesSemanticEdit(scriptValue: unknown, input: SemanticEditQuery, haystack: string, admissionValue?: unknown): boolean {
@@ -37,9 +54,23 @@ export function matchesSemanticEdit(scriptValue: unknown, input: SemanticEditQue
       !hasScript && semanticEditTextMatch(haystack, input.semanticEditAdmission));
 }
 
+export function matchesSemanticEditProjection(value: unknown, wanted: string | undefined, haystack: string): boolean {
+  if (wanted === undefined) return true;
+  const lowered = wanted.toLowerCase();
+  const projection = isObject(value) ? value : {};
+  const number = (key: string) => Number(projection[key] ?? 0);
+  if (lowered === 'projected') return number('projected') > 0;
+  if (lowered === 'blocked') return number('blocked') > 0;
+  if (lowered === 'worker-match' || lowered === 'match') return number('projectedSourceMatchesWorker') > 0;
+  if (lowered === 'worker-mismatch' || lowered === 'mismatch') return number('projectedSourceMismatchesWorker') > 0;
+  if (lowered === 'worker-unknown' || lowered === 'unknown') return number('projectedSourceMatchUnknown') > 0;
+  return semanticEditTextMatch(haystack, wanted);
+}
+
 export function matchesEvidenceSemanticEdit(entry: Record<string, unknown>, input: SemanticEditQuery, haystack: string): boolean {
   const facets = isObject(entry.facets) ? entry.facets : {};
-  return matchesSemanticEdit(facetsToSemanticEditScript(facets), input, haystack, facetsToSemanticEditAdmission(facets));
+  return matchesSemanticEdit(facetsToSemanticEditScript(facets), input, haystack, facetsToSemanticEditAdmission(facets)) &&
+    matchesSemanticEditProjection(facetsToSemanticEditProjection(facets), input.semanticEditProjection, haystack);
 }
 
 export function semanticEditAdmissionSummary(jobs: Record<string, unknown>[]) {
@@ -64,6 +95,18 @@ export function semanticEditScriptAdmissionSummary(jobs: Record<string, unknown>
       return semanticEditScriptAdmissionCount(script, 'auto-merge-candidate') > 0 && semanticEditScriptHasStatus(script, 'portable');
     }).length
   };
+}
+
+export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): SemanticEditProjectionQuerySummary {
+  return jobs.reduce<SemanticEditProjectionQuerySummary>((out, job) => {
+    const projection = isObject(jobSemanticEditProjection(job)) ? jobSemanticEditProjection(job) as Record<string, unknown> : {};
+    out.projected += nonNegativeNumber(projection.projected);
+    out.blocked += nonNegativeNumber(projection.blocked);
+    out.workerMatches += nonNegativeNumber(projection.projectedSourceMatchesWorker);
+    out.workerMismatches += nonNegativeNumber(projection.projectedSourceMismatchesWorker);
+    out.workerUnknown += nonNegativeNumber(projection.projectedSourceMatchUnknown);
+    return out;
+  }, { projected: 0, blocked: 0, workerMatches: 0, workerMismatches: 0, workerUnknown: 0 });
 }
 
 function semanticEditAdmissionFromUnknown(value: unknown, script: ReturnType<typeof semanticEditScriptFromUnknown> | undefined): FrontierCodexSemanticEditAdmissionDecision {
@@ -114,6 +157,16 @@ function facetsToSemanticEditAdmission(facets: Record<string, unknown>): unknown
     autoMergeCandidate: facets.semanticEditAdmissionAutoMergeCandidate === true || String(facets.semanticEditAdmissionAutoMergeCandidate) === 'true',
     cleanEligible: facets.semanticEditAdmissionCleanEligible === true || String(facets.semanticEditAdmissionCleanEligible) === 'true',
     reasons: String(facets.semanticEditAdmissionReasons ?? '').split(',').filter(Boolean)
+  };
+}
+
+function facetsToSemanticEditProjection(facets: Record<string, unknown>): unknown {
+  return {
+    projected: facets.semanticEditProjectionProjected,
+    blocked: facets.semanticEditProjectionBlocked,
+    projectedSourceMatchesWorker: facets.semanticEditProjectionMatchesWorker,
+    projectedSourceMismatchesWorker: facets.semanticEditProjectionMismatchesWorker,
+    projectedSourceMatchUnknown: facets.semanticEditProjectionMatchUnknown
   };
 }
 

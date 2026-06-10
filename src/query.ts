@@ -6,10 +6,13 @@ import { isObject, pathExists, uniqueStrings } from './common.js';
 import { readCodexArtifactRecords } from './artifact-store.js';
 import {
   jobSemanticEditAdmission,
+  jobSemanticEditProjection,
   jobSemanticEditScript,
   matchesEvidenceSemanticEdit,
   matchesSemanticEdit,
+  matchesSemanticEditProjection,
   semanticEditAdmissionSummary,
+  semanticEditProjectionSummary,
   semanticEditScriptAdmissionSummary
 } from './query-semantic-edit.js';
 
@@ -31,6 +34,7 @@ export interface FrontierCodexQueryInput {
   lineage?: boolean;
   semanticEditStatus?: string;
   semanticEditAdmission?: string;
+  semanticEditProjection?: string;
   readiness?: string;
   passedTests?: boolean;
   limit?: number;
@@ -65,6 +69,7 @@ export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) 
       evidence: evidenceRows.length,
       touchedPaths: uniqueStrings(jobs.flatMap((job) => Array.isArray(job.changedPaths) ? job.changedPaths.filter((entry): entry is string => typeof entry === 'string') : [])),
       semanticEditAdmission: semanticEditAdmissionSummary(jobs),
+      semanticEditProjection: semanticEditProjectionSummary(jobs),
       semanticEditScriptAdmission: semanticEditScriptAdmissionSummary(jobs)
     },
     jobs,
@@ -90,6 +95,7 @@ export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
     lineage: optionalBoolArg(args.lineage ?? args['semantic-lineage']),
     semanticEditStatus: stringArg(args.semanticEditStatus ?? args['semantic-edit-status']),
     semanticEditAdmission: stringArg(args.semanticEditAdmission ?? args['semantic-edit-admission']),
+    semanticEditProjection: stringArg(args.semanticEditProjection ?? args['semantic-edit-projection']),
     readiness: stringArg(args.readiness ?? args.view),
     passedTests: optionalBoolArg(args.passedTests ?? args['passed-tests']),
     limit: numberArg(args.limit)
@@ -130,6 +136,7 @@ function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput
     && (input.semantic === undefined || Boolean(job.semanticImport) === input.semantic || Boolean(job.semanticImportQuality) === input.semantic)
     && (input.lineage === undefined || jobHasLineage(job) === input.lineage)
     && matchesSemanticEdit(jobSemanticEditScript(job), input, haystack, jobSemanticEditAdmission(job))
+    && matchesSemanticEditProjection(jobSemanticEditProjection(job), input.semanticEditProjection, haystack)
     && (input.readiness === undefined || matchesReadiness(job, input.readiness))
     && (input.passedTests === undefined || testsPassed(job) === input.passedTests);
 }
@@ -145,7 +152,8 @@ function matchesArtifact(record: FrontierCodexArtifactRecord, input: FrontierCod
     && (input.tag === undefined || record.tags.includes(input.tag))
     && (input.semantic === undefined || record.tags.includes('semantic-sidecar') === input.semantic)
     && (input.lineage === undefined || textHasLineage(haystack) === input.lineage)
-    && matchesSemanticEdit(undefined, input, haystack);
+    && matchesSemanticEdit(artifactSemanticEditScript(record), input, haystack, artifactSemanticEditAdmission(record))
+    && matchesSemanticEditProjection(artifactSemanticEditProjection(record), input.semanticEditProjection, haystack);
 }
 
 function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQueryInput): boolean {
@@ -191,6 +199,24 @@ function matchesReadiness(job: Record<string, unknown>, value: string): boolean 
   if (readiness === 'blocked') return job.status === 'blocked' || job.mergeReadiness === 'blocked' || job.disposition === 'blocked';
   if (readiness === 'evidence-only') return job.mergeReadiness === 'evidence-only' || job.disposition === 'evidence-only';
   return JSON.stringify(job).toLowerCase().includes(readiness);
+}
+
+function artifactSemanticEditScript(record: FrontierCodexArtifactRecord): unknown {
+  const compact = isObject(record.metadata.semanticCompactSummary) ? record.metadata.semanticCompactSummary : {};
+  const semanticEdit = isObject(compact.semanticEdit) ? compact.semanticEdit : {};
+  return record.metadata.semanticEditScript ?? semanticEdit.script;
+}
+
+function artifactSemanticEditAdmission(record: FrontierCodexArtifactRecord): unknown {
+  const compact = isObject(record.metadata.semanticCompactSummary) ? record.metadata.semanticCompactSummary : {};
+  const semanticEdit = isObject(compact.semanticEdit) ? compact.semanticEdit : {};
+  return record.metadata.semanticEditAdmission ?? semanticEdit.admission;
+}
+
+function artifactSemanticEditProjection(record: FrontierCodexArtifactRecord): unknown {
+  const compact = isObject(record.metadata.semanticCompactSummary) ? record.metadata.semanticCompactSummary : {};
+  const semanticEdit = isObject(compact.semanticEdit) ? compact.semanticEdit : {};
+  return record.metadata.semanticEditProjection ?? semanticEdit.projection;
 }
 
 function arrayIncludes(value: unknown, needle: string): boolean {

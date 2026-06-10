@@ -8,6 +8,7 @@ import { uniqueStrings } from './common.js';
 import { mergeSemanticFactSummaries } from './semantic-import-facts.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { mergeSemanticEditScriptSummaries } from './semantic-edit-script.js';
+import { mergeSemanticEditProjectionSummaries } from './semantic-edit-projection.js';
 import { codexJobTraceSummary, summarizeCodexTraceSummaries } from './trace-summary.js';
 import { contextBudgetFromCoordinatorJob } from './context-budget.js';
 
@@ -30,6 +31,7 @@ export function createCodexCompactDashboard(input: {
     predicates: entry.semanticFactPredicates
   })));
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
+  const semanticEditProjections = mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
   const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
   const traceSummaries = input.dashboard.jobs
@@ -112,6 +114,7 @@ export function createCodexCompactDashboard(input: {
       semanticLineageEventKinds: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageEventKinds)),
       semanticLineageReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageReasonCodes)),
       semanticEditScripts,
+      semanticEditProjections,
       semanticEditAdmission,
       semanticEditScriptAdmission
     },
