@@ -141,6 +141,17 @@ export {
   queryCodexSwarmTournament,
   readCodexTournamentAdaptiveFeedback
 } from './tournament-query.js';
+export {
+  canonicalSemanticEditStatus,
+  classifySemanticEditScriptAdmission,
+  semanticEditScriptAdmissionCount,
+  semanticEditScriptFacets,
+  semanticEditScriptFromUnknown,
+  semanticEditScriptHasAdmission,
+  semanticEditScriptHasStatus,
+  semanticEditScriptStatusCount,
+  semanticEditScriptTags
+} from './semantic-edit-admission.js';
 
 export type * from './types.js';
 

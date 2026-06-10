@@ -60,6 +60,22 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
       metadata: { semanticImport: semanticEditPortableImport(readySemanticImport) }
     }
   });
+  await writeSemanticFixture({
+    collection,
+    readyDir,
+    bundle: {
+      ...baseBundle,
+      id: 'semantic-edit-needs-port-portable-bundle',
+      jobId: 'semantic-edit-needs-port-portable-job',
+      taskId: 'semantic-edit-needs-port-portable-task',
+      queueItemIds: ['semantic-edit-needs-port-portable-task'],
+      mergeReadiness: 'patch-candidate',
+      disposition: 'needs-port',
+      autoMergeable: false,
+      semanticImport: semanticEditPortableImport(readySemanticImport),
+      metadata: { semanticImport: semanticEditPortableImport(readySemanticImport) }
+    }
+  });
   const score = await scoreCodexSwarmPatches({
     collection,
     cwd: applyRepo,
@@ -68,7 +84,7 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   });
   const byJob = new Map(score.entries.map((entry) => [entry.jobId, entry]));
   assert.strictEqual(score.ok, true);
-  assert.strictEqual(score.summary['accepted-clean'], 1);
+  assert.strictEqual(score.summary['accepted-clean'], 2);
   assert.strictEqual(score.summary['accepted-needs-port'], 3);
   assert.strictEqual(byJob.get('empty-semantic-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('empty-semantic-job').semanticEvidence.cleanEligible, false);
@@ -85,6 +101,10 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.cleanEligible, true);
   assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.semanticEditScript.portable, 1);
   assert.strictEqual(byJob.get('semantic-edit-portable-job').semanticEvidence.semanticEditScript.autoMergeCandidates, 1);
+  assert.strictEqual(byJob.get('semantic-edit-needs-port-portable-job').status, 'accepted-clean');
+  assert.strictEqual(byJob.get('semantic-edit-needs-port-portable-job').semanticEvidence.semanticEditAdmission.status, 'auto-merge-candidate');
+  assert.strictEqual(byJob.get('semantic-edit-needs-port-portable-job').semanticEvidence.semanticEditAdmission.autoMergeCandidate, true);
+  assert.ok(byJob.get('semantic-edit-needs-port-portable-job').reasons.includes('semantic edit script promoted bundle to auto-merge candidate'));
 }
 
 async function writeSemanticFixture({ collection, readyDir, bundle }) {

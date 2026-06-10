@@ -8,6 +8,7 @@ import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportLineageSummary } from './semantic-import-lineage.js';
 import { emptySemanticEditScriptSummary, summarizeSemanticEditScript } from './semantic-edit-script.js';
+import { classifySemanticEditScriptAdmission } from './semantic-edit-admission.js';
 
 
 export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): FrontierCodexPatchScoreSemanticEvidence {
@@ -53,6 +54,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
       semanticLineageEventKinds: [],
       semanticLineageReasonCodes: [],
       semanticEditScript: emptySemanticEditScriptSummary(),
+      semanticEditAdmission: classifySemanticEditScriptAdmission(undefined),
       readiness: {},
       lossesBySeverity: {},
       scoreAdjustment,
@@ -81,6 +83,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
   const semanticLineage = semanticImportLineageSummary(summary);
   const semanticEditScript = summarizeSemanticEditScript(summary) ?? emptySemanticEditScriptSummary();
+  const semanticEditAdmission = classifySemanticEditScriptAdmission(semanticEditScript);
   const errorLosses = nonNegativeNumber(lossesBySeverity.error);
   const warningLosses = nonNegativeNumber(lossesBySeverity.warning);
   const blocked = nonNegativeNumber(readiness.blocked);
@@ -190,6 +193,11 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     scoreAdjustment -= 20;
     cleanEligible = false;
   }
+  if (semanticEditScript.reviewRequired > 0) {
+    reasons.push('semantic edit script needs review');
+    scoreAdjustment -= 5;
+    cleanEligible = false;
+  }
   if (semanticEditScript.needsPort > 0 || semanticEditScript.candidates > 0) {
     reasons.push('semantic edit script needs port');
     scoreAdjustment -= 5;
@@ -245,6 +253,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     semanticLineageEventKinds: semanticLineage.eventKinds,
     semanticLineageReasonCodes: semanticLineage.reasonCodes,
     semanticEditScript,
+    semanticEditAdmission,
     readiness,
     lossesBySeverity,
     scoreAdjustment: Math.max(-60, Math.min(15, scoreAdjustment)),

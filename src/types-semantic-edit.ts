@@ -20,3 +20,19 @@ export interface FrontierCodexSemanticEditScriptSummary {
   evidenceIds: string[];
   empty: boolean;
 }
+
+export type FrontierCodexSemanticEditAdmissionStatus =
+  | 'auto-merge-candidate'
+  | 'needs-port'
+  | 'conflict'
+  | 'stale'
+  | 'blocked'
+  | 'review-required'
+  | 'no-semantic-edit-script';
+
+export interface FrontierCodexSemanticEditAdmissionDecision {
+  status: FrontierCodexSemanticEditAdmissionStatus;
+  autoMergeCandidate: boolean;
+  cleanEligible: boolean;
+  reasons: string[];
+}

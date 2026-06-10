@@ -23,7 +23,10 @@ import type {
   FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION
 } from './constants.js';
 import type { FrontierCodexCompactDashboard, FrontierCodexContextBudgetReport } from './types-evidence.js';
-import type { FrontierCodexSemanticEditScriptSummary } from './types-semantic-edit.js';
+import type {
+  FrontierCodexSemanticEditAdmissionDecision,
+  FrontierCodexSemanticEditScriptSummary
+} from './types-semantic-edit.js';
 
 export type FrontierCodexCollectBucket =
   | 'ready-to-apply'
@@ -235,6 +238,7 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   semanticLineageEventKinds: string[];
   semanticLineageReasonCodes: string[];
   semanticEditScript: FrontierCodexSemanticEditScriptSummary;
+  semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision;
   readiness: Record<string, number>;
   lossesBySeverity: Record<string, number>;
   scoreAdjustment: number;

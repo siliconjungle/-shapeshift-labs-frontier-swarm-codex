@@ -1,4 +1,7 @@
-import type { FrontierCodexSemanticEditScriptSummary } from './types-semantic-edit.js';
+import type {
+  FrontierCodexSemanticEditAdmissionDecision,
+  FrontierCodexSemanticEditScriptSummary
+} from './types-semantic-edit.js';
 import { nonNegativeNumber, uniqueStrings } from './common.js';
 import { emptySemanticEditScriptSummary, summarizeSemanticEditScript } from './semantic-edit-script.js';
 
@@ -81,6 +84,56 @@ export function semanticEditScriptFacets(summary: FrontierCodexSemanticEditScrip
   };
 }
 
+export function classifySemanticEditScriptAdmission(
+  summary: FrontierCodexSemanticEditScriptSummary | undefined
+): FrontierCodexSemanticEditAdmissionDecision {
+  const entry = summary ?? emptySemanticEditScriptSummary();
+  if (entry.empty || entry.total === 0 && entry.operations === 0) {
+    return {
+      status: 'no-semantic-edit-script',
+      autoMergeCandidate: false,
+      cleanEligible: false,
+      reasons: ['no semantic edit script']
+    };
+  }
+  if (entry.conflicts > 0) return blockedSemanticEditAdmission('conflict', `semantic edit script conflicts: ${entry.conflicts}`);
+  if (entry.stale > 0) return blockedSemanticEditAdmission('stale', `semantic edit script stale anchors: ${entry.stale}`);
+  if (entry.blocked > 0) return blockedSemanticEditAdmission('blocked', `semantic edit script blocked: ${entry.blocked}`);
+  if (entry.reviewRequired > 0) return blockedSemanticEditAdmission('review-required', 'semantic edit script needs review');
+  if (entry.needsPort > 0 || entry.candidates > 0) {
+    return {
+      status: 'needs-port',
+      autoMergeCandidate: false,
+      cleanEligible: false,
+      reasons: ['semantic edit script needs port']
+    };
+  }
+  const hasPositiveAdmission = entry.autoMergeCandidates > 0 || semanticEditScriptHasAdmission(entry, 'auto-merge-candidate');
+  const hasPortableAction = entry.portable > 0 || entry.autoApplyCandidates > 0 || entry.alreadyApplied > 0;
+  if (hasPositiveAdmission && hasPortableAction) {
+    return {
+      status: 'auto-merge-candidate',
+      autoMergeCandidate: true,
+      cleanEligible: true,
+      reasons: ['semantic edit script auto-merge candidate']
+    };
+  }
+  if (entry.portable > 0) {
+    return {
+      status: 'needs-port',
+      autoMergeCandidate: false,
+      cleanEligible: false,
+      reasons: ['semantic edit script is portable but lacks auto-merge admission']
+    };
+  }
+  return {
+    status: 'needs-port',
+    autoMergeCandidate: false,
+    cleanEligible: false,
+    reasons: ['semantic edit script has no auto-merge admission']
+  };
+}
+
 export function canonicalSemanticEditStatus(status: string): string {
   const clean = status.trim();
   const lowered = clean.replace(/_/g, '-').toLowerCase();
@@ -99,6 +152,18 @@ function directSemanticEditCounter(summary: FrontierCodexSemanticEditScriptSumma
   if (status === 'stale') return summary.stale;
   if (status === 'blocked') return summary.blocked;
   return 0;
+}
+
+function blockedSemanticEditAdmission(
+  status: FrontierCodexSemanticEditAdmissionDecision['status'],
+  reason: string
+): FrontierCodexSemanticEditAdmissionDecision {
+  return {
+    status,
+    autoMergeCandidate: false,
+    cleanEligible: false,
+    reasons: [reason]
+  };
 }
 
 function sumAliases(record: Record<string, number>, status: string): number {
