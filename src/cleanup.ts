@@ -4,6 +4,7 @@ import { FRONTIER_SWARM_CODEX_CLEANUP_PLAN_KIND, FRONTIER_SWARM_CODEX_CLEANUP_PL
 import type { FrontierCodexCleanupInput, FrontierCodexCleanupPlan } from './index.js';
 import { findFilesByName, isObject, pathExists } from './common.js';
 import { readCodexPidProcesses } from './collect.js';
+import { readCodexArtifactRecords } from './artifact-store.js';
 
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
@@ -12,7 +13,7 @@ export async function createCodexCleanupPlan(input: FrontierCodexCleanupInput): 
   const generatedAt = Date.now();
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const runDir = path.resolve(cwd, input.run);
-  const collectionDir = await resolveCollectionDir(runDir);
+  const collectionDir = input.collection ? path.resolve(cwd, input.collection) : await resolveCollectionDir(runDir);
   const markerPath = collectionDir ? path.join(collectionDir, 'collected-and-indexed.json') : undefined;
   const indexed = !!markerPath && await pathExists(markerPath);
   const processes = await readCodexPidProcesses(path.join(runDir, 'pids.json')).catch(() => []);
@@ -22,7 +23,11 @@ export async function createCodexCleanupPlan(input: FrontierCodexCleanupInput): 
     ...(active && input.keepActive !== false ? ['active-pids-present'] : [])
   ];
   const failedJobIds = input.keepFailed === false ? new Set<string>() : await readFailedJobIds(collectionDir);
-  const candidates = await workspaceCleanupCandidates(runDir, failedJobIds, generatedAt, input.maxAgeHours);
+  const workspaceCandidates = await workspaceCleanupCandidates(runDir, failedJobIds, generatedAt, input.maxAgeHours);
+  const artifactCandidates = input.pruneArtifacts
+    ? await artifactSourceCleanupCandidates(runDir, collectionDir, generatedAt, input.maxAgeHours)
+    : [];
+  const candidates = [...workspaceCandidates, ...artifactCandidates];
   let deletedCount = 0;
   if (input.dryRun === false && blockedReasons.length === 0) {
     for (const candidate of candidates) {
@@ -38,6 +43,7 @@ export async function createCodexCleanupPlan(input: FrontierCodexCleanupInput): 
     ok: blockedReasons.length === 0,
     dryRun: input.dryRun !== false,
     runDir,
+    ...(collectionDir ? { collectionDir } : {}),
     generatedAt,
     indexed,
     candidates,
@@ -45,7 +51,9 @@ export async function createCodexCleanupPlan(input: FrontierCodexCleanupInput): 
     summary: {
       candidateCount: candidates.length,
       deletedCount,
-      reclaimableBytes: candidates.reduce((sum, candidate) => sum + candidate.bytes, 0)
+      reclaimableBytes: candidates.reduce((sum, candidate) => sum + candidate.bytes, 0),
+      workspaceCount: workspaceCandidates.length,
+      artifactSourceCount: artifactCandidates.length
     }
   };
 }
@@ -56,9 +64,11 @@ export async function handleCodexCleanupCommand(args: CliArgs): Promise<void> {
   const result = await createCodexCleanupPlan({
     cwd: process.cwd(),
     run,
-    maxAgeHours: numberArg(args.maxAgeHours ?? args['max-age-hours'] ?? args.maxAge ?? args['max-age']),
+    collection: stringArg(args.collection),
+    maxAgeHours: ageHoursArg(args.maxAgeHours ?? args['max-age-hours'] ?? args.maxAge ?? args['max-age']),
     keepFailed: boolArg(args.keepFailed ?? args['keep-failed'], true),
     keepActive: boolArg(args.keepActive ?? args['keep-active'], true),
+    pruneArtifacts: boolArg(args.pruneArtifacts ?? args['prune-artifacts'] ?? args.compactArtifacts ?? args['compact-artifacts'], false),
     dryRun: !boolArg(args.write, false)
   });
   await writeMaybe(args, result);
@@ -66,9 +76,11 @@ export async function handleCodexCleanupCommand(args: CliArgs): Promise<void> {
   if (!result.ok) process.exitCode = 1;
 }
 
-async function workspaceCleanupCandidates(runDir: string, failedJobIds: ReadonlySet<string>, now: number, maxAgeHours?: number) {
+type CleanupCandidate = FrontierCodexCleanupPlan['candidates'][number];
+
+async function workspaceCleanupCandidates(runDir: string, failedJobIds: ReadonlySet<string>, now: number, maxAgeHours?: number): Promise<CleanupCandidate[]> {
   const proofs = await findFilesByName(runDir, 'workspace-proof.json');
-  const out: Array<{ path: string; reason: string; bytes: number; active: boolean; failed: boolean; deleted?: boolean }> = [];
+  const out: CleanupCandidate[] = [];
   const seen = new Set<string>();
   for (const proofPath of proofs) {
     const proof = await readJsonIfExists<{ manifest?: unknown }>(proofPath);
@@ -81,6 +93,7 @@ async function workspaceCleanupCandidates(runDir: string, failedJobIds: Readonly
     const jobId = path.basename(workspacePath);
     seen.add(workspacePath);
     out.push({
+      kind: 'workspace',
       path: workspacePath,
       reason: `${mode}-workspace-collected-and-indexed`,
       bytes: await directoryBytes(workspacePath),
@@ -89,6 +102,41 @@ async function workspaceCleanupCandidates(runDir: string, failedJobIds: Readonly
     });
   }
   return out.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function artifactSourceCleanupCandidates(
+  runDir: string,
+  collectionDir: string | undefined,
+  now: number,
+  maxAgeHours?: number
+): Promise<CleanupCandidate[]> {
+  if (!collectionDir) return [];
+  const records = await readCodexArtifactRecords(collectionDir).catch(() => []);
+  const out: CleanupCandidate[] = [];
+  const seen = new Set<string>();
+  for (const record of records) {
+    const file = path.resolve(record.path);
+    if (seen.has(file) || !isInside(runDir, file) || isInside(collectionDir, file)) continue;
+    if (!await pathExists(record.blobPath) || !await pathExists(file)) continue;
+    const stat = await fs.stat(file).catch(() => undefined);
+    if (!stat?.isFile()) continue;
+    if (maxAgeHours !== undefined && now - stat.mtimeMs < maxAgeHours * 3600_000) continue;
+    seen.add(file);
+    out.push({
+      kind: 'artifact-source',
+      path: file,
+      reason: 'indexed-artifact-source-archived',
+      bytes: stat.size,
+      active: false,
+      failed: false
+    });
+  }
+  return out.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function isInside(root: string, file: string): boolean {
+  const relative = path.relative(root, file).replace(/\\/g, '/');
+  return !!relative && relative !== '..' && !relative.startsWith('../') && !path.isAbsolute(relative);
 }
 
 async function readFailedJobIds(collectionDir: string | undefined): Promise<Set<string>> {
@@ -134,6 +182,15 @@ function stringArg(value: CliValue | undefined): string | undefined {
 
 function numberArg(value: CliValue | undefined): number | undefined {
   const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function ageHoursArg(value: CliValue | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const text = String(value).trim();
+  const match = /^(\d+(?:\.\d+)?)(h|hr|hrs|hour|hours)?$/i.exec(text);
+  if (!match) return numberArg(value);
+  const parsed = Number(match[1]);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 

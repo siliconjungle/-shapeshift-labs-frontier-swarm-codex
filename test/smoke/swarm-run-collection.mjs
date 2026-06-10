@@ -114,10 +114,10 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.ok(Array.isArray(mergeBundle.metadata.semanticImport.semanticImportExpectedMissingReasonCodes));
 
   await testSemanticImportFallbackFromTaskRefs(plan, tmp);
-  await testCollectedRun(tmp);
+  const collectionDir = await testCollectedRun(tmp);
   await testNoIndexCollection(tmp, mergeBundle);
   await testBrowserRun(tmp);
-  return { mergeBundle };
+  return { mergeBundle, collectionDir };
 }
 
 async function testSemanticImportFallbackFromTaskRefs(plan, tmp) {
@@ -198,7 +198,7 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(collection.semanticImport.warningCount, 0);
   assert.strictEqual(collection.artifactStore.kind, 'frontier.swarm-codex.artifact-store');
   assert.ok(collection.artifactStore.summary.artifactCount >= 8);
-  assert.ok(collection.artifactStore.summary.gzipCount >= 1);
+  assert.ok((collection.artifactStore.summary.zstdCount ?? 0) + collection.artifactStore.summary.gzipCount >= 1);
   assert.ok(await exists(path.join(collection.outDir, 'artifact-store', 'artifacts.jsonl')));
   assert.ok(await exists(path.join(collection.outDir, 'artifact-store', 'artifact-index.sql')));
   assert.ok(await exists(path.join(collection.outDir, 'collected-and-indexed.json')));
@@ -266,8 +266,8 @@ async function testCollectedRun(tmp) {
   ])).stdout);
   assert.strictEqual(cliQuery.jobs.length, 1);
   await testSafeCleanup(tmp, collection.outDir);
+  return collection.outDir;
 }
-
 async function testSafeCleanup(tmp, collectionDir) {
   const workspacePath = path.join(tmp, 'agent-worktrees', 'frontier-swarm-codex', 'cleanup-job');
   await fs.mkdir(workspacePath, { recursive: true });
@@ -277,12 +277,12 @@ async function testSafeCleanup(tmp, collectionDir) {
   await fs.writeFile(path.join(proofDir, 'workspace-proof.json'), JSON.stringify({
     manifest: { mode: 'copy', path: workspacePath }
   }, null, 2) + '\n');
-  const dryRun = await createCodexCleanupPlan({ run: path.join(tmp, 'run'), keepActive: false });
+  const dryRun = await createCodexCleanupPlan({ run: path.join(tmp, 'run'), collection: collectionDir, keepActive: false });
   assert.strictEqual(dryRun.dryRun, true);
   assert.strictEqual(dryRun.indexed, true);
   assert.strictEqual(dryRun.summary.candidateCount, 1);
   assert.ok(await exists(workspacePath));
-  const cleanup = await createCodexCleanupPlan({ run: path.join(tmp, 'run'), keepActive: false, dryRun: false });
+  const cleanup = await createCodexCleanupPlan({ run: path.join(tmp, 'run'), collection: collectionDir, keepActive: false, dryRun: false });
   assert.strictEqual(cleanup.summary.deletedCount, 1);
   assert.strictEqual(await exists(workspacePath), false);
   const cli = new URL('../../dist/cli.js', import.meta.url).pathname;
@@ -291,6 +291,8 @@ async function testSafeCleanup(tmp, collectionDir) {
     'cleanup',
     '--run',
     path.join(tmp, 'run'),
+    '--collection',
+    collectionDir,
     '--keep-active',
     'false'
   ])).stdout);
@@ -298,7 +300,6 @@ async function testSafeCleanup(tmp, collectionDir) {
   assert.strictEqual(cliCleanup.summary.candidateCount, 0);
   assert.ok(await exists(path.join(collectionDir, 'collected-and-indexed.json')));
 }
-
 async function testBrowserRun(tmp) {
   const browserRun = await runCodexSwarm(createBrowserPlan(), {
     outDir: path.join(tmp, 'browser-run'),

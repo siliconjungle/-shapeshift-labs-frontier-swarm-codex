@@ -207,6 +207,8 @@ async function testScoreDedupesCollectedAndIndexedBundle(applyRepo, tmp, readyDi
 }
 
 async function testScore(applyRepo, tmp) {
+  await fs.mkdir(path.join(applyRepo, 'research', 'repos'), { recursive: true });
+  await fs.writeFile(path.join(applyRepo, 'research', 'repos', 'heavy.bin'), 'do not copy\n');
   const patchScore = await scoreCodexSwarmPatches({
     collection: path.join(tmp, 'ready-collection'),
     cwd: applyRepo,
@@ -233,10 +235,10 @@ async function testScore(applyRepo, tmp) {
     'score',
     '--collection',
     path.join(tmp, 'ready-collection'),
-    '--include',
+    '--workspace-include',
     'src',
     '--focused-command',
-    "node -e \"const fs=require('fs'); const label='a,b'; if(label !== 'a,b' || fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
+    "node -e \"const fs=require('fs'); const label='a,b'; if(label !== 'a,b' || fs.existsSync('research/repos/heavy.bin') || fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
   ], { cwd: applyRepo });
   assert.strictEqual(JSON.parse(cliScore.stdout).ok, true);
 }

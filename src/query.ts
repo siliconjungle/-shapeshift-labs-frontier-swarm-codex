@@ -107,7 +107,14 @@ async function resolveCollectionDir(input: Pick<FrontierCodexQueryInput, 'collec
     input.run
   ].filter((entry): entry is string => !!entry).map((entry) => path.resolve(cwd, entry));
   for (const candidate of candidates) {
-    if (await pathExists(path.join(candidate, 'coordinator-query.json')) || await pathExists(path.join(candidate, 'artifact-store', 'artifacts.jsonl'))) return candidate;
+    if (
+      await pathExists(path.join(candidate, 'coordinator-query.json')) ||
+      await pathExists(path.join(candidate, 'artifact-store', 'artifacts.jsonl')) ||
+      await pathExists(path.join(candidate, 'artifact-store', 'artifact-index.sqlite')) ||
+      await pathExists(path.join(candidate, 'collected-and-indexed.json'))
+    ) {
+      return candidate;
+    }
   }
   throw new Error('query requires --collection <dir> or --run <run-dir> with collected artifacts');
 }

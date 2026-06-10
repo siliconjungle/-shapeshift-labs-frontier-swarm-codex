@@ -1,9 +1,6 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import path from 'node:path';
-import { gzip } from 'node:zlib';
-import { promisify } from 'node:util';
 import {
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND,
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION,
@@ -11,9 +8,9 @@ import {
 } from './constants.js';
 import type { FrontierCodexArtifactRecord, FrontierCodexArtifactStoreResult, FrontierCodexCollectResult } from './index.js';
 import { isObject, pathExists, uniqueStrings } from './common.js';
+import { compressArtifactBytes } from './artifact-compression.js';
+import { readSqliteArtifactIndex, writeSqliteArtifactIndex } from './artifact-sqlite.js';
 
-const gzipAsync = promisify(gzip);
-const require = createRequire(import.meta.url);
 const COMPRESS_EXTENSIONS = new Set(['.json', '.jsonl', '.log', '.txt', '.patch', '.md']);
 
 export async function createCodexArtifactStore(input: {
@@ -41,12 +38,13 @@ export async function createCodexArtifactStore(input: {
   const sqlitePath = path.join(storeDir, 'artifact-index.sqlite');
   await fs.writeFile(jsonlPath, records.map((record) => JSON.stringify(record)).join('\n') + (records.length ? '\n' : ''));
   await fs.writeFile(sqlPath, renderArtifactSql(records));
-  const sqliteWritten = input.sqlite === false ? false : await writeSqliteIndex(sqlitePath, records).catch(() => false);
+  const sqliteWritten = input.sqlite === false ? false : await writeSqliteArtifactIndex(sqlitePath, records).catch(() => false);
   const summary = {
     artifactCount: records.length,
     totalBytes: records.reduce((sum, record) => sum + record.bytes, 0),
     compressedBytes: records.reduce((sum, record) => sum + (record.compressedBytes ?? record.bytes), 0),
     blobCount: new Set(records.map((record) => record.sha256)).size,
+    zstdCount: records.filter((record) => record.compression === 'zstd').length,
     gzipCount: records.filter((record) => record.compression === 'gzip').length,
     sqliteWritten
   };
@@ -75,6 +73,15 @@ export async function createCodexArtifactStore(input: {
 }
 
 export async function readCodexArtifactRecords(collectionDir: string): Promise<FrontierCodexArtifactRecord[]> {
+  const sqlitePath = path.join(collectionDir, 'artifact-store', 'artifact-index.sqlite');
+  const sqliteRecords = await readSqliteArtifactIndex(sqlitePath).catch(() => []);
+  if (sqliteRecords.length > 0) {
+    return sqliteRecords.map((record) => ({
+      ...record,
+      runDir: record.runDir || '',
+      collectionDir: record.collectionDir || collectionDir
+    }));
+  }
   const jsonlPath = path.join(collectionDir, 'artifact-store', 'artifacts.jsonl');
   const text = await fs.readFile(jsonlPath, 'utf8');
   return text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as FrontierCodexArtifactRecord);
@@ -115,11 +122,13 @@ async function createArtifactRecord(
   const bytes = await fs.readFile(candidate.file);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const relativePath = path.relative(collection.outDir, candidate.file).replace(/\\/g, '/');
-  const compress = options.compress && COMPRESS_EXTENSIONS.has(path.extname(candidate.file).toLowerCase());
-  const blobBytes = compress ? await gzipAsync(bytes) : bytes;
-  const blobPath = path.join(options.blobDir, sha256.slice(0, 2), `${sha256}${compress ? '.gz' : ''}`);
+  const compressed = await compressArtifactBytes(bytes, {
+    enabled: options.compress,
+    compressible: COMPRESS_EXTENSIONS.has(path.extname(candidate.file).toLowerCase())
+  });
+  const blobPath = path.join(options.blobDir, sha256.slice(0, 2), `${sha256}${compressed.extension}`);
   await fs.mkdir(path.dirname(blobPath), { recursive: true });
-  if (!await pathExists(blobPath)) await fs.writeFile(blobPath, blobBytes);
+  if (!await pathExists(blobPath)) await fs.writeFile(blobPath, compressed.bytes);
   const metadata = await readArtifactMetadata(candidate.file);
   return {
     id: `artifact:${sha256}`,
@@ -133,8 +142,8 @@ async function createArtifactRecord(
     bytes: stat.size,
     sha256,
     blobPath,
-    compression: compress ? 'gzip' : 'none',
-    ...(compress ? { compressedBytes: blobBytes.byteLength } : {}),
+    compression: compressed.compression,
+    ...(compressed.compression !== 'none' ? { compressedBytes: compressed.bytes.byteLength } : {}),
     mtimeMs: stat.mtimeMs,
     tags: artifactTags(candidate, metadata),
     metadata
@@ -196,6 +205,8 @@ function artifactTags(candidate: { bucket?: string; kind: string }, metadata: Re
 function renderArtifactSql(records: readonly FrontierCodexArtifactRecord[]): string {
   const rows = records.map((record) => `insert into artifacts values (${[
     record.id,
+    record.runDir,
+    record.collectionDir,
     record.jobId ?? null,
     record.bucket ?? null,
     record.kind,
@@ -206,25 +217,18 @@ function renderArtifactSql(records: readonly FrontierCodexArtifactRecord[]): str
     record.compression,
     record.bytes,
     record.compressedBytes ?? null,
+    record.mtimeMs,
     record.tags.join(','),
     JSON.stringify(record.metadata)
   ].map(sqlValue).join(', ')});`);
   return [
-    'create table if not exists artifacts (id text, job_id text, bucket text, kind text, path text, relative_path text, sha256 text, blob_path text, compression text, bytes integer, compressed_bytes integer, tags text, metadata_json text);',
+    [
+      'create table if not exists artifacts (id text, run_dir text, collection_dir text, job_id text, bucket text,',
+      'kind text, path text, relative_path text, sha256 text, blob_path text, compression text, bytes integer,',
+      'compressed_bytes integer, mtime_ms real, tags text, metadata_json text);'
+    ].join(' '),
     ...rows
   ].join('\n') + '\n';
-}
-
-async function writeSqliteIndex(file: string, records: readonly FrontierCodexArtifactRecord[]): Promise<boolean> {
-  const sqlite = require('node:sqlite') as { DatabaseSync?: new (file: string) => { exec(sql: string): void; prepare(sql: string): { run(...args: unknown[]): void }; close(): void } };
-  if (!sqlite.DatabaseSync) return false;
-  await fs.rm(file, { force: true });
-  const db = new sqlite.DatabaseSync(file);
-  db.exec('create table artifacts (id text, job_id text, bucket text, kind text, path text, relative_path text, sha256 text, blob_path text, compression text, bytes integer, compressed_bytes integer, tags text, metadata_json text)');
-  const stmt = db.prepare('insert into artifacts values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  for (const record of records) stmt.run(record.id, record.jobId ?? null, record.bucket ?? null, record.kind, record.path, record.relativePath, record.sha256, record.blobPath, record.compression, record.bytes, record.compressedBytes ?? null, record.tags.join(','), JSON.stringify(record.metadata));
-  db.close();
-  return true;
 }
 
 function artifactKindForEvidencePath(file: string): string {

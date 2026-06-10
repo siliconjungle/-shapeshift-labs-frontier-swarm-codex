@@ -111,6 +111,7 @@ export interface FrontierCodexArtifactStoreResult {
     totalBytes: number;
     compressedBytes: number;
     blobCount: number;
+    zstdCount?: number;
     gzipCount: number;
     sqliteWritten: boolean;
   };
@@ -118,10 +119,12 @@ export interface FrontierCodexArtifactStoreResult {
 
 export interface FrontierCodexCleanupInput {
   run: string;
+  collection?: string;
   cwd?: string;
   maxAgeHours?: number;
   keepFailed?: boolean;
   keepActive?: boolean;
+  pruneArtifacts?: boolean;
   dryRun?: boolean;
 }
 
@@ -131,11 +134,12 @@ export interface FrontierCodexCleanupPlan {
   ok: boolean;
   dryRun: boolean;
   runDir: string;
+  collectionDir?: string;
   generatedAt: number;
   indexed: boolean;
-  candidates: Array<{ path: string; reason: string; bytes: number; active: boolean; failed: boolean; deleted?: boolean }>;
+  candidates: Array<{ path: string; reason: string; bytes: number; active: boolean; failed: boolean; kind?: 'workspace' | 'artifact-source'; deleted?: boolean }>;
   blockedReasons: string[];
-  summary: { candidateCount: number; deletedCount: number; reclaimableBytes: number };
+  summary: { candidateCount: number; deletedCount: number; reclaimableBytes: number; workspaceCount?: number; artifactSourceCount?: number };
 }
 
 export type FrontierCodexApplyStatus = 'checked' | 'applied' | 'committed' | 'skipped' | 'failed';

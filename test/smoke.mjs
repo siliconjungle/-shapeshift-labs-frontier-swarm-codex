@@ -18,6 +18,7 @@ import { testSemanticImportBaseLineage } from './smoke/semantic-import-base-line
 import { testSemanticImportQuality } from './smoke/semantic-import-quality.mjs';
 import { testSemanticLineageCollection } from './smoke/semantic-lineage-collection.mjs';
 import { testSwarmRunCollection } from './smoke/swarm-run-collection.mjs';
+import { testArtifactArchiveCompaction } from './smoke/artifact-archive.mjs';
 import { testTournamentCli } from './smoke/tournament-cli.mjs';
 import { testContextBudget } from './smoke/context-budget.mjs';
 
@@ -29,7 +30,8 @@ await testCompactLogTruncation(context);
 await testContextBudget(context);
 await testSemanticImportSelection(context);
 await testSemanticImportBaseLineage(context);
-const { mergeBundle } = await testSwarmRunCollection(context);
+const { mergeBundle, collectionDir } = await testSwarmRunCollection(context);
+await testArtifactArchiveCompaction(context, collectionDir);
 await testTournamentCli(context);
 await testSemanticImportQuality(context, mergeBundle);
 await testSemanticLineageCollection(context, mergeBundle);
