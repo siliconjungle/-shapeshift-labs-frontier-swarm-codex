@@ -143,6 +143,11 @@ export {
   readCodexTournamentAdaptiveFeedback
 } from './tournament-query.js';
 export {
+  attachCodexCalibrationAdaptiveFeedback,
+  createCodexCalibrationAdaptiveFeedback,
+  readCodexPatchScoreCalibration
+} from './calibration-feedback.js';
+export {
   canonicalSemanticEditStatus,
   classifySemanticEditScriptAdmission,
   semanticEditScriptAdmissionCount,

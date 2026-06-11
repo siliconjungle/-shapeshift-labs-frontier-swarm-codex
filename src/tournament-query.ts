@@ -15,6 +15,10 @@ import {
   FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_VERSION
 } from './constants.js';
 import { isObject, pathExists } from './common.js';
+import {
+  attachCodexCalibrationAdaptiveFeedback,
+  createCodexCalibrationAdaptiveFeedback
+} from './calibration-feedback.js';
 import type { FrontierCodexCompactDashboard } from './types-evidence.js';
 import type { FrontierCodexSemanticImportQuality } from './types-semantic.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
@@ -123,18 +127,25 @@ async function historyCommand(args: CliArgs, cwd: string) {
 }
 
 async function feedbackCommand(args: CliArgs, cwd: string) {
-  const tournamentPath = await resolveTournamentPath(queryInput(args, cwd));
+  const input = queryInput(args, cwd);
+  const tournamentPath = await resolveTournamentPath(input);
+  const collectionDir = await resolveCollectionDir(input, tournamentPath);
   const historyPath = stringArg(args.history);
   const comparisonPath = stringArg(args.comparison);
   const history: FrontierSwarmStrategyTournamentHistory | undefined = historyPath ? JSON.parse(await fs.readFile(path.resolve(cwd, historyPath), 'utf8')) : undefined;
   const comparison: FrontierSwarmStrategyTournamentComparison | undefined = comparisonPath ? JSON.parse(await fs.readFile(path.resolve(cwd, comparisonPath), 'utf8')) : undefined;
-  return createSwarmTournamentAdaptiveFeedback({
+  const feedback = createSwarmTournamentAdaptiveFeedback({
     tournament: await readTournament(tournamentPath),
     history,
     comparison,
     scoreFloor: numberArg(args.scoreFloor ?? args['score-floor']),
     regressionThreshold: numberArg(args.regressionThreshold ?? args['regression-threshold'])
   });
+  const calibrationFeedback = await createCodexCalibrationAdaptiveFeedback({
+    collectionDir,
+    generatedAt: feedback.generatedAt
+  });
+  return attachCodexCalibrationAdaptiveFeedback(feedback, calibrationFeedback);
 }
 
 function tournamentView(

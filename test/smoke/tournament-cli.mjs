@@ -82,6 +82,7 @@ export async function testTournamentCli({ plan, tmp }) {
   ])).stdout);
   assert.strictEqual(cliHistory.history.summary.tournamentCount, 1);
 
+  await writePatchScoreCalibrationFixture(collection);
   const feedbackOut = path.join(tmp, 'tournament-feedback');
   const feedback = JSON.parse((await execFileP(process.execPath, [
     cli,
@@ -96,6 +97,10 @@ export async function testTournamentCli({ plan, tmp }) {
   ])).stdout);
   assert.strictEqual(feedback.kind, 'frontier.swarm.tournament-adaptive-feedback');
   assert.ok(feedback.observations.length >= 1);
+  assert.ok(feedback.observations.some((entry) => entry.metadata?.source === 'patch-score-calibration'));
+  assert.ok(feedback.observations.some((entry) => entry.kind === 'semantic-weak'));
+  assert.strictEqual(feedback.metadata.calibrationFeedback.falsePositiveClean, 1);
+  assert.strictEqual(feedback.metadata.calibrationFeedback.falsePositiveSemanticAutoMergeCandidates, 1);
   assert.ok(await existsFile(path.join(feedbackOut, 'tournament-feedback.json')));
 
   const customFeedback = path.join(tmp, 'custom-tournament-feedback.json');
@@ -127,4 +132,36 @@ async function existsFile(file) {
   } catch {
     return false;
   }
+}
+
+async function writePatchScoreCalibrationFixture(collection) {
+  await fs.mkdir(path.join(collection, 'patch-scores'), { recursive: true });
+  await fs.writeFile(path.join(collection, 'patch-scores', 'patch-score.json'), JSON.stringify({
+    calibration: {
+      source: 'apply-ledger',
+      landedJobIds: ['landed-clean'],
+      predictedCleanJobIds: ['landed-clean', 'false-clean'],
+      truePositiveCleanJobIds: ['landed-clean'],
+      falsePositiveCleanJobIds: ['false-clean'],
+      falseNegativeCleanJobIds: [],
+      landedNeedsPortJobIds: [],
+      semanticAutoMergeCandidateJobIds: ['landed-clean', 'false-semantic'],
+      landedSemanticAutoMergeCandidateJobIds: ['landed-clean'],
+      falsePositiveSemanticAutoMergeCandidateJobIds: ['false-semantic'],
+      semanticAutoMergeCandidatePrecision: 0.5,
+      precision: 0.5,
+      recall: 1,
+      summary: {
+        landed: 1,
+        predictedClean: 2,
+        truePositiveClean: 1,
+        falsePositiveClean: 1,
+        falseNegativeClean: 0,
+        landedNeedsPort: 0,
+        semanticAutoMergeCandidates: 2,
+        landedSemanticAutoMergeCandidates: 1,
+        falsePositiveSemanticAutoMergeCandidates: 1
+      }
+    }
+  }, null, 2) + '\n');
 }
