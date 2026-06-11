@@ -30,6 +30,7 @@ import type {
   FrontierCodexSemanticEditScriptSummary
 } from './types-semantic-edit.js';
 import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
+import type { FrontierCodexSemanticEditReplaySummary } from './types-semantic-edit-replay.js';
 
 export type FrontierCodexCollectBucket =
   | 'ready-to-apply'
@@ -249,6 +250,7 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   semanticLineageReasonCodes: string[];
   semanticEditScript: FrontierCodexSemanticEditScriptSummary;
   semanticEditProjection: FrontierCodexSemanticEditProjectionSummary;
+  semanticEditReplay: FrontierCodexSemanticEditReplaySummary;
   semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision;
   semanticEditOperationAutoMergeCandidate: boolean;
   semanticEditOperationCleanEligible: boolean;

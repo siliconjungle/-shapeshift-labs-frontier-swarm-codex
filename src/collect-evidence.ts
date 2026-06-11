@@ -11,6 +11,7 @@ import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers
 import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { semanticEditScriptFacets, semanticEditScriptTags } from './semantic-edit-admission.js';
+import { semanticEditReplayFacets } from './semantic-edit-replay-facets.js';
 import { codexBundleTraceSummary } from './trace-summary.js';
 import { contextBudgetFromBundle } from './context-budget.js';
 
@@ -150,6 +151,9 @@ export function createCollectedEvidenceEntries(
       ...(semanticImportQuality.semanticEditAdmission.autoMergeCandidate ? ['semantic-edit-admission-auto-merge-candidate'] : []),
       ...(semanticImportQuality.semanticEditAdmission.cleanEligible ? ['semantic-edit-admission-clean-eligible'] : []),
       ...(semanticImportQuality.semanticEditProjection.semanticKeys.length ? ['semantic-edit-projection-identity'] : []),
+      ...(semanticImportQuality.semanticEditReplay.acceptedClean ? ['semantic-edit-replay-accepted-clean'] : []),
+      ...(semanticImportQuality.semanticEditReplay.conflicts ? ['semantic-edit-replay-conflict'] : []),
+      ...(semanticImportQuality.semanticEditReplay.stale ? ['semantic-edit-replay-stale'] : []),
       ...(contextBudget?.warnings.length ? ['context-budget-warning'] : []),
       ...(contextBudget?.errors.length ? ['context-budget-failed'] : [])
     ]),
@@ -201,6 +205,7 @@ export function createCollectedEvidenceEntries(
       semanticLineageReasonCodes: semanticImportQuality.semanticLineageReasonCodes.join(','),
       ...semanticEditScriptFacets(semanticImportQuality.semanticEditScript),
       ...semanticEditProjectionFacets(semanticImportQuality.semanticEditProjection),
+      ...semanticEditReplayFacets(semanticImportQuality.semanticEditReplay),
       traceShards: traceSummary.shardCount,
       traceDivergences: traceSummary.divergenceCount,
       traceOpenDivergences: traceSummary.openDivergenceCount,

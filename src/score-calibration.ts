@@ -30,7 +30,8 @@ export async function calibratePatchScores(input: {
   const semanticAutoMergeCandidates = uniqueStrings(input.entries
     .filter((entry) => entry.status === 'accepted-clean' && (
       entry.semanticEvidence.semanticEditAdmission.autoMergeCandidate ||
-      entry.semanticEvidence.semanticEditOperationAutoMergeCandidate
+      entry.semanticEvidence.semanticEditOperationAutoMergeCandidate ||
+      semanticEditReplayAutoMergeCandidate(entry)
     ))
     .map((entry) => entry.jobId));
   const landedSemanticAutoMergeCandidates = semanticAutoMergeCandidates.filter((jobId) => landedSet.has(jobId));
@@ -91,6 +92,13 @@ function emptyCalibration(source: 'none'): FrontierCodexPatchScoreCalibration {
       falsePositiveSemanticAutoMergeCandidates: 0
     }
   };
+}
+
+function semanticEditReplayAutoMergeCandidate(entry: FrontierCodexPatchScoreEntry): boolean {
+  const replay = entry.semanticEvidence.semanticEditReplay;
+  return replay.total > 0 &&
+    replay.acceptedClean + replay.alreadyApplied > 0 &&
+    replay.conflicts + replay.stale + replay.blocked + replay.needsPort === 0;
 }
 
 async function findApplyLedger(collectionDir: string): Promise<string | undefined> {

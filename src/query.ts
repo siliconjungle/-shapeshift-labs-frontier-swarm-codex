@@ -15,6 +15,12 @@ import {
   semanticEditProjectionSummary,
   semanticEditScriptAdmissionSummary
 } from './query-semantic-edit.js';
+import {
+  evidenceSemanticEditReplay,
+  jobSemanticEditReplay,
+  matchesSemanticEditReplay,
+  semanticEditReplaySummary
+} from './query-semantic-edit-replay.js';
 import { semanticPatchBundleOverlapJobIds } from './semantic-bundle-overlaps.js';
 
 type CliValue = string | boolean | string[];
@@ -36,6 +42,9 @@ export interface FrontierCodexQueryInput {
   semanticEditStatus?: string;
   semanticEditAdmission?: string;
   semanticEditProjection?: string;
+  semanticEditReplay?: string;
+  semanticEditReplayStatus?: string;
+  semanticEditReplayAdmission?: string;
   semanticEditKey?: string;
   semanticBundleOverlap?: string;
   semanticIdentityHash?: string;
@@ -83,6 +92,7 @@ export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) 
       touchedPaths: uniqueStrings(jobs.flatMap((job) => Array.isArray(job.changedPaths) ? job.changedPaths.filter((entry): entry is string => typeof entry === 'string') : [])),
       semanticEditAdmission: semanticEditAdmissionSummary(jobs),
       semanticEditProjection: semanticEditProjectionSummary(jobs),
+      semanticEditReplay: semanticEditReplaySummary(jobs),
       semanticEditScriptAdmission: semanticEditScriptAdmissionSummary(jobs),
       semanticPatchBundleOverlaps
     },
@@ -110,6 +120,9 @@ export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
     semanticEditStatus: stringArg(args.semanticEditStatus ?? args['semantic-edit-status']),
     semanticEditAdmission: stringArg(args.semanticEditAdmission ?? args['semantic-edit-admission']),
     semanticEditProjection: stringArg(args.semanticEditProjection ?? args['semantic-edit-projection']),
+    semanticEditReplay: stringArg(args.semanticEditReplay ?? args['semantic-edit-replay']),
+    semanticEditReplayStatus: stringArg(args.semanticEditReplayStatus ?? args['semantic-edit-replay-status']),
+    semanticEditReplayAdmission: stringArg(args.semanticEditReplayAdmission ?? args['semantic-edit-replay-admission']),
     semanticEditKey: stringArg(args.semanticEditKey ?? args['semantic-edit-key'] ?? args.semanticKey ?? args['semantic-key']),
     semanticBundleOverlap: stringArg(args.semanticBundleOverlap ?? args['semantic-bundle-overlap'] ?? args.semanticPatchBundleOverlap ?? args['semantic-patch-bundle-overlap']),
     semanticIdentityHash: stringArg(args.semanticIdentityHash ?? args['semantic-identity-hash'] ?? args['semantic-edit-identity-hash']),
@@ -162,6 +175,7 @@ function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput
     && (input.lineage === undefined || jobHasLineage(job) === input.lineage)
     && matchesSemanticEdit(jobSemanticEditScript(job), input, haystack, jobSemanticEditAdmission(job))
     && matchesSemanticEditProjection(jobSemanticEditProjection(job), input, haystack)
+    && matchesSemanticEditReplay(jobSemanticEditReplay(job), input, haystack)
     && (input.readiness === undefined || matchesReadiness(job, input.readiness))
     && (input.passedTests === undefined || testsPassed(job) === input.passedTests);
 }
@@ -178,7 +192,8 @@ function matchesArtifact(record: FrontierCodexArtifactRecord, input: FrontierCod
     && (input.semantic === undefined || record.tags.includes('semantic-sidecar') === input.semantic)
     && (input.lineage === undefined || textHasLineage(haystack) === input.lineage)
     && matchesSemanticEdit(artifactSemanticEditScript(record), input, haystack, artifactSemanticEditAdmission(record))
-    && matchesSemanticEditProjection(artifactSemanticEditProjection(record), input, haystack);
+    && matchesSemanticEditProjection(artifactSemanticEditProjection(record), input, haystack)
+    && matchesSemanticEditReplay(artifactSemanticEditReplay(record), input, haystack);
 }
 
 function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQueryInput): boolean {
@@ -191,7 +206,8 @@ function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQue
     && (input.symbol === undefined || haystack.includes(input.symbol.toLowerCase()))
     && (input.tag === undefined || Array.isArray(entry.tags) && entry.tags.includes(input.tag))
     && (input.lineage === undefined || textHasLineage(haystack) === input.lineage)
-    && matchesEvidenceSemanticEdit(entry, input, haystack);
+    && matchesEvidenceSemanticEdit(entry, input, haystack)
+    && matchesSemanticEditReplay(evidenceSemanticEditReplay(entry), input, haystack);
 }
 
 function matchesText(haystack: string, input: FrontierCodexQueryInput): boolean {
@@ -242,6 +258,12 @@ function artifactSemanticEditProjection(record: FrontierCodexArtifactRecord): un
   const compact = isObject(record.metadata.semanticCompactSummary) ? record.metadata.semanticCompactSummary : {};
   const semanticEdit = isObject(compact.semanticEdit) ? compact.semanticEdit : {};
   return record.metadata.semanticEditProjection ?? semanticEdit.projection;
+}
+
+function artifactSemanticEditReplay(record: FrontierCodexArtifactRecord): unknown {
+  const compact = isObject(record.metadata.semanticCompactSummary) ? record.metadata.semanticCompactSummary : {};
+  const semanticEdit = isObject(compact.semanticEdit) ? compact.semanticEdit : {};
+  return record.metadata.semanticEditReplay ?? semanticEdit.replay;
 }
 
 function arrayIncludes(value: unknown, needle: string): boolean {

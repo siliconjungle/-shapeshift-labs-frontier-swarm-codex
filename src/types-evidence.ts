@@ -15,6 +15,7 @@ import type {
   FrontierCodexSemanticEditScriptSummary
 } from './types-semantic-edit.js';
 import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
+import type { FrontierCodexSemanticEditReplaySummary } from './types-semantic-edit-replay.js';
 import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
 import type { FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './types-semantic.js';
 
@@ -169,6 +170,15 @@ export interface FrontierCodexCompactDashboard {
   duplicateDiscoveryCount: number;
   semanticEditAdmission: FrontierCodexSemanticEditAdmissionSummary;
   semanticEditScriptAdmission: FrontierCodexSemanticEditScriptAdmissionSummary;
+  semanticEditReplay: {
+    total: number;
+    acceptedClean: number;
+    alreadyApplied: number;
+    conflicts: number;
+    stale: number;
+    blocked: number;
+    needsPort: number;
+  };
   semanticPatchBundleOverlaps?: FrontierCodexSemanticPatchBundleOverlapSummary;
   tournament: {
     strategyCount: number;
@@ -219,6 +229,7 @@ export interface FrontierCodexCompactDashboard {
     semanticLineageReasonCodes: string[];
     semanticEditScripts: FrontierCodexSemanticEditScriptSummary;
     semanticEditProjections: FrontierCodexSemanticEditProjectionSummary;
+    semanticEditReplays: FrontierCodexSemanticEditReplaySummary;
     semanticEditAdmission: FrontierCodexSemanticEditAdmissionSummary;
     semanticEditScriptAdmission: FrontierCodexSemanticEditScriptAdmissionSummary;
   };

@@ -10,12 +10,14 @@ import {
   discoverCodexHandoffArtifacts,
   runCodexSwarm,
   scoreCodexSwarmPatches,
+  summarizeSemanticEditReplay,
   type FrontierCodexHandoffArtifact,
   type FrontierCodexWorkspacePlan,
   type FrontierCodexWorkspaceManifest,
   type FrontierCodexCollectResult,
   type FrontierCodexApplyResult,
   type FrontierCodexSemanticEditAdmissionDecision,
+  type FrontierCodexSemanticEditReplaySummary,
   type FrontierCodexPatchScoreResult,
   type FrontierCodexResourceAllocation,
   type FrontierCodexResourceSchedulingOptions,
@@ -89,6 +91,7 @@ const applyPromise: Promise<FrontierCodexApplyResult> = applyCodexSwarmCollectio
 const scorePromise: Promise<FrontierCodexPatchScoreResult> = scoreCodexSwarmPatches({ collection: '.', focusedCommands: ['npm test'] });
 const handoffArtifactsPromise: Promise<FrontierCodexHandoffArtifact[]> = discoverCodexHandoffArtifacts({ root: '.' });
 const semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision = classifySemanticEditScriptAdmission(undefined);
+const semanticEditReplay: FrontierCodexSemanticEditReplaySummary | undefined = summarizeSemanticEditReplay(undefined);
 
 args satisfies string[];
 workspacePlan satisfies FrontierCodexWorkspacePlan;
@@ -101,6 +104,7 @@ applyPromise satisfies Promise<FrontierCodexApplyResult>;
 scorePromise satisfies Promise<FrontierCodexPatchScoreResult>;
 handoffArtifactsPromise satisfies Promise<readonly { kind: string; path: string }[]>;
 semanticEditAdmission.status satisfies string;
+semanticEditReplay?.acceptedClean satisfies number | undefined;
 scorePromise.then((score) => {
   const proofFailures: number | undefined = score.entries[0]?.semanticEvidence.proofSpecFailedObligations;
   const paradigmRecords: number | undefined = score.entries[0]?.semanticEvidence.paradigmSemanticsRecords;

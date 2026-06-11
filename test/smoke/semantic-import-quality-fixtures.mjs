@@ -95,6 +95,10 @@ export function cleanEditScriptSemanticImportSummary() {
       deletedBytes: 8,
       replacementBytes: 10,
       workerMismatch: false
+    }),
+    semanticEditReplays: semanticEditReplaySummary({
+      file: 'src/runtime/edit-script-clean.ts',
+      symbolName: 'cleanRun'
     })
   };
 }
@@ -183,6 +187,39 @@ function semanticEditProjectionSummary(input) {
     projectedSourceMatchUnknown: 0,
     reasonCodes: [],
     admission: { projected: 1 }
+  };
+}
+
+function semanticEditReplaySummary(input) {
+  const suffix = input.symbolName === 'cleanRun' ? 'clean' : input.symbolName;
+  return {
+    total: 1,
+    acceptedClean: 1,
+    alreadyApplied: 0,
+    conflicts: 0,
+    stale: 0,
+    blocked: 0,
+    needsPort: 0,
+    evidenceOnly: 0,
+    appliedOperations: 1,
+    skippedOperations: 0,
+    editCount: 1,
+    appliedEditCount: 1,
+    alreadyAppliedEditCount: 0,
+    statusCounts: { 'accepted-clean': 1 },
+    admission: { 'accepted-clean': 1 },
+    actions: ['apply'],
+    operationIds: [`semantic_edit_op_${suffix}`],
+    semanticKeys: [`semantic-edit:replaceBody:modified:function:${input.symbolName}`],
+    semanticIdentityHashes: [`hash:semantic-identity-${suffix}`],
+    sourceIdentityHashes: [`hash:source-identity-${suffix}`],
+    editContentHashes: [`hash:edit-content-${suffix}`],
+    sourcePaths: [input.file],
+    symbolNames: [input.symbolName],
+    currentHashes: [`hash:current-${suffix}`],
+    outputHashes: [`hash:output-${suffix}`],
+    reasonCodes: [],
+    empty: false
   };
 }
 

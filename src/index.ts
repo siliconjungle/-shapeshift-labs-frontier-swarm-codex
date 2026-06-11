@@ -164,6 +164,11 @@ export {
   summarizeSemanticEditProjection
 } from './semantic-edit-projection.js';
 export {
+  emptySemanticEditReplaySummary,
+  mergeSemanticEditReplaySummaries,
+  summarizeSemanticEditReplay
+} from './semantic-edit-replay.js';
+export {
   emptySemanticEditScriptSummary,
   mergeSemanticEditScriptSummaries,
   summarizeSemanticEditScript

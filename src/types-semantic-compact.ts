@@ -3,6 +3,7 @@ import type {
   FrontierCodexSemanticEditScriptSummary
 } from './types-semantic-edit.js';
 import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
+import type { FrontierCodexSemanticEditReplaySummary } from './types-semantic-edit-replay.js';
 
 export interface FrontierCodexSemanticCompactSourceSummary {
   path: string;
@@ -71,6 +72,7 @@ export interface FrontierCodexSemanticCompactSummary {
     admission: FrontierCodexSemanticEditAdmissionDecision;
     script: FrontierCodexSemanticEditScriptSummary;
     projection: FrontierCodexSemanticEditProjectionSummary;
+    replay: FrontierCodexSemanticEditReplaySummary;
   };
   warnings: string[];
   sourceCount: number;

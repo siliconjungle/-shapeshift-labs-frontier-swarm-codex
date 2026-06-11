@@ -8,6 +8,7 @@ import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportLineageSummary } from './semantic-import-lineage.js';
 import { summarizeSemanticEditScript } from './semantic-edit-script.js';
 import { summarizeSemanticEditProjection, emptySemanticEditProjectionSummary } from './semantic-edit-projection.js';
+import { emptySemanticEditReplaySummary, summarizeSemanticEditReplay } from './semantic-edit-replay.js';
 import { classifySemanticEditScriptAdmission } from './semantic-edit-admission.js';
 
 export function summarizeCodexSemanticImportQuality(
@@ -37,6 +38,7 @@ export function summarizeCodexSemanticImportQuality(
   const semanticLineage = semanticImportLineageSummary(summary);
   const semanticEditScript = summarizeSemanticEditScript(summary) ?? summarizeSemanticEditScript({ semanticEditScripts: (summary as { semanticEditScripts?: unknown } | undefined)?.semanticEditScripts })!;
   const semanticEditProjection = summarizeSemanticEditProjection(summary) ?? emptySemanticEditProjectionSummary();
+  const semanticEditReplay = summarizeSemanticEditReplay(summary) ?? emptySemanticEditReplaySummary();
   const semanticEditAdmission = classifySemanticEditScriptAdmission(semanticEditScript);
   const semanticLineageExpected = semanticLineageExpectedForBeforeSourceDiff(summary, semanticLineage.beforeSymbols);
   const selection = semanticSelectionSummary(summary);
@@ -91,12 +93,12 @@ export function summarizeCodexSemanticImportQuality(
     warnings.push('semantic edit projection is missing');
   }
   if (present && semanticEditProjection.blocked > 0) warnings.push('semantic edit projection is blocked');
-  if (present && semanticEditProjection.projectedSourceMismatchesWorker > 0) {
-    warnings.push('semantic edit projection does not match worker source');
-  }
-  if (present && semanticEditProjection.projectedSourceMatchUnknown > 0) {
-    warnings.push('semantic edit projection worker match is unknown');
-  }
+  if (present && semanticEditProjection.projectedSourceMismatchesWorker > 0) warnings.push('semantic edit projection does not match worker source');
+  if (present && semanticEditProjection.projectedSourceMatchUnknown > 0) warnings.push('semantic edit projection worker match is unknown');
+  if (present && semanticEditReplay.conflicts > 0) warnings.push('semantic edit replay has conflicts');
+  if (present && semanticEditReplay.stale > 0) warnings.push('semantic edit replay is stale against current source');
+  if (present && semanticEditReplay.blocked > 0) warnings.push('semantic edit replay is blocked');
+  if (present && semanticEditReplay.needsPort > 0) warnings.push('semantic edit replay needs port');
   return {
     expected: effectiveExpected,
     expectedSatisfied,
@@ -136,6 +138,7 @@ export function summarizeCodexSemanticImportQuality(
     semanticLineageReasonCodes: semanticLineage.reasonCodes,
     semanticEditScript,
     semanticEditProjection,
+    semanticEditReplay,
     semanticEditAdmission,
     warnings: uniqueStrings(warnings)
   };

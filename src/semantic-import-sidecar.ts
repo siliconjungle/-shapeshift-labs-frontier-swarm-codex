@@ -11,9 +11,7 @@ import { mergeSemanticFactSummaries, summarizeLangSidecarSemanticFacts } from '.
 import { summarizeSemanticImportLineage, summarizeSemanticLineageEvidence } from './semantic-import-lineage.js';
 import { mergeSemanticEditScriptSummaries, summarizeSemanticEditScript } from './semantic-edit-script.js';
 import { mergeSemanticEditProjectionSummaries, summarizeSemanticEditProjection } from './semantic-edit-projection.js';
-
-
-
+import { mergeSemanticEditReplaySummaries, summarizeSemanticEditReplay } from './semantic-edit-replay.js';
 export function createSemanticImportSidecar(
   job: FrontierSwarmJob,
   records: FrontierCodexSemanticImportRecord[],
@@ -47,6 +45,7 @@ export function createSemanticImportSidecar(
   const semanticLineage = summarizeSemanticImportLineage(records);
   const semanticEditScripts = mergeSemanticEditScriptSummaries(records.map((record) => record.semanticEditScript));
   const semanticEditProjections = mergeSemanticEditProjectionSummaries(records.map((record) => record.semanticEditProjection));
+  const semanticEditReplays = mergeSemanticEditReplaySummaries(records.map((record) => record.semanticEditReplay));
   const sourceProjections = records.reduce((totals, record) => {
     const summary = record.sourceProjection as { mode?: string; readiness?: string } | undefined;
     if (!summary) return totals;
@@ -154,6 +153,7 @@ export function createSemanticImportSidecar(
       semanticLineage,
       semanticEditScripts,
       semanticEditProjections,
+      semanticEditReplays,
       sourceProjections,
       nativeCompiles,
       semanticSliceAdmissions: {
@@ -252,6 +252,7 @@ export function summarizeLangSemanticImportSidecar(value: any): unknown {
     semanticLineage: summarizeSemanticLineageEvidence(value),
     semanticEditScript: summarizeSemanticEditScript(value),
     semanticEditProjection: summarizeSemanticEditProjection(value),
+    semanticEditReplay: summarizeSemanticEditReplay(value),
     semanticFacts,
     semanticFactCount: semanticFacts.total,
     semanticFactPredicates: semanticFacts.predicates,

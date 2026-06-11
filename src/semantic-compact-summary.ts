@@ -57,7 +57,8 @@ export function createSemanticCompactSummary(input: {
       cleanEligible: quality.semanticEditAdmission.cleanEligible,
       admission: quality.semanticEditAdmission,
       script: quality.semanticEditScript,
-      projection: quality.semanticEditProjection
+      projection: quality.semanticEditProjection,
+      replay: quality.semanticEditReplay
     },
     warnings: quality.warnings,
     sourceCount: sourceRecords(sidecar).length,

@@ -4,6 +4,7 @@ import { uniqueStrings } from './common.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { mergeSemanticEditScriptSummaries } from './semantic-edit-script.js';
 import { mergeSemanticEditProjectionSummaries } from './semantic-edit-projection.js';
+import { mergeSemanticEditReplaySummaries } from './semantic-edit-replay.js';
 
 
 export function enrichCollectedCoordinatorDashboard(
@@ -24,6 +25,7 @@ export function enrichCollectedCoordinatorDashboard(
   const semanticQualities = dashboard.jobs.map((job) => qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected));
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
   const semanticEditProjections = mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection));
+  const semanticEditReplays = mergeSemanticEditReplaySummaries(semanticQualities.map((entry) => entry.semanticEditReplay));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
   const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
   mutable.jobs = dashboard.jobs.map((job) => {
@@ -68,6 +70,13 @@ export function enrichCollectedCoordinatorDashboard(
     semanticEditProjectionMatchesWorker: semanticEditProjections.projectedSourceMatchesWorker,
     semanticEditProjectionMismatchesWorker: semanticEditProjections.projectedSourceMismatchesWorker,
     semanticEditProjectionMatchUnknown: semanticEditProjections.projectedSourceMatchUnknown,
+    semanticEditReplayAcceptedClean: semanticEditReplays.acceptedClean,
+    semanticEditReplayAlreadyApplied: semanticEditReplays.alreadyApplied,
+    semanticEditReplayConflicts: semanticEditReplays.conflicts,
+    semanticEditReplayStale: semanticEditReplays.stale,
+    semanticEditReplayBlocked: semanticEditReplays.blocked,
+    semanticEditReplayNeedsPort: semanticEditReplays.needsPort,
+    semanticEditReplays,
     semanticEditAdmission,
     semanticEditScriptAdmission,
     semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
@@ -105,6 +114,9 @@ function semanticImportMetadata(
     semanticEditScripts: { ...mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript)) },
     semanticEditProjections: {
       ...mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection))
+    },
+    semanticEditReplays: {
+      ...mergeSemanticEditReplaySummaries(semanticQualities.map((entry) => entry.semanticEditReplay))
     },
     semanticEditAdmission: semanticEditAdmissionSummary(semanticQualities),
     semanticEditScriptAdmission: semanticEditScriptAdmissionSummary(mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript))),

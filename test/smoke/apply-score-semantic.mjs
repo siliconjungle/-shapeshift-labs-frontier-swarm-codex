@@ -12,6 +12,7 @@ import {
   semanticEditMixedReviewImport,
   semanticEditPortableImport,
   semanticEditProjectedPortableImport,
+  semanticEditReplayedPortableImport,
   weakPatchHintSemanticImport
 } from './apply-score-semantic-fixtures.mjs';
 
@@ -88,6 +89,22 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
     readyDir,
     bundle: {
       ...baseBundle,
+      id: 'semantic-edit-replayed-portable-bundle',
+      jobId: 'semantic-edit-replayed-portable-job',
+      taskId: 'semantic-edit-replayed-portable-task',
+      queueItemIds: ['semantic-edit-replayed-portable-task'],
+      mergeReadiness: 'patch-candidate',
+      disposition: 'needs-port',
+      autoMergeable: false,
+      semanticImport: semanticEditReplayedPortableImport(readySemanticImport),
+      metadata: { semanticImport: semanticEditReplayedPortableImport(readySemanticImport) }
+    }
+  });
+  await writeSemanticFixture({
+    collection,
+    readyDir,
+    bundle: {
+      ...baseBundle,
       id: 'semantic-edit-blocked-projection-bundle',
       jobId: 'semantic-edit-blocked-projection-job',
       taskId: 'semantic-edit-blocked-projection-task',
@@ -146,7 +163,7 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   });
   const byJob = new Map(score.entries.map((entry) => [entry.jobId, entry]));
   assert.strictEqual(score.ok, true);
-  assert.strictEqual(score.summary['accepted-clean'], 3);
+  assert.strictEqual(score.summary['accepted-clean'], 4);
   assert.strictEqual(score.summary['accepted-needs-port'], 6);
   assert.strictEqual(byJob.get('empty-semantic-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('empty-semantic-job').semanticEvidence.cleanEligible, false);
@@ -176,6 +193,10 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
   assert.deepStrictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.sourcePaths, ['src/apply.ts']);
   assert.deepStrictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.semanticKeys, ['semantic-edit:replaceBody:modified:function:apply']);
   assert.deepStrictEqual(byJob.get('semantic-edit-projected-portable-job').semanticEvidence.semanticEditProjection.semanticIdentityHashes, ['hash:semantic-identity-apply']);
+  assert.strictEqual(byJob.get('semantic-edit-replayed-portable-job').status, 'accepted-clean');
+  assert.strictEqual(byJob.get('semantic-edit-replayed-portable-job').semanticEvidence.semanticEditReplay.acceptedClean, 1);
+  assert.deepStrictEqual(byJob.get('semantic-edit-replayed-portable-job').semanticEvidence.semanticEditReplay.operationIds, ['semantic_edit_op_apply']);
+  assert.ok(byJob.get('semantic-edit-replayed-portable-job').reasons.includes('semantic edit replay promoted bundle to auto-merge candidate'));
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').status, 'accepted-needs-port');
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').semanticEvidence.semanticEditOperationCleanEligible, false);
   assert.strictEqual(byJob.get('semantic-edit-blocked-projection-job').semanticEvidence.semanticEditProjection.blocked, 1);
@@ -204,8 +225,9 @@ export async function testWeakSemanticAdmissionScore({ applyRepo, tmp, readyDir,
     focusedCommands: [{ name: 'assert-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
   });
   assert.ok(calibrated.calibration.semanticAutoMergeCandidateJobIds.includes('semantic-edit-needs-port-portable-job'));
+  assert.ok(calibrated.calibration.semanticAutoMergeCandidateJobIds.includes('semantic-edit-replayed-portable-job'));
   assert.ok(calibrated.calibration.landedSemanticAutoMergeCandidateJobIds.includes('semantic-edit-needs-port-portable-job'));
-  assert.strictEqual(calibrated.calibration.semanticAutoMergeCandidatePrecision, 0.3333);
+  assert.strictEqual(calibrated.calibration.semanticAutoMergeCandidatePrecision, 0.25);
 }
 
 async function writeSemanticFixture({ collection, readyDir, bundle }) {

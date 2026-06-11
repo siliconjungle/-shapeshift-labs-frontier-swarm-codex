@@ -113,6 +113,12 @@ export function semanticEditProjectedPortableImport(readySemanticImport) {
   return semanticImport;
 }
 
+export function semanticEditReplayedPortableImport(readySemanticImport) {
+  const semanticImport = semanticEditPortableImport(readySemanticImport);
+  semanticImport.semanticEditReplays = semanticEditReplay();
+  return semanticImport;
+}
+
 export function semanticEditMismatchProjectionImport(readySemanticImport) {
   const semanticImport = semanticEditProjectedPortableImport(readySemanticImport);
   semanticImport.semanticEditProjections.projectedSourceMatchesWorker = 0;
@@ -157,6 +163,39 @@ function semanticEditProjection(overrides = {}) {
     projectedSourceMatchUnknown: 0,
     statusCounts: { projected: 1 },
     admission: { 'auto-merge-candidate': 1 },
+    reasonCodes: [],
+    empty: false,
+    ...overrides
+  };
+}
+
+function semanticEditReplay(overrides = {}) {
+  return {
+    total: 1,
+    acceptedClean: 1,
+    alreadyApplied: 0,
+    conflicts: 0,
+    stale: 0,
+    blocked: 0,
+    needsPort: 0,
+    evidenceOnly: 0,
+    appliedOperations: 1,
+    skippedOperations: 0,
+    editCount: 1,
+    appliedEditCount: 1,
+    alreadyAppliedEditCount: 0,
+    statusCounts: { 'accepted-clean': 1 },
+    admission: { 'accepted-clean': 1 },
+    actions: ['apply'],
+    operationIds: ['semantic_edit_op_apply'],
+    semanticKeys: ['semantic-edit:replaceBody:modified:function:apply'],
+    semanticIdentityHashes: ['hash:semantic-identity-apply'],
+    sourceIdentityHashes: ['hash:source-identity-apply'],
+    editContentHashes: ['hash:edit-content-apply'],
+    sourcePaths: ['src/apply.ts'],
+    symbolNames: ['apply'],
+    currentHashes: ['hash:current-apply'],
+    outputHashes: ['hash:output-apply'],
     reasonCodes: [],
     empty: false,
     ...overrides

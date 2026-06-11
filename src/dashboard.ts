@@ -9,6 +9,7 @@ import { mergeSemanticFactSummaries } from './semantic-import-facts.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { mergeSemanticEditScriptSummaries } from './semantic-edit-script.js';
 import { mergeSemanticEditProjectionSummaries } from './semantic-edit-projection.js';
+import { mergeSemanticEditReplaySummaries } from './semantic-edit-replay.js';
 import { codexJobTraceSummary, summarizeCodexTraceSummaries } from './trace-summary.js';
 import { contextBudgetFromCoordinatorJob } from './context-budget.js';
 
@@ -32,6 +33,7 @@ export function createCodexCompactDashboard(input: {
   })));
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
   const semanticEditProjections = mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection));
+  const semanticEditReplays = mergeSemanticEditReplaySummaries(semanticQualities.map((entry) => entry.semanticEditReplay));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
   const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
   const traceSummaries = input.dashboard.jobs
@@ -74,6 +76,15 @@ export function createCodexCompactDashboard(input: {
     duplicateDiscoveryCount: input.dashboard.duplicateGroups.length,
     semanticEditAdmission,
     semanticEditScriptAdmission,
+    semanticEditReplay: {
+      total: semanticEditReplays.total,
+      acceptedClean: semanticEditReplays.acceptedClean,
+      alreadyApplied: semanticEditReplays.alreadyApplied,
+      conflicts: semanticEditReplays.conflicts,
+      stale: semanticEditReplays.stale,
+      blocked: semanticEditReplays.blocked,
+      needsPort: semanticEditReplays.needsPort
+    },
     tournament: summarizeTournament(input.strategyTournament),
     semanticImport: {
       expected: input.semanticImportExpected,
@@ -115,6 +126,7 @@ export function createCodexCompactDashboard(input: {
       semanticLineageReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageReasonCodes)),
       semanticEditScripts,
       semanticEditProjections,
+      semanticEditReplays,
       semanticEditAdmission,
       semanticEditScriptAdmission
     },
