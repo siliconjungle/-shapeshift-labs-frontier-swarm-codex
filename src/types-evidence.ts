@@ -15,6 +15,7 @@ import type {
   FrontierCodexSemanticEditScriptSummary
 } from './types-semantic-edit.js';
 import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
+import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
 import type { FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './types-semantic.js';
 
 export interface FrontierCodexPatchHunkSummary {
@@ -168,6 +169,7 @@ export interface FrontierCodexCompactDashboard {
   duplicateDiscoveryCount: number;
   semanticEditAdmission: FrontierCodexSemanticEditAdmissionSummary;
   semanticEditScriptAdmission: FrontierCodexSemanticEditScriptAdmissionSummary;
+  semanticPatchBundleOverlaps?: FrontierCodexSemanticPatchBundleOverlapSummary;
   tournament: {
     strategyCount: number;
     gameCount: number;

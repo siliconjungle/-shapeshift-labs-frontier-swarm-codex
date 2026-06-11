@@ -9,6 +9,7 @@ import {
   createSwarmStrategyTournamentHistory,
   createSwarmTournamentAdaptiveFeedback,
   createSwarmQueueOverlay,
+  type FrontierSwarmCoordinatorDashboard,
   type FrontierSwarmCoordinatorProcessInput,
   type FrontierSwarmEvidenceIndexEntryInput,
   type FrontierSwarmMergeBundle,
@@ -31,6 +32,7 @@ import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } 
 import { createCodexArtifactStore } from './artifact-store.js';
 import { enrichCollectedCoordinatorDashboard } from './collect-dashboard.js';
 import { contextBudgetFromBundle } from './context-budget.js';
+import { summarizeSemanticPatchBundleOverlaps } from './semantic-bundle-overlaps.js';
 
 
 export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Promise<FrontierCodexCollectResult> {
@@ -170,6 +172,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     generatedAt,
     metadata: { runDir, outDir }
   }), semanticImportQualities, semanticImportExpected, contextBudgets);
+  const semanticPatchBundleOverlaps = await summarizeSemanticPatchBundleOverlaps(collectedBundles);
   const compactDashboard = createCodexCompactDashboard({
     runDir,
     dashboard,
@@ -177,6 +180,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     semanticImportExpected,
     generatedAt
   });
+  attachSemanticPatchBundleOverlaps(dashboard, compactDashboard, semanticPatchBundleOverlaps);
   const summary = {
     total: mergeRecords.length,
     'ready-to-apply': buckets['ready-to-apply'].length,
@@ -204,6 +208,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     semanticImport: compactDashboard.semanticImport,
     semanticEditAdmission: compactDashboard.semanticEditAdmission,
     semanticEditScriptAdmission: compactDashboard.semanticEditScriptAdmission,
+    semanticPatchBundleOverlaps,
     summary
   };
   await fs.mkdir(outDir, { recursive: true });
@@ -220,6 +225,18 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   result.artifactStore = await createCodexArtifactStore({ collection: result });
   await fs.writeFile(path.join(outDir, 'collection.json'), JSON.stringify(result, null, 2) + '\n');
   return result;
+}
+
+function attachSemanticPatchBundleOverlaps(
+  dashboard: FrontierSwarmCoordinatorDashboard,
+  compactDashboard: ReturnType<typeof createCodexCompactDashboard>,
+  semanticPatchBundleOverlaps: Awaited<ReturnType<typeof summarizeSemanticPatchBundleOverlaps>>
+): void {
+  const mutableDashboard = dashboard as FrontierSwarmCoordinatorDashboard & { metadata?: Record<string, unknown> };
+  const dashboardMetadata = mutableDashboard as unknown as { metadata?: Record<string, unknown> };
+  (mutableDashboard.summary as Record<string, unknown>).semanticPatchBundleOverlaps = semanticPatchBundleOverlaps;
+  dashboardMetadata.metadata = { ...(dashboardMetadata.metadata ?? {}), semanticPatchBundleOverlaps };
+  (compactDashboard as typeof compactDashboard & { semanticPatchBundleOverlaps?: typeof semanticPatchBundleOverlaps }).semanticPatchBundleOverlaps = semanticPatchBundleOverlaps;
 }
 
 function normalizeCollectedReasons(

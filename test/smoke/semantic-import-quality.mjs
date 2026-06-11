@@ -90,6 +90,19 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     semanticImport: cleanEditScriptSemanticImportSummary(),
     metadata: { semanticImport: cleanEditScriptSemanticImportSummary() }
   }, null, 2) + '\n');
+  const duplicateCleanJobDir = path.join(runDir, 'semantic-edit-clean-duplicate-worker');
+  await fs.mkdir(duplicateCleanJobDir, { recursive: true });
+  await fs.writeFile(path.join(duplicateCleanJobDir, 'merge.json'), JSON.stringify({
+    ...mergeBundle,
+    id: 'semantic-edit-clean-duplicate-worker-bundle',
+    jobId: 'semantic-edit-clean-duplicate-worker',
+    taskId: 'semantic-edit-clean-duplicate-task',
+    changedPaths: ['src/runtime/edit-script-clean-copy.ts'],
+    evidencePaths: ['semantic-imports.json'],
+    patchPath: undefined,
+    semanticImport: cleanEditScriptSemanticImportSummary(),
+    metadata: { semanticImport: cleanEditScriptSemanticImportSummary() }
+  }, null, 2) + '\n');
   const collection = await collectCodexSwarmRun({
     run: runDir,
     checkStale: false,
@@ -103,22 +116,26 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   const factQuality = qualityByJob.get('fact-semantic-worker');
   const zeroLineageQuality = qualityByJob.get('zero-lineage-semantic-worker');
   assert.strictEqual(semanticImport.expectedUnsatisfiedCount, 2);
-  assert.strictEqual(semanticImport.semanticFactCount, 9);
+  assert.strictEqual(semanticImport.semanticFactCount, 12);
   assert.ok(semanticImport.semanticFactPredicates.includes('controlFlow'));
-  assert.strictEqual(semanticImport.semanticFactSummary.effect, 3);
+  assert.strictEqual(semanticImport.semanticFactSummary.effect, 4);
   assert.ok(semanticImport.expectedMissingReasonCodes.includes('expected-semantic-import-empty'));
   assert.ok(semanticImport.expectedMissingReasonCodes.includes('expected-semantic-import-missing'));
   assert.ok(semanticImport.warnings.includes('semantic import expected but empty'));
   assert.ok(semanticImport.warnings.includes('semantic import expected but missing'));
   assert.ok(semanticImport.warnings.includes(EXPECTED_ZERO_LINEAGE_WARNING));
   assert.strictEqual(semanticImport.semanticEditScripts.conflicts, 1);
-  assert.strictEqual(semanticImport.semanticEditScripts.autoMergeCandidates, 2);
-  assert.strictEqual(semanticImport.semanticEditScripts.portable, 2);
+  assert.strictEqual(semanticImport.semanticEditScripts.autoMergeCandidates, 3);
+  assert.strictEqual(semanticImport.semanticEditScripts.portable, 3);
   assert.strictEqual(semanticImport.semanticEditAdmission.statusCounts.conflict, 1);
-  assert.strictEqual(semanticImport.semanticEditAdmission.statusCounts['auto-merge-candidate'], 1);
-  assert.strictEqual(semanticImport.semanticEditAdmission.autoMergeCandidateCount, 1);
-  assert.strictEqual(semanticImport.semanticEditScriptAdmission.autoMergeCandidateCount, 2);
-  assert.strictEqual(semanticImport.semanticEditScriptAdmission.cleanEligibleCandidateCount, 2);
+  assert.strictEqual(semanticImport.semanticEditAdmission.statusCounts['auto-merge-candidate'], 2);
+  assert.strictEqual(semanticImport.semanticEditAdmission.autoMergeCandidateCount, 2);
+  assert.strictEqual(semanticImport.semanticEditScriptAdmission.autoMergeCandidateCount, 3);
+  assert.strictEqual(semanticImport.semanticEditScriptAdmission.cleanEligibleCandidateCount, 3);
+  assert.strictEqual(collection.semanticPatchBundleOverlaps.available, true);
+  assert.strictEqual(collection.semanticPatchBundleOverlaps.duplicateCount, 1);
+  assert.strictEqual(collection.semanticPatchBundleOverlaps.statusCounts.duplicate, 1);
+  assert.deepStrictEqual(collection.semanticPatchBundleOverlaps.top[0].overlapKinds.includes('operation-content'), true);
   assert.deepStrictEqual(collection.semanticEditAdmission, semanticImport.semanticEditAdmission);
   assert.deepStrictEqual(collection.semanticEditScriptAdmission, semanticImport.semanticEditScriptAdmission);
   assert.deepStrictEqual(collection.compactDashboard.semanticEditAdmission, semanticImport.semanticEditAdmission);
@@ -152,12 +169,14 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.strictEqual(queryQualityByJob.get('fact-semantic-worker').semanticFacts, 3);
   assert.strictEqual(queryQualityByJob.get('zero-lineage-semantic-worker').expectedSatisfied, true);
   assert.ok(queryQualityByJob.get('zero-lineage-semantic-worker').warnings.includes(EXPECTED_ZERO_LINEAGE_WARNING));
-  assert.strictEqual(coordinatorQuery.summary.semanticImportFactCount, 9);
+  assert.strictEqual(coordinatorQuery.summary.semanticImportFactCount, 12);
   assert.strictEqual(coordinatorQuery.summary.semanticEditScriptConflicts, 1);
   assert.strictEqual(coordinatorQuery.summary.semanticEditAdmission.statusCounts.conflict, 1);
-  assert.strictEqual(coordinatorQuery.summary.semanticEditAdmission.statusCounts['auto-merge-candidate'], 1);
-  assert.strictEqual(coordinatorQuery.summary.semanticEditScriptAdmission.autoMergeCandidateCount, 2);
-  assert.strictEqual(coordinatorQuery.summary.semanticEditScriptAdmission.cleanEligibleCandidateCount, 2);
+  assert.strictEqual(coordinatorQuery.summary.semanticEditAdmission.statusCounts['auto-merge-candidate'], 2);
+  assert.strictEqual(coordinatorQuery.summary.semanticEditScriptAdmission.autoMergeCandidateCount, 3);
+  assert.strictEqual(coordinatorQuery.summary.semanticEditScriptAdmission.cleanEligibleCandidateCount, 3);
+  assert.strictEqual(coordinatorQuery.summary.semanticPatchBundleOverlaps.duplicateCount, 1);
+  assert.strictEqual(collection.compactDashboard.semanticPatchBundleOverlaps.duplicateCount, 1);
   assert.strictEqual(queryQualityByJob.get('semantic-edit-script-worker').semanticEditAdmission.status, 'conflict');
   assert.strictEqual(queryQualityByJob.get('semantic-edit-clean-worker').semanticEditAdmission.status, 'auto-merge-candidate');
   assert.strictEqual(coordinatorQuery.jobs.find((entry) => entry.jobId === 'semantic-edit-clean-worker').semanticEditAdmission.status, 'auto-merge-candidate');
@@ -173,18 +192,31 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     collection: collection.outDir,
     semanticEditAdmission: 'auto-merge-candidate'
   });
-  assert.strictEqual(admissionQuery.jobs.length, 2);
+  assert.strictEqual(admissionQuery.jobs.length, 3);
   assert.deepStrictEqual(admissionQuery.jobs.map((entry) => entry.jobId).sort(), [
+    'semantic-edit-clean-duplicate-worker',
     'semantic-edit-clean-worker',
     'semantic-edit-script-worker'
   ]);
-  assert.strictEqual(admissionQuery.summary.semanticEditAdmission.autoMergeCandidateCount, 1);
-  assert.strictEqual(admissionQuery.summary.semanticEditScriptAdmission.autoMergeCandidateCount, 2);
+  assert.strictEqual(admissionQuery.summary.semanticEditAdmission.autoMergeCandidateCount, 2);
+  assert.strictEqual(admissionQuery.summary.semanticEditScriptAdmission.autoMergeCandidateCount, 3);
+  const duplicateOverlapQuery = await queryCodexSwarmCollection({
+    collection: collection.outDir,
+    semanticBundleOverlap: 'duplicate'
+  });
+  assert.deepStrictEqual(duplicateOverlapQuery.jobs.map((entry) => entry.jobId).sort(), [
+    'semantic-edit-clean-duplicate-worker',
+    'semantic-edit-clean-worker'
+  ]);
+  assert.strictEqual(duplicateOverlapQuery.summary.semanticPatchBundleOverlaps.duplicateCount, 1);
   const semanticKeyQuery = await queryCodexSwarmCollection({
     collection: collection.outDir,
     semanticEditKey: 'semantic-edit:replaceBody:modified:function:cleanRun'
   });
-  assert.deepStrictEqual(semanticKeyQuery.jobs.map((entry) => entry.jobId), ['semantic-edit-clean-worker']);
+  assert.deepStrictEqual(semanticKeyQuery.jobs.map((entry) => entry.jobId).sort(), [
+    'semantic-edit-clean-duplicate-worker',
+    'semantic-edit-clean-worker'
+  ]);
   assert.ok(semanticKeyQuery.evidence.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
   assert.ok(semanticKeyQuery.artifacts.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
   assert.deepStrictEqual(semanticKeyQuery.summary.semanticEditProjection.semanticKeys, [
@@ -194,11 +226,17 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     collection: collection.outDir,
     editContentHash: 'hash:edit-content-clean'
   });
-  assert.deepStrictEqual(contentHashQuery.jobs.map((entry) => entry.jobId), ['semantic-edit-clean-worker']);
+  assert.deepStrictEqual(contentHashQuery.jobs.map((entry) => entry.jobId).sort(), [
+    'semantic-edit-clean-duplicate-worker',
+    'semantic-edit-clean-worker'
+  ]);
   const operationHashQuery = await queryCodexSwarmCollection({
     collection: collection.outDir,
     operationContentHash: 'hash:operation-content-clean'
   });
-  assert.deepStrictEqual(operationHashQuery.jobs.map((entry) => entry.jobId), ['semantic-edit-clean-worker']);
+  assert.deepStrictEqual(operationHashQuery.jobs.map((entry) => entry.jobId).sort(), [
+    'semantic-edit-clean-duplicate-worker',
+    'semantic-edit-clean-worker'
+  ]);
   assert.ok(operationHashQuery.evidence.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
 }

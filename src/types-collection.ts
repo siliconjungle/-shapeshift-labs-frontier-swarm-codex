@@ -24,6 +24,7 @@ import type {
 } from './constants.js';
 import type { FrontierCodexCompactDashboard, FrontierCodexContextBudgetReport } from './types-evidence.js';
 import type { FrontierCodexPatchScoreCalibration } from './types-score-calibration.js';
+import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
 import type {
   FrontierCodexSemanticEditAdmissionDecision,
   FrontierCodexSemanticEditScriptSummary
@@ -73,6 +74,7 @@ export interface FrontierCodexCollectResult {
   semanticImport: FrontierCodexCompactDashboard['semanticImport'];
   semanticEditAdmission: FrontierCodexCompactDashboard['semanticEditAdmission'];
   semanticEditScriptAdmission: FrontierCodexCompactDashboard['semanticEditScriptAdmission'];
+  semanticPatchBundleOverlaps: FrontierCodexSemanticPatchBundleOverlapSummary;
   artifactStore?: FrontierCodexArtifactStoreResult;
   summary: Record<FrontierCodexCollectBucket, number> & { total: number };
 }

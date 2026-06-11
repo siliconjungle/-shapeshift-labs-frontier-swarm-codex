@@ -163,6 +163,7 @@ export {
   mergeSemanticEditScriptSummaries,
   summarizeSemanticEditScript
 } from './semantic-edit-script.js';
+export { summarizeSemanticPatchBundleOverlaps } from './semantic-bundle-overlaps.js';
 
 export type * from './types.js';
 

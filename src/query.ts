@@ -15,6 +15,7 @@ import {
   semanticEditProjectionSummary,
   semanticEditScriptAdmissionSummary
 } from './query-semantic-edit.js';
+import { semanticPatchBundleOverlapJobIds } from './semantic-bundle-overlaps.js';
 
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
@@ -36,6 +37,7 @@ export interface FrontierCodexQueryInput {
   semanticEditAdmission?: string;
   semanticEditProjection?: string;
   semanticEditKey?: string;
+  semanticBundleOverlap?: string;
   semanticIdentityHash?: string;
   sourceIdentityHash?: string;
   operationContentHash?: string;
@@ -53,9 +55,11 @@ export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) 
     readJsonIfExists<{ jobs?: unknown[]; summary?: unknown }>(path.join(collectionDir, 'coordinator-query.json')),
     readJsonIfExists<{ entries?: unknown[]; summary?: unknown }>(path.join(collectionDir, 'evidence-index.json'))
   ]);
+  const semanticPatchBundleOverlaps = isObject(dashboard?.summary) ? dashboard.summary.semanticPatchBundleOverlaps : undefined;
+  const overlapJobIds = semanticPatchBundleOverlapJobIds(semanticPatchBundleOverlaps, input.semanticBundleOverlap);
   const jobs = (Array.isArray(dashboard?.jobs) ? dashboard.jobs : [])
     .filter(isObject)
-    .filter((job) => matchesJob(job, input))
+    .filter((job) => matchesJob(job, input, overlapJobIds))
     .slice(0, input.limit ?? 50);
   const artifactRows = artifacts.filter((record) => matchesArtifact(record, input)).slice(0, input.limit ?? 100);
   const evidenceRows = (Array.isArray(evidenceIndex?.entries) ? evidenceIndex.entries : [])
@@ -75,7 +79,8 @@ export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) 
       touchedPaths: uniqueStrings(jobs.flatMap((job) => Array.isArray(job.changedPaths) ? job.changedPaths.filter((entry): entry is string => typeof entry === 'string') : [])),
       semanticEditAdmission: semanticEditAdmissionSummary(jobs),
       semanticEditProjection: semanticEditProjectionSummary(jobs),
-      semanticEditScriptAdmission: semanticEditScriptAdmissionSummary(jobs)
+      semanticEditScriptAdmission: semanticEditScriptAdmissionSummary(jobs),
+      semanticPatchBundleOverlaps
     },
     jobs,
     artifacts: artifactRows,
@@ -102,6 +107,7 @@ export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
     semanticEditAdmission: stringArg(args.semanticEditAdmission ?? args['semantic-edit-admission']),
     semanticEditProjection: stringArg(args.semanticEditProjection ?? args['semantic-edit-projection']),
     semanticEditKey: stringArg(args.semanticEditKey ?? args['semantic-edit-key'] ?? args.semanticKey ?? args['semantic-key']),
+    semanticBundleOverlap: stringArg(args.semanticBundleOverlap ?? args['semantic-bundle-overlap'] ?? args.semanticPatchBundleOverlap ?? args['semantic-patch-bundle-overlap']),
     semanticIdentityHash: stringArg(args.semanticIdentityHash ?? args['semantic-identity-hash'] ?? args['semantic-edit-identity-hash']),
     sourceIdentityHash: stringArg(args.sourceIdentityHash ?? args['source-identity-hash'] ?? args['semantic-source-identity-hash']),
     operationContentHash: stringArg(args.operationContentHash ?? args['operation-content-hash'] ?? args['semantic-operation-content-hash']),
@@ -135,10 +141,11 @@ async function resolveCollectionDir(input: Pick<FrontierCodexQueryInput, 'collec
   throw new Error('query requires --collection <dir> or --run <run-dir> with collected artifacts');
 }
 
-function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput): boolean {
+function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput, overlapJobIds?: Set<string>): boolean {
   const haystack = JSON.stringify(job).toLowerCase();
   return matchesText(haystack, input)
     && (input.jobId === undefined || job.jobId === input.jobId)
+    && (overlapJobIds === undefined || overlapJobIds.has(String(job.jobId ?? '')))
     && (input.bucket === undefined || job.disposition === input.bucket || job.admissionStatus === input.bucket)
     && (input.pathIncludes === undefined || arrayIncludes(job.changedPaths, input.pathIncludes))
     && (input.symbol === undefined || haystack.includes(input.symbol.toLowerCase()))
