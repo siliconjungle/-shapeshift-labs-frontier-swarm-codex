@@ -35,6 +35,10 @@ export interface FrontierCodexQueryInput {
   semanticEditStatus?: string;
   semanticEditAdmission?: string;
   semanticEditProjection?: string;
+  semanticEditKey?: string;
+  semanticIdentityHash?: string;
+  sourceIdentityHash?: string;
+  editContentHash?: string;
   readiness?: string;
   passedTests?: boolean;
   limit?: number;
@@ -96,6 +100,10 @@ export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
     semanticEditStatus: stringArg(args.semanticEditStatus ?? args['semantic-edit-status']),
     semanticEditAdmission: stringArg(args.semanticEditAdmission ?? args['semantic-edit-admission']),
     semanticEditProjection: stringArg(args.semanticEditProjection ?? args['semantic-edit-projection']),
+    semanticEditKey: stringArg(args.semanticEditKey ?? args['semantic-edit-key'] ?? args.semanticKey ?? args['semantic-key']),
+    semanticIdentityHash: stringArg(args.semanticIdentityHash ?? args['semantic-identity-hash'] ?? args['semantic-edit-identity-hash']),
+    sourceIdentityHash: stringArg(args.sourceIdentityHash ?? args['source-identity-hash'] ?? args['semantic-source-identity-hash']),
+    editContentHash: stringArg(args.editContentHash ?? args['edit-content-hash'] ?? args['semantic-edit-content-hash']),
     readiness: stringArg(args.readiness ?? args.view),
     passedTests: optionalBoolArg(args.passedTests ?? args['passed-tests']),
     limit: numberArg(args.limit)
@@ -136,7 +144,7 @@ function matchesJob(job: Record<string, unknown>, input: FrontierCodexQueryInput
     && (input.semantic === undefined || Boolean(job.semanticImport) === input.semantic || Boolean(job.semanticImportQuality) === input.semantic)
     && (input.lineage === undefined || jobHasLineage(job) === input.lineage)
     && matchesSemanticEdit(jobSemanticEditScript(job), input, haystack, jobSemanticEditAdmission(job))
-    && matchesSemanticEditProjection(jobSemanticEditProjection(job), input.semanticEditProjection, haystack)
+    && matchesSemanticEditProjection(jobSemanticEditProjection(job), input, haystack)
     && (input.readiness === undefined || matchesReadiness(job, input.readiness))
     && (input.passedTests === undefined || testsPassed(job) === input.passedTests);
 }
@@ -153,7 +161,7 @@ function matchesArtifact(record: FrontierCodexArtifactRecord, input: FrontierCod
     && (input.semantic === undefined || record.tags.includes('semantic-sidecar') === input.semantic)
     && (input.lineage === undefined || textHasLineage(haystack) === input.lineage)
     && matchesSemanticEdit(artifactSemanticEditScript(record), input, haystack, artifactSemanticEditAdmission(record))
-    && matchesSemanticEditProjection(artifactSemanticEditProjection(record), input.semanticEditProjection, haystack);
+    && matchesSemanticEditProjection(artifactSemanticEditProjection(record), input, haystack);
 }
 
 function matchesEvidence(entry: Record<string, unknown>, input: FrontierCodexQueryInput): boolean {

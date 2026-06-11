@@ -1,5 +1,12 @@
 import assert from 'node:assert';
 import { collectCodexSwarmRun, fs, path, queryCodexSwarmCollection } from './context.mjs';
+import {
+  cleanEditScriptSemanticImportSummary,
+  editScriptSemanticImportSummary,
+  emptyExpectedSemanticImportSummary,
+  factSemanticImportSummary,
+  zeroLineageSemanticImportSummary
+} from './semantic-import-quality-fixtures.mjs';
 
 const EXPECTED_ZERO_LINEAGE_WARNING = 'semantic import has symbols but no inferred semantic lineage for expected before-source diff';
 
@@ -173,134 +180,19 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   ]);
   assert.strictEqual(admissionQuery.summary.semanticEditAdmission.autoMergeCandidateCount, 1);
   assert.strictEqual(admissionQuery.summary.semanticEditScriptAdmission.autoMergeCandidateCount, 2);
-}
-
-function emptyExpectedSemanticImportSummary() {
-  return {
-    total: 0,
-    selected: 0,
-    eligible: 0,
-    imported: 0,
-    sourceMapMappingCount: 0,
-    semanticIndex: { symbols: 0 },
-    semanticSidecars: { ownershipRegions: 0, patchHints: 0 },
-    dependencies: { total: 0, predicates: [] },
-    semanticImportExpected: true,
-    semanticImportExpectedSatisfied: false,
-    semanticImportExpectedMissingReasonCodes: ['expected-semantic-import-empty']
-  };
-}
-
-function factSemanticImportSummary() {
-  return {
-    total: 1,
-    selected: 1,
-    eligible: 1,
-    imported: 1,
-    sourceMapMappingCount: 1,
-    semanticIndex: { symbols: 2, facts: 3 },
-    semanticFacts: {
-      total: 3,
-      predicates: ['controlFlow', 'effect', 'mutation'],
-      byPredicate: { controlFlow: 1, effect: 1, mutation: 1 }
-    },
-    semanticSidecars: { ownershipRegions: 1, patchHints: 1 },
-    dependencies: { total: 1, predicates: ['calls'] },
-    semanticImportExpected: true,
-    semanticImportExpectedSatisfied: true,
-    semanticImportExpectedMissingReasonCodes: []
-  };
-}
-
-function zeroLineageSemanticImportSummary() {
-  return {
-    total: 1,
-    selected: 1,
-    eligible: 1,
-    imported: 1,
-    sourceMapMappingCount: 1,
-    semanticIndex: { symbols: 2, facts: 0 },
-    semanticSidecars: { ownershipRegions: 1, patchHints: 1 },
-    dependencies: { total: 1, predicates: ['calls'] },
-    universalAstLayers: { total: 1, names: ['program'], ids: ['layer:program'] },
-    semanticLineage: {
-      total: 0,
-      inferredEvents: 0,
-      moved: 0,
-      renamed: 0,
-      deleted: 0,
-      ambiguous: 0,
-      unmatchedAdded: 0,
-      unchangedAnchors: 1,
-      beforeSymbols: 2,
-      afterSymbols: 2,
-      blocked: 0,
-      needsReview: 0,
-      ready: 0,
-      readiness: {},
-      eventKinds: [],
-      reasonCodes: [],
-      reviewRequired: false,
-      empty: false
-    },
-    semanticImportExpected: true,
-    semanticImportExpectedSatisfied: true,
-    semanticImportExpectedMissingReasonCodes: []
-  };
-}
-
-function editScriptSemanticImportSummary() {
-  return {
-    ...factSemanticImportSummary(),
-    semanticEditScripts: {
-      total: 2,
-      operations: 2,
-      autoMergeCandidates: 1,
-      portable: 1,
-      alreadyApplied: 0,
-      needsPort: 0,
-      conflicts: 1,
-      stale: 0,
-      blocked: 0,
-      candidates: 0,
-      reviewRequired: 1,
-      autoApplyCandidates: 1,
-      byStatus: { conflict: 1, portable: 1 },
-      byKind: { replaceBody: 2 },
-      admission: { conflict: 1, 'auto-merge-candidate': 1 },
-      actions: ['block', 'apply'],
-      reasonCodes: ['head-anchor-changed-since-base'],
-      conflictKeys: ['region:source#src/runtime/edit-script.ts#body#run'],
-      evidenceIds: ['evidence_semantic_edit_script'],
-      empty: false
-    }
-  };
-}
-
-function cleanEditScriptSemanticImportSummary() {
-  return {
-    ...factSemanticImportSummary(),
-    semanticEditScripts: {
-      total: 1,
-      operations: 1,
-      autoMergeCandidates: 1,
-      portable: 1,
-      alreadyApplied: 0,
-      needsPort: 0,
-      conflicts: 0,
-      stale: 0,
-      blocked: 0,
-      candidates: 0,
-      reviewRequired: 0,
-      autoApplyCandidates: 1,
-      byStatus: { portable: 1 },
-      byKind: { replaceBody: 1 },
-      admission: { 'auto-merge-candidate': 1 },
-      actions: ['apply'],
-      reasonCodes: [],
-      conflictKeys: [],
-      evidenceIds: ['evidence_semantic_edit_script_clean'],
-      empty: false
-    }
-  };
+  const semanticKeyQuery = await queryCodexSwarmCollection({
+    collection: collection.outDir,
+    semanticEditKey: 'semantic-edit:replaceBody:modified:function:cleanRun'
+  });
+  assert.deepStrictEqual(semanticKeyQuery.jobs.map((entry) => entry.jobId), ['semantic-edit-clean-worker']);
+  assert.ok(semanticKeyQuery.evidence.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
+  assert.ok(semanticKeyQuery.artifacts.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
+  assert.deepStrictEqual(semanticKeyQuery.summary.semanticEditProjection.semanticKeys, [
+    'semantic-edit:replaceBody:modified:function:cleanRun'
+  ]);
+  const contentHashQuery = await queryCodexSwarmCollection({
+    collection: collection.outDir,
+    editContentHash: 'hash:edit-content-clean'
+  });
+  assert.deepStrictEqual(contentHashQuery.jobs.map((entry) => entry.jobId), ['semantic-edit-clean-worker']);
 }

@@ -13,6 +13,10 @@ export interface SemanticEditQuery {
   semanticEditStatus?: string;
   semanticEditAdmission?: string;
   semanticEditProjection?: string;
+  semanticEditKey?: string;
+  semanticIdentityHash?: string;
+  sourceIdentityHash?: string;
+  editContentHash?: string;
 }
 
 export interface SemanticEditProjectionQuerySummary {
@@ -67,26 +71,19 @@ export function matchesSemanticEdit(scriptValue: unknown, input: SemanticEditQue
       !hasScript && semanticEditTextMatch(haystack, input.semanticEditAdmission));
 }
 
-export function matchesSemanticEditProjection(value: unknown, wanted: string | undefined, haystack: string): boolean {
-  if (wanted === undefined) return true;
-  const lowered = wanted.toLowerCase();
+export function matchesSemanticEditProjection(value: unknown, input: SemanticEditQuery, haystack: string): boolean {
   const projection = isObject(value) ? value : {};
-  const number = (key: string) => Number(projection[key] ?? 0);
-  if (lowered === 'projected') return number('projected') > 0;
-  if (lowered === 'blocked') return number('blocked') > 0;
-  if (lowered === 'edits' || lowered === 'has-edits') return number('editCount') > 0;
-  if (lowered === 'applied-edits') return number('appliedEditCount') > 0;
-  if (lowered === 'already-applied-edits') return number('alreadyAppliedEditCount') > 0;
-  if (lowered === 'worker-match' || lowered === 'match') return number('projectedSourceMatchesWorker') > 0;
-  if (lowered === 'worker-mismatch' || lowered === 'mismatch') return number('projectedSourceMismatchesWorker') > 0;
-  if (lowered === 'worker-unknown' || lowered === 'unknown') return number('projectedSourceMatchUnknown') > 0;
-  return semanticEditTextMatch(haystack, wanted);
+  return matchesProjectionStatus(projection, input.semanticEditProjection, haystack)
+    && projectionArrayMatches(projection, 'semanticKeys', input.semanticEditKey, haystack)
+    && projectionArrayMatches(projection, 'semanticIdentityHashes', input.semanticIdentityHash, haystack)
+    && projectionArrayMatches(projection, 'sourceIdentityHashes', input.sourceIdentityHash, haystack)
+    && projectionArrayMatches(projection, 'editContentHashes', input.editContentHash, haystack);
 }
 
 export function matchesEvidenceSemanticEdit(entry: Record<string, unknown>, input: SemanticEditQuery, haystack: string): boolean {
   const facets = isObject(entry.facets) ? entry.facets : {};
   return matchesSemanticEdit(facetsToSemanticEditScript(facets), input, haystack, facetsToSemanticEditAdmission(facets)) &&
-    matchesSemanticEditProjection(facetsToSemanticEditProjection(facets), input.semanticEditProjection, haystack);
+    matchesSemanticEditProjection(facetsToSemanticEditProjection(facets), input, haystack);
 }
 
 export function semanticEditAdmissionSummary(jobs: Record<string, unknown>[]) {
@@ -219,8 +216,33 @@ function facetsToSemanticEditProjection(facets: Record<string, unknown>): unknow
     replacementBytes: facets.semanticEditProjectionReplacementBytes,
     projectedSourceMatchesWorker: facets.semanticEditProjectionMatchesWorker,
     projectedSourceMismatchesWorker: facets.semanticEditProjectionMismatchesWorker,
-    projectedSourceMatchUnknown: facets.semanticEditProjectionMatchUnknown
+    projectedSourceMatchUnknown: facets.semanticEditProjectionMatchUnknown,
+    semanticKeys: csvArray(facets.semanticEditProjectionSemanticKeys),
+    semanticIdentityHashes: csvArray(facets.semanticEditProjectionSemanticIdentityHashes),
+    sourceIdentityHashes: csvArray(facets.semanticEditProjectionSourceIdentityHashes),
+    editContentHashes: csvArray(facets.semanticEditProjectionEditContentHashes)
   };
+}
+
+function matchesProjectionStatus(projection: Record<string, unknown>, wanted: string | undefined, haystack: string): boolean {
+  if (wanted === undefined) return true;
+  const lowered = wanted.toLowerCase();
+  const number = (key: string) => Number(projection[key] ?? 0);
+  if (lowered === 'projected') return number('projected') > 0;
+  if (lowered === 'blocked') return number('blocked') > 0;
+  if (lowered === 'edits' || lowered === 'has-edits') return number('editCount') > 0;
+  if (lowered === 'applied-edits') return number('appliedEditCount') > 0;
+  if (lowered === 'already-applied-edits') return number('alreadyAppliedEditCount') > 0;
+  if (lowered === 'worker-match' || lowered === 'match') return number('projectedSourceMatchesWorker') > 0;
+  if (lowered === 'worker-mismatch' || lowered === 'mismatch') return number('projectedSourceMismatchesWorker') > 0;
+  if (lowered === 'worker-unknown' || lowered === 'unknown') return number('projectedSourceMatchUnknown') > 0;
+  return semanticEditTextMatch(haystack, wanted);
+}
+
+function projectionArrayMatches(projection: Record<string, unknown>, key: string, wanted: string | undefined, haystack: string): boolean {
+  if (wanted === undefined) return true;
+  return readStringArray(projection[key]).some((entry) => semanticEditTextMatch(entry.toLowerCase(), wanted)) ||
+    semanticEditTextMatch(haystack, wanted);
 }
 
 function csvRecord(value: unknown): Record<string, number> {
@@ -228,6 +250,10 @@ function csvRecord(value: unknown): Record<string, number> {
     out[key] = 1;
     return out;
   }, {});
+}
+
+function csvArray(value: unknown): string[] {
+  return String(value ?? '').split(',').filter(Boolean);
 }
 
 function semanticEditTextMatch(haystack: string, value: string): boolean {

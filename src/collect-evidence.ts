@@ -149,6 +149,7 @@ export function createCollectedEvidenceEntries(
       `semantic-edit-admission-${semanticImportQuality.semanticEditAdmission.status}`,
       ...(semanticImportQuality.semanticEditAdmission.autoMergeCandidate ? ['semantic-edit-admission-auto-merge-candidate'] : []),
       ...(semanticImportQuality.semanticEditAdmission.cleanEligible ? ['semantic-edit-admission-clean-eligible'] : []),
+      ...(semanticImportQuality.semanticEditProjection.semanticKeys.length ? ['semantic-edit-projection-identity'] : []),
       ...(contextBudget?.warnings.length ? ['context-budget-warning'] : []),
       ...(contextBudget?.errors.length ? ['context-budget-failed'] : [])
     ]),
@@ -199,6 +200,7 @@ export function createCollectedEvidenceEntries(
       semanticLineageEventKinds: semanticImportQuality.semanticLineageEventKinds.join(','),
       semanticLineageReasonCodes: semanticImportQuality.semanticLineageReasonCodes.join(','),
       ...semanticEditScriptFacets(semanticImportQuality.semanticEditScript),
+      ...semanticEditProjectionFacets(semanticImportQuality.semanticEditProjection),
       traceShards: traceSummary.shardCount,
       traceDivergences: traceSummary.divergenceCount,
       traceOpenDivergences: traceSummary.openDivergenceCount,
@@ -231,4 +233,25 @@ export function createCollectedEvidenceEntries(
     });
   }
   return entries;
+}
+
+function semanticEditProjectionFacets(
+  projection: ReturnType<typeof summarizeCodexSemanticImportQuality>['semanticEditProjection']
+): Record<string, string | number> {
+  return {
+    semanticEditProjectionProjected: projection.projected,
+    semanticEditProjectionBlocked: projection.blocked,
+    semanticEditProjectionEdits: projection.editCount,
+    semanticEditProjectionAppliedEdits: projection.appliedEditCount,
+    semanticEditProjectionAlreadyAppliedEdits: projection.alreadyAppliedEditCount,
+    semanticEditProjectionDeletedBytes: projection.deletedBytes,
+    semanticEditProjectionReplacementBytes: projection.replacementBytes,
+    semanticEditProjectionMatchesWorker: projection.projectedSourceMatchesWorker,
+    semanticEditProjectionMismatchesWorker: projection.projectedSourceMismatchesWorker,
+    semanticEditProjectionMatchUnknown: projection.projectedSourceMatchUnknown,
+    semanticEditProjectionSemanticKeys: projection.semanticKeys.join(','),
+    semanticEditProjectionSemanticIdentityHashes: projection.semanticIdentityHashes.join(','),
+    semanticEditProjectionSourceIdentityHashes: projection.sourceIdentityHashes.join(','),
+    semanticEditProjectionEditContentHashes: projection.editContentHashes.join(',')
+  };
 }
