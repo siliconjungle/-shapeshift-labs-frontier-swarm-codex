@@ -27,6 +27,10 @@ export interface SemanticEditProjectionQuerySummary {
   conflictKeys: string[];
   symbolNames: string[];
   sourcePaths: string[];
+  semanticKeys: string[];
+  semanticIdentityHashes: string[];
+  sourceIdentityHashes: string[];
+  editContentHashes: string[];
   workerMatches: number;
   workerMismatches: number;
   workerUnknown: number;
@@ -123,6 +127,10 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     out.conflictKeys = uniqueStrings([...out.conflictKeys, ...readStringArray(projection.conflictKeys)]);
     out.symbolNames = uniqueStrings([...out.symbolNames, ...readStringArray(projection.symbolNames)]);
     out.sourcePaths = uniqueStrings([...out.sourcePaths, ...readStringArray(projection.sourcePaths)]);
+    out.semanticKeys = uniqueStrings([...out.semanticKeys, ...readStringArray(projection.semanticKeys)]);
+    out.semanticIdentityHashes = uniqueStrings([...out.semanticIdentityHashes, ...readStringArray(projection.semanticIdentityHashes)]);
+    out.sourceIdentityHashes = uniqueStrings([...out.sourceIdentityHashes, ...readStringArray(projection.sourceIdentityHashes)]);
+    out.editContentHashes = uniqueStrings([...out.editContentHashes, ...readStringArray(projection.editContentHashes)]);
     out.workerMatches += nonNegativeNumber(projection.projectedSourceMatchesWorker);
     out.workerMismatches += nonNegativeNumber(projection.projectedSourceMismatchesWorker);
     out.workerUnknown += nonNegativeNumber(projection.projectedSourceMatchUnknown);
@@ -139,6 +147,10 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     conflictKeys: [],
     symbolNames: [],
     sourcePaths: [],
+    semanticKeys: [],
+    semanticIdentityHashes: [],
+    sourceIdentityHashes: [],
+    editContentHashes: [],
     workerMatches: 0,
     workerMismatches: 0,
     workerUnknown: 0

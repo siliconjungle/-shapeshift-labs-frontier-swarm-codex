@@ -14,6 +14,10 @@ export interface FrontierCodexSemanticEditProjectionSummary {
   conflictKeys: string[];
   symbolNames: string[];
   sourcePaths: string[];
+  semanticKeys: string[];
+  semanticIdentityHashes: string[];
+  sourceIdentityHashes: string[];
+  editContentHashes: string[];
   projectedSourceMatchesWorker: number;
   projectedSourceMismatchesWorker: number;
   projectedSourceMatchUnknown: number;

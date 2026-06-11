@@ -25,6 +25,10 @@ export async function testSemanticEditProjectionSummary() {
       conflictKey: 'region:source#src/runtime.ts#function#run',
       symbolName: 'run',
       sourcePath: 'src/runtime.ts',
+      semanticKey: 'semantic-edit:replaceBody:modified:function:run',
+      semanticIdentityHash: 'hash:semantic-identity',
+      sourceIdentityHash: 'hash:source-identity',
+      editContentHash: 'hash:edit-content',
       deletedBytes: 4,
       replacementBytes: 8,
       replacementTextHash: 'hash:replacement'
@@ -41,10 +45,15 @@ export async function testSemanticEditProjectionSummary() {
   assert.deepStrictEqual(summary.conflictKeys, ['region:source#src/runtime.ts#function#run']);
   assert.deepStrictEqual(summary.symbolNames, ['run']);
   assert.deepStrictEqual(summary.sourcePaths, ['src/runtime.ts']);
+  assert.deepStrictEqual(summary.semanticKeys, ['semantic-edit:replaceBody:modified:function:run']);
+  assert.deepStrictEqual(summary.semanticIdentityHashes, ['hash:semantic-identity']);
+  assert.deepStrictEqual(summary.sourceIdentityHashes, ['hash:source-identity']);
+  assert.deepStrictEqual(summary.editContentHashes, ['hash:edit-content']);
   assert.strictEqual(summary.projectedSourceMatchesWorker, 1);
   const merged = mergeSemanticEditProjectionSummaries([emptySemanticEditProjectionSummary(), summary]);
   assert.strictEqual(merged.editCount, 1);
   assert.strictEqual(merged.replacementBytes, 8);
   assert.deepStrictEqual(merged.anchorKeys, ['source#src/runtime.ts#function#run']);
+  assert.deepStrictEqual(merged.semanticKeys, ['semantic-edit:replaceBody:modified:function:run']);
   assert.strictEqual(merged.empty, false);
 }
