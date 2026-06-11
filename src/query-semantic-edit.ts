@@ -16,6 +16,7 @@ export interface SemanticEditQuery {
   semanticEditKey?: string;
   semanticIdentityHash?: string;
   sourceIdentityHash?: string;
+  operationContentHash?: string;
   editContentHash?: string;
 }
 
@@ -34,6 +35,7 @@ export interface SemanticEditProjectionQuerySummary {
   semanticKeys: string[];
   semanticIdentityHashes: string[];
   sourceIdentityHashes: string[];
+  operationContentHashes: string[];
   editContentHashes: string[];
   workerMatches: number;
   workerMismatches: number;
@@ -60,7 +62,13 @@ export function jobSemanticEditProjection(job: Record<string, unknown>): unknown
 }
 
 export function matchesSemanticEdit(scriptValue: unknown, input: SemanticEditQuery, haystack: string, admissionValue?: unknown): boolean {
-  if (input.semanticEditStatus === undefined && input.semanticEditAdmission === undefined) return true;
+  const identityOnly = input.semanticEditStatus === undefined && input.semanticEditAdmission === undefined;
+  const hasIdentityFilter = input.semanticEditKey !== undefined ||
+    input.semanticIdentityHash !== undefined ||
+    input.sourceIdentityHash !== undefined ||
+    input.operationContentHash !== undefined ||
+    input.editContentHash !== undefined;
+  if (identityOnly && !hasIdentityFilter) return true;
   const hasScript = scriptValue !== undefined;
   const script = scriptValue === undefined ? undefined : semanticEditScriptFromUnknown(scriptValue);
   const admission = semanticEditAdmissionFromUnknown(admissionValue, script);
@@ -68,7 +76,8 @@ export function matchesSemanticEdit(scriptValue: unknown, input: SemanticEditQue
     && (input.semanticEditAdmission === undefined ||
       semanticEditAdmissionMatches(admission, input.semanticEditAdmission) ||
       semanticEditScriptHasAdmission(script, input.semanticEditAdmission) ||
-      !hasScript && semanticEditTextMatch(haystack, input.semanticEditAdmission));
+      !hasScript && semanticEditTextMatch(haystack, input.semanticEditAdmission))
+    && semanticEditScriptIdentityMatches(script, input, haystack);
 }
 
 export function matchesSemanticEditProjection(value: unknown, input: SemanticEditQuery, haystack: string): boolean {
@@ -77,6 +86,7 @@ export function matchesSemanticEditProjection(value: unknown, input: SemanticEdi
     && projectionArrayMatches(projection, 'semanticKeys', input.semanticEditKey, haystack)
     && projectionArrayMatches(projection, 'semanticIdentityHashes', input.semanticIdentityHash, haystack)
     && projectionArrayMatches(projection, 'sourceIdentityHashes', input.sourceIdentityHash, haystack)
+    && projectionArrayMatches(projection, 'operationContentHashes', input.operationContentHash, haystack)
     && projectionArrayMatches(projection, 'editContentHashes', input.editContentHash, haystack);
 }
 
@@ -127,6 +137,7 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     out.semanticKeys = uniqueStrings([...out.semanticKeys, ...readStringArray(projection.semanticKeys)]);
     out.semanticIdentityHashes = uniqueStrings([...out.semanticIdentityHashes, ...readStringArray(projection.semanticIdentityHashes)]);
     out.sourceIdentityHashes = uniqueStrings([...out.sourceIdentityHashes, ...readStringArray(projection.sourceIdentityHashes)]);
+    out.operationContentHashes = uniqueStrings([...out.operationContentHashes, ...readStringArray(projection.operationContentHashes)]);
     out.editContentHashes = uniqueStrings([...out.editContentHashes, ...readStringArray(projection.editContentHashes)]);
     out.workerMatches += nonNegativeNumber(projection.projectedSourceMatchesWorker);
     out.workerMismatches += nonNegativeNumber(projection.projectedSourceMismatchesWorker);
@@ -147,6 +158,7 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     semanticKeys: [],
     semanticIdentityHashes: [],
     sourceIdentityHashes: [],
+    operationContentHashes: [],
     editContentHashes: [],
     workerMatches: 0,
     workerMismatches: 0,
@@ -190,7 +202,11 @@ function facetsToSemanticEditScript(facets: Record<string, unknown>): unknown {
     reviewRequired: facets.semanticEditScriptReviewRequired,
     autoApplyCandidates: facets.semanticEditScriptAutoApplyCandidates,
     byStatus: csvRecord(facets.semanticEditScriptStatuses),
-    admission: csvRecord(facets.semanticEditScriptAdmissions)
+    admission: csvRecord(facets.semanticEditScriptAdmissions),
+    semanticKeys: csvArray(facets.semanticEditScriptSemanticKeys),
+    semanticIdentityHashes: csvArray(facets.semanticEditScriptSemanticIdentityHashes),
+    sourceIdentityHashes: csvArray(facets.semanticEditScriptSourceIdentityHashes),
+    operationContentHashes: csvArray(facets.semanticEditScriptOperationContentHashes)
   };
 }
 
@@ -220,6 +236,7 @@ function facetsToSemanticEditProjection(facets: Record<string, unknown>): unknow
     semanticKeys: csvArray(facets.semanticEditProjectionSemanticKeys),
     semanticIdentityHashes: csvArray(facets.semanticEditProjectionSemanticIdentityHashes),
     sourceIdentityHashes: csvArray(facets.semanticEditProjectionSourceIdentityHashes),
+    operationContentHashes: csvArray(facets.semanticEditProjectionOperationContentHashes),
     editContentHashes: csvArray(facets.semanticEditProjectionEditContentHashes)
   };
 }
@@ -243,6 +260,18 @@ function projectionArrayMatches(projection: Record<string, unknown>, key: string
   if (wanted === undefined) return true;
   return readStringArray(projection[key]).some((entry) => semanticEditTextMatch(entry.toLowerCase(), wanted)) ||
     semanticEditTextMatch(haystack, wanted);
+}
+
+function semanticEditScriptIdentityMatches(
+  script: ReturnType<typeof semanticEditScriptFromUnknown> | undefined,
+  input: SemanticEditQuery,
+  haystack: string
+): boolean {
+  const entry = script ?? semanticEditScriptFromUnknown(undefined);
+  return projectionArrayMatches(entry as unknown as Record<string, unknown>, 'semanticKeys', input.semanticEditKey, haystack)
+    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'semanticIdentityHashes', input.semanticIdentityHash, haystack)
+    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'sourceIdentityHashes', input.sourceIdentityHash, haystack)
+    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'operationContentHashes', input.operationContentHash, haystack);
 }
 
 function csvRecord(value: unknown): Record<string, number> {

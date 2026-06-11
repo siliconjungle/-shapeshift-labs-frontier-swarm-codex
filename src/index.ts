@@ -158,6 +158,11 @@ export {
   mergeSemanticEditProjectionSummaries,
   summarizeSemanticEditProjection
 } from './semantic-edit-projection.js';
+export {
+  emptySemanticEditScriptSummary,
+  mergeSemanticEditScriptSummaries,
+  summarizeSemanticEditScript
+} from './semantic-edit-script.js';
 
 export type * from './types.js';
 

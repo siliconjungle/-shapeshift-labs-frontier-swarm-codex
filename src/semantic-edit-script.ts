@@ -27,6 +27,10 @@ export function mergeSemanticEditScriptSummaries(
     merged.reasonCodes = uniqueStrings([...merged.reasonCodes, ...entry.reasonCodes]);
     merged.conflictKeys = uniqueStrings([...merged.conflictKeys, ...entry.conflictKeys]);
     merged.evidenceIds = uniqueStrings([...merged.evidenceIds, ...entry.evidenceIds]);
+    merged.semanticKeys = uniqueStrings([...merged.semanticKeys, ...entry.semanticKeys]);
+    merged.semanticIdentityHashes = uniqueStrings([...merged.semanticIdentityHashes, ...entry.semanticIdentityHashes]);
+    merged.sourceIdentityHashes = uniqueStrings([...merged.sourceIdentityHashes, ...entry.sourceIdentityHashes]);
+    merged.operationContentHashes = uniqueStrings([...merged.operationContentHashes, ...entry.operationContentHashes]);
   }
   merged.empty = merged.total === 0 && merged.operations === 0;
   return merged;
@@ -53,6 +57,10 @@ export function emptySemanticEditScriptSummary(): FrontierCodexSemanticEditScrip
     reasonCodes: [],
     conflictKeys: [],
     evidenceIds: [],
+    semanticKeys: [],
+    semanticIdentityHashes: [],
+    sourceIdentityHashes: [],
+    operationContentHashes: [],
     empty: true
   };
 }
@@ -94,8 +102,16 @@ function normalizeSemanticEditScript(record: Record<string, unknown>): FrontierC
     reasonCodes: uniqueStrings([...readStringArray(admission.reasonCodes), ...readStringArray(summary.reasonCodes)]),
     conflictKeys: uniqueStrings([...readStringArray(admission.conflictKeys), ...readStringArray(summary.conflictKeys)]),
     evidenceIds: uniqueStrings([...readStringArray(admission.evidenceIds), ...readStringArray(summary.evidenceIds)]),
+    semanticKeys: uniqueStrings([...readStringArray(summary.semanticKeys), ...operations.flatMap((operation) => stringField(operation.semanticKey))]),
+    semanticIdentityHashes: uniqueStrings([...readStringArray(summary.semanticIdentityHashes), ...operations.flatMap((operation) => stringField(operation.semanticIdentityHash))]),
+    sourceIdentityHashes: uniqueStrings([...readStringArray(summary.sourceIdentityHashes), ...operations.flatMap((operation) => stringField(operation.sourceIdentityHash))]),
+    operationContentHashes: uniqueStrings([...readStringArray(summary.operationContentHashes), ...operations.flatMap((operation) => stringField(operation.operationContentHash))]),
     empty: total === 0 && operationCount === 0
   };
+}
+
+function stringField(value: unknown): string[] {
+  return typeof value === 'string' && value ? [value] : [];
 }
 
 function countStrings(values: readonly unknown[]): Record<string, number> {

@@ -2,7 +2,8 @@ import assert from 'node:assert';
 import {
   emptySemanticEditProjectionSummary,
   mergeSemanticEditProjectionSummaries,
-  summarizeSemanticEditProjection
+  summarizeSemanticEditProjection,
+  summarizeSemanticEditScript
 } from '../../dist/index.js';
 
 export async function testSemanticEditProjectionSummary() {
@@ -28,6 +29,7 @@ export async function testSemanticEditProjectionSummary() {
       semanticKey: 'semantic-edit:replaceBody:modified:function:run',
       semanticIdentityHash: 'hash:semantic-identity',
       sourceIdentityHash: 'hash:source-identity',
+      operationContentHash: 'hash:operation-content',
       editContentHash: 'hash:edit-content',
       deletedBytes: 4,
       replacementBytes: 8,
@@ -48,6 +50,7 @@ export async function testSemanticEditProjectionSummary() {
   assert.deepStrictEqual(summary.semanticKeys, ['semantic-edit:replaceBody:modified:function:run']);
   assert.deepStrictEqual(summary.semanticIdentityHashes, ['hash:semantic-identity']);
   assert.deepStrictEqual(summary.sourceIdentityHashes, ['hash:source-identity']);
+  assert.deepStrictEqual(summary.operationContentHashes, ['hash:operation-content']);
   assert.deepStrictEqual(summary.editContentHashes, ['hash:edit-content']);
   assert.strictEqual(summary.projectedSourceMatchesWorker, 1);
   const merged = mergeSemanticEditProjectionSummaries([emptySemanticEditProjectionSummary(), summary]);
@@ -56,4 +59,17 @@ export async function testSemanticEditProjectionSummary() {
   assert.deepStrictEqual(merged.anchorKeys, ['source#src/runtime.ts#function#run']);
   assert.deepStrictEqual(merged.semanticKeys, ['semantic-edit:replaceBody:modified:function:run']);
   assert.strictEqual(merged.empty, false);
+  const scriptSummary = summarizeSemanticEditScript({
+    kind: 'frontier.lang.semanticEditScript',
+    operations: [{
+      kind: 'replaceBody',
+      status: 'portable',
+      semanticKey: 'semantic-edit:replaceBody:modified:function:run',
+      semanticIdentityHash: 'hash:semantic-identity',
+      sourceIdentityHash: 'hash:source-identity',
+      operationContentHash: 'hash:operation-content'
+    }]
+  });
+  assert.deepStrictEqual(scriptSummary.semanticKeys, ['semantic-edit:replaceBody:modified:function:run']);
+  assert.deepStrictEqual(scriptSummary.operationContentHashes, ['hash:operation-content']);
 }

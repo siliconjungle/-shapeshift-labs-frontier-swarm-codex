@@ -65,7 +65,8 @@ export function editScriptSemanticImportSummary() {
       actions: ['block', 'apply'],
       reasonCodes: ['head-anchor-changed-since-base'],
       conflictKeys: ['region:source#src/runtime/edit-script.ts#body#run'],
-      evidenceIds: ['evidence_semantic_edit_script']
+      evidenceIds: ['evidence_semantic_edit_script'],
+      symbolName: 'run'
     }),
     semanticEditProjections: semanticEditProjectionSummary({
       file: 'src/runtime/edit-script.ts',
@@ -85,7 +86,8 @@ export function cleanEditScriptSemanticImportSummary() {
       byStatus: { portable: 1 },
       admission: { 'auto-merge-candidate': 1 },
       actions: ['apply'],
-      evidenceIds: ['evidence_semantic_edit_script_clean']
+      evidenceIds: ['evidence_semantic_edit_script_clean'],
+      symbolName: 'cleanRun'
     }),
     semanticEditProjections: semanticEditProjectionSummary({
       file: 'src/runtime/edit-script-clean.ts',
@@ -141,6 +143,10 @@ function semanticEditScriptSummary(overrides) {
     reasonCodes: overrides.reasonCodes ?? [],
     conflictKeys: overrides.conflictKeys ?? [],
     evidenceIds: overrides.evidenceIds,
+    semanticKeys: semanticEditIdentityValues(overrides.symbolName, 'semantic-edit'),
+    semanticIdentityHashes: semanticEditIdentityValues(overrides.symbolName, 'hash:semantic-identity'),
+    sourceIdentityHashes: semanticEditIdentityValues(overrides.symbolName, 'hash:source-identity'),
+    operationContentHashes: semanticEditIdentityValues(overrides.symbolName, 'hash:operation-content'),
     empty: false
   };
 }
@@ -162,6 +168,7 @@ function semanticEditProjectionSummary(input) {
     semanticKeys: [`semantic-edit:replaceBody:modified:function:${input.symbolName}`],
     semanticIdentityHashes: [`hash:semantic-identity-${suffix}`],
     sourceIdentityHashes: [`hash:source-identity-${suffix}`],
+    operationContentHashes: [`hash:operation-content-${suffix}`],
     editContentHashes: [`hash:edit-content-${suffix}`],
     projectedSourceMatchesWorker: input.workerMismatch ? 0 : 1,
     projectedSourceMismatchesWorker: input.workerMismatch ? 1 : 0,
@@ -169,4 +176,11 @@ function semanticEditProjectionSummary(input) {
     reasonCodes: [],
     admission: { projected: 1 }
   };
+}
+
+function semanticEditIdentityValues(symbolName, prefix) {
+  if (!symbolName) return [];
+  const suffix = symbolName === 'cleanRun' ? 'clean' : symbolName;
+  if (prefix === 'semantic-edit') return [`semantic-edit:replaceBody:modified:function:${symbolName}`];
+  return [`${prefix}-${suffix}`];
 }

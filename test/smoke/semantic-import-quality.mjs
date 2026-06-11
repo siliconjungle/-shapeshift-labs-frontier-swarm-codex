@@ -195,4 +195,10 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     editContentHash: 'hash:edit-content-clean'
   });
   assert.deepStrictEqual(contentHashQuery.jobs.map((entry) => entry.jobId), ['semantic-edit-clean-worker']);
+  const operationHashQuery = await queryCodexSwarmCollection({
+    collection: collection.outDir,
+    operationContentHash: 'hash:operation-content-clean'
+  });
+  assert.deepStrictEqual(operationHashQuery.jobs.map((entry) => entry.jobId), ['semantic-edit-clean-worker']);
+  assert.ok(operationHashQuery.evidence.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
 }

@@ -252,6 +252,7 @@ function semanticEditProjectionFacets(
     semanticEditProjectionSemanticKeys: projection.semanticKeys.join(','),
     semanticEditProjectionSemanticIdentityHashes: projection.semanticIdentityHashes.join(','),
     semanticEditProjectionSourceIdentityHashes: projection.sourceIdentityHashes.join(','),
+    semanticEditProjectionOperationContentHashes: projection.operationContentHashes.join(','),
     semanticEditProjectionEditContentHashes: projection.editContentHashes.join(',')
   };
 }

@@ -43,6 +43,7 @@ export function mergeSemanticEditProjectionSummaries(
     merged.semanticKeys = uniqueStrings([...merged.semanticKeys, ...entry.semanticKeys]);
     merged.semanticIdentityHashes = uniqueStrings([...merged.semanticIdentityHashes, ...entry.semanticIdentityHashes]);
     merged.sourceIdentityHashes = uniqueStrings([...merged.sourceIdentityHashes, ...entry.sourceIdentityHashes]);
+    merged.operationContentHashes = uniqueStrings([...merged.operationContentHashes, ...entry.operationContentHashes]);
     merged.editContentHashes = uniqueStrings([...merged.editContentHashes, ...entry.editContentHashes]);
     merged.reasonCodes = uniqueStrings([...merged.reasonCodes, ...entry.reasonCodes]);
   }
@@ -70,6 +71,7 @@ export function emptySemanticEditProjectionSummary(): FrontierCodexSemanticEditP
     semanticKeys: [],
     semanticIdentityHashes: [],
     sourceIdentityHashes: [],
+    operationContentHashes: [],
     editContentHashes: [],
     projectedSourceMatchesWorker: 0,
     projectedSourceMismatchesWorker: 0,
@@ -111,6 +113,7 @@ function normalizeProjectionRecord(record: Record<string, unknown>): FrontierCod
     semanticKeys: editIdentity.semanticKeys,
     semanticIdentityHashes: editIdentity.semanticIdentityHashes,
     sourceIdentityHashes: editIdentity.sourceIdentityHashes,
+    operationContentHashes: editIdentity.operationContentHashes,
     editContentHashes: editIdentity.editContentHashes,
     projectedSourceMatchesWorker: workerMatch.matches,
     projectedSourceMismatchesWorker: workerMatch.mismatches,
@@ -149,6 +152,7 @@ function projectionEditIdentity(record: Record<string, unknown>): {
   semanticKeys: string[];
   semanticIdentityHashes: string[];
   sourceIdentityHashes: string[];
+  operationContentHashes: string[];
   editContentHashes: string[];
 } {
   const edits = Array.isArray(record.edits) ? record.edits.filter(isObject) : [];
@@ -161,6 +165,7 @@ function projectionEditIdentity(record: Record<string, unknown>): {
       semanticKeys: readStringArray(record.semanticKeys),
       semanticIdentityHashes: readStringArray(record.semanticIdentityHashes),
       sourceIdentityHashes: readStringArray(record.sourceIdentityHashes),
+      operationContentHashes: readStringArray(record.operationContentHashes),
       editContentHashes: readStringArray(record.editContentHashes)
     };
   }
@@ -172,6 +177,7 @@ function projectionEditIdentity(record: Record<string, unknown>): {
     semanticKeys: uniqueStrings(edits.flatMap((edit) => stringField(edit.semanticKey))),
     semanticIdentityHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.semanticIdentityHash))),
     sourceIdentityHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.sourceIdentityHash))),
+    operationContentHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.operationContentHash))),
     editContentHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.editContentHash)))
   };
 }

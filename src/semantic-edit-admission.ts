@@ -80,7 +80,11 @@ export function semanticEditScriptFacets(summary: FrontierCodexSemanticEditScrip
     semanticEditScriptAdmissions: Object.keys(entry.admission).filter((key) => nonNegativeNumber(entry.admission[key]) > 0).join(','),
     semanticEditScriptActions: entry.actions.join(','),
     semanticEditScriptReasonCodes: entry.reasonCodes.join(','),
-    semanticEditScriptConflictKeys: entry.conflictKeys.join(',')
+    semanticEditScriptConflictKeys: entry.conflictKeys.join(','),
+    semanticEditScriptSemanticKeys: entry.semanticKeys.join(','),
+    semanticEditScriptSemanticIdentityHashes: entry.semanticIdentityHashes.join(','),
+    semanticEditScriptSourceIdentityHashes: entry.sourceIdentityHashes.join(','),
+    semanticEditScriptOperationContentHashes: entry.operationContentHashes.join(',')
   };
 }
 

@@ -18,6 +18,10 @@ export interface FrontierCodexSemanticEditScriptSummary {
   reasonCodes: string[];
   conflictKeys: string[];
   evidenceIds: string[];
+  semanticKeys: string[];
+  semanticIdentityHashes: string[];
+  sourceIdentityHashes: string[];
+  operationContentHashes: string[];
   empty: boolean;
 }
 
