@@ -45,6 +45,14 @@ export function mergeSemanticEditProjectionSummaries(
     merged.sourceIdentityHashes = uniqueStrings([...merged.sourceIdentityHashes, ...entry.sourceIdentityHashes]);
     merged.operationContentHashes = uniqueStrings([...merged.operationContentHashes, ...entry.operationContentHashes]);
     merged.editContentHashes = uniqueStrings([...merged.editContentHashes, ...entry.editContentHashes]);
+    merged.semanticTransformKeys = uniqueStrings([...merged.semanticTransformKeys, ...entry.semanticTransformKeys]);
+    merged.semanticTransformIdentityHashes = uniqueStrings([...merged.semanticTransformIdentityHashes, ...entry.semanticTransformIdentityHashes]);
+    merged.semanticTransformContentHashes = uniqueStrings([...merged.semanticTransformContentHashes, ...entry.semanticTransformContentHashes]);
+    merged.projectionIdentityHashes = uniqueStrings([...merged.projectionIdentityHashes, ...entry.projectionIdentityHashes]);
+    merged.transformSourceLanguages = uniqueStrings([...merged.transformSourceLanguages, ...entry.transformSourceLanguages]);
+    merged.transformTargetLanguages = uniqueStrings([...merged.transformTargetLanguages, ...entry.transformTargetLanguages]);
+    merged.transformSourcePaths = uniqueStrings([...merged.transformSourcePaths, ...entry.transformSourcePaths]);
+    merged.transformTargetPaths = uniqueStrings([...merged.transformTargetPaths, ...entry.transformTargetPaths]);
     merged.reasonCodes = uniqueStrings([...merged.reasonCodes, ...entry.reasonCodes]);
   }
   merged.empty = merged.total === 0;
@@ -73,6 +81,14 @@ export function emptySemanticEditProjectionSummary(): FrontierCodexSemanticEditP
     sourceIdentityHashes: [],
     operationContentHashes: [],
     editContentHashes: [],
+    semanticTransformKeys: [],
+    semanticTransformIdentityHashes: [],
+    semanticTransformContentHashes: [],
+    projectionIdentityHashes: [],
+    transformSourceLanguages: [],
+    transformTargetLanguages: [],
+    transformSourcePaths: [],
+    transformTargetPaths: [],
     projectedSourceMatchesWorker: 0,
     projectedSourceMismatchesWorker: 0,
     projectedSourceMatchUnknown: 0,
@@ -115,6 +131,14 @@ function normalizeProjectionRecord(record: Record<string, unknown>): FrontierCod
     sourceIdentityHashes: editIdentity.sourceIdentityHashes,
     operationContentHashes: editIdentity.operationContentHashes,
     editContentHashes: editIdentity.editContentHashes,
+    semanticTransformKeys: editIdentity.semanticTransformKeys,
+    semanticTransformIdentityHashes: editIdentity.semanticTransformIdentityHashes,
+    semanticTransformContentHashes: editIdentity.semanticTransformContentHashes,
+    projectionIdentityHashes: editIdentity.projectionIdentityHashes,
+    transformSourceLanguages: editIdentity.transformSourceLanguages,
+    transformTargetLanguages: editIdentity.transformTargetLanguages,
+    transformSourcePaths: editIdentity.transformSourcePaths,
+    transformTargetPaths: editIdentity.transformTargetPaths,
     projectedSourceMatchesWorker: workerMatch.matches,
     projectedSourceMismatchesWorker: workerMatch.mismatches,
     projectedSourceMatchUnknown: workerMatch.unknown,
@@ -154,6 +178,14 @@ function projectionEditIdentity(record: Record<string, unknown>): {
   sourceIdentityHashes: string[];
   operationContentHashes: string[];
   editContentHashes: string[];
+  semanticTransformKeys: string[];
+  semanticTransformIdentityHashes: string[];
+  semanticTransformContentHashes: string[];
+  projectionIdentityHashes: string[];
+  transformSourceLanguages: string[];
+  transformTargetLanguages: string[];
+  transformSourcePaths: string[];
+  transformTargetPaths: string[];
 } {
   const edits = Array.isArray(record.edits) ? record.edits.filter(isObject) : [];
   if (!edits.length) {
@@ -166,7 +198,15 @@ function projectionEditIdentity(record: Record<string, unknown>): {
       semanticIdentityHashes: readStringArray(record.semanticIdentityHashes),
       sourceIdentityHashes: readStringArray(record.sourceIdentityHashes),
       operationContentHashes: readStringArray(record.operationContentHashes),
-      editContentHashes: readStringArray(record.editContentHashes)
+      editContentHashes: readStringArray(record.editContentHashes),
+      semanticTransformKeys: stringArrays(record, 'semanticTransformKeys', 'transformKeys'),
+      semanticTransformIdentityHashes: stringArrays(record, 'semanticTransformIdentityHashes', 'transformIdentityHashes'),
+      semanticTransformContentHashes: stringArrays(record, 'semanticTransformContentHashes', 'transformContentHashes'),
+      projectionIdentityHashes: stringArrays(record, 'projectionIdentityHashes'),
+      transformSourceLanguages: stringArrays(record, 'transformSourceLanguages', 'sourceLanguages'),
+      transformTargetLanguages: stringArrays(record, 'transformTargetLanguages', 'targetLanguages'),
+      transformSourcePaths: stringArrays(record, 'transformSourcePaths'),
+      transformTargetPaths: stringArrays(record, 'transformTargetPaths', 'targetPaths')
     };
   }
   return {
@@ -178,7 +218,15 @@ function projectionEditIdentity(record: Record<string, unknown>): {
     semanticIdentityHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.semanticIdentityHash))),
     sourceIdentityHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.sourceIdentityHash))),
     operationContentHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.operationContentHash))),
-    editContentHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.editContentHash)))
+    editContentHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.editContentHash))),
+    semanticTransformKeys: uniqueStrings(edits.flatMap((edit) => stringFields(edit, 'semanticTransformKey', 'transformKey'))),
+    semanticTransformIdentityHashes: uniqueStrings(edits.flatMap((edit) => stringFields(edit, 'semanticTransformIdentityHash', 'transformIdentityHash'))),
+    semanticTransformContentHashes: uniqueStrings(edits.flatMap((edit) => stringFields(edit, 'semanticTransformContentHash', 'transformContentHash'))),
+    projectionIdentityHashes: uniqueStrings(edits.flatMap((edit) => stringField(edit.projectionIdentityHash))),
+    transformSourceLanguages: uniqueStrings(edits.flatMap((edit) => stringField(edit.sourceLanguage))),
+    transformTargetLanguages: uniqueStrings(edits.flatMap((edit) => stringField(edit.targetLanguage))),
+    transformSourcePaths: uniqueStrings(edits.flatMap((edit) => stringFields(edit, 'originalSourcePath', 'sourcePath'))),
+    transformTargetPaths: uniqueStrings(edits.flatMap((edit) => stringFields(edit, 'targetPath', 'targetSourcePath')))
   };
 }
 
@@ -212,6 +260,14 @@ function projectionEditSummary(record: Record<string, unknown>): {
 
 function stringField(value: unknown): string[] {
   return typeof value === 'string' && value.length ? [value] : [];
+}
+
+function stringFields(record: Record<string, unknown>, ...keys: string[]): string[] {
+  return keys.flatMap((key) => stringField(record[key]));
+}
+
+function stringArrays(record: Record<string, unknown>, ...keys: string[]): string[] {
+  return uniqueStrings(keys.flatMap((key) => [...readStringArray(record[key]), ...stringField(record[key])]));
 }
 
 function projectedWorkerMatchCounts(

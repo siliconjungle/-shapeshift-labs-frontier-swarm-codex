@@ -136,6 +136,7 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.strictEqual(collection.semanticPatchBundleOverlaps.duplicateCount, 1);
   assert.strictEqual(collection.semanticPatchBundleOverlaps.statusCounts.duplicate, 1);
   assert.deepStrictEqual(collection.semanticPatchBundleOverlaps.top[0].overlapKinds.includes('operation-content'), true);
+  assert.deepStrictEqual(collection.semanticPatchBundleOverlaps.top[0].overlapKinds.includes('transform-content'), true);
   assert.deepStrictEqual(collection.semanticEditAdmission, semanticImport.semanticEditAdmission);
   assert.deepStrictEqual(collection.semanticEditScriptAdmission, semanticImport.semanticEditScriptAdmission);
   assert.deepStrictEqual(collection.compactDashboard.semanticEditAdmission, semanticImport.semanticEditAdmission);
@@ -222,6 +223,9 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
   assert.deepStrictEqual(semanticKeyQuery.summary.semanticEditProjection.semanticKeys, [
     'semantic-edit:replaceBody:modified:function:cleanRun'
   ]);
+  assert.deepStrictEqual(semanticKeyQuery.summary.semanticEditProjection.semanticTransformContentHashes, [
+    'hash:transform-content-clean'
+  ]);
   const contentHashQuery = await queryCodexSwarmCollection({
     collection: collection.outDir,
     editContentHash: 'hash:edit-content-clean'
@@ -239,4 +243,13 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     'semantic-edit-clean-worker'
   ]);
   assert.ok(operationHashQuery.evidence.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
+  const transformHashQuery = await queryCodexSwarmCollection({
+    collection: collection.outDir,
+    semanticTransformContentHash: 'hash:transform-content-clean'
+  });
+  assert.deepStrictEqual(transformHashQuery.jobs.map((entry) => entry.jobId).sort(), [
+    'semantic-edit-clean-duplicate-worker',
+    'semantic-edit-clean-worker'
+  ]);
+  assert.ok(transformHashQuery.evidence.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
 }

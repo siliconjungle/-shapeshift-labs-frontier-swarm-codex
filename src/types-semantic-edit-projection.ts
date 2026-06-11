@@ -19,6 +19,14 @@ export interface FrontierCodexSemanticEditProjectionSummary {
   sourceIdentityHashes: string[];
   operationContentHashes: string[];
   editContentHashes: string[];
+  semanticTransformKeys: string[];
+  semanticTransformIdentityHashes: string[];
+  semanticTransformContentHashes: string[];
+  projectionIdentityHashes: string[];
+  transformSourceLanguages: string[];
+  transformTargetLanguages: string[];
+  transformSourcePaths: string[];
+  transformTargetPaths: string[];
   projectedSourceMatchesWorker: number;
   projectedSourceMismatchesWorker: number;
   projectedSourceMatchUnknown: number;

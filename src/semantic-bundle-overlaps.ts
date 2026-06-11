@@ -74,7 +74,11 @@ function bundleToSemanticPatchBundleRecord(bundle: FrontierSwarmMergeBundle): Re
       semanticIdentityHashes: uniqueStrings([...script.semanticIdentityHashes, ...projection.semanticIdentityHashes]),
       sourceIdentityHashes: uniqueStrings([...script.sourceIdentityHashes, ...projection.sourceIdentityHashes]),
       operationContentHashes: uniqueStrings([...script.operationContentHashes, ...projection.operationContentHashes]),
-      editContentHashes: projection.editContentHashes
+      editContentHashes: projection.editContentHashes,
+      semanticTransformKeys: projection.semanticTransformKeys,
+      semanticTransformIdentityHashes: projection.semanticTransformIdentityHashes,
+      semanticTransformContentHashes: projection.semanticTransformContentHashes,
+      projectionIdentityHashes: projection.projectionIdentityHashes
     }
   };
 }
@@ -115,6 +119,10 @@ function normalizeOverlapEntry(
       sourceIdentityHashes: readStringArray(shared.sourceIdentityHashes),
       operationContentHashes: readStringArray(shared.operationContentHashes),
       editContentHashes: readStringArray(shared.editContentHashes),
+      semanticTransformKeys: readStringArray(shared.semanticTransformKeys),
+      semanticTransformIdentityHashes: readStringArray(shared.semanticTransformIdentityHashes),
+      semanticTransformContentHashes: readStringArray(shared.semanticTransformContentHashes),
+      projectionIdentityHashes: readStringArray(shared.projectionIdentityHashes),
       regionKeys: readStringArray(shared.regionKeys),
       conflictKeys: readStringArray(shared.conflictKeys),
       sourcePaths: readStringArray(shared.sourcePaths)

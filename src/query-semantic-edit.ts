@@ -18,6 +18,10 @@ export interface SemanticEditQuery {
   sourceIdentityHash?: string;
   operationContentHash?: string;
   editContentHash?: string;
+  semanticTransformKey?: string;
+  semanticTransformIdentityHash?: string;
+  semanticTransformContentHash?: string;
+  projectionIdentityHash?: string;
 }
 
 export interface SemanticEditProjectionQuerySummary {
@@ -37,6 +41,8 @@ export interface SemanticEditProjectionQuerySummary {
   sourceIdentityHashes: string[];
   operationContentHashes: string[];
   editContentHashes: string[];
+  semanticTransformKeys: string[]; semanticTransformIdentityHashes: string[];
+  semanticTransformContentHashes: string[]; projectionIdentityHashes: string[];
   workerMatches: number;
   workerMismatches: number;
   workerUnknown: number;
@@ -67,7 +73,11 @@ export function matchesSemanticEdit(scriptValue: unknown, input: SemanticEditQue
     input.semanticIdentityHash !== undefined ||
     input.sourceIdentityHash !== undefined ||
     input.operationContentHash !== undefined ||
-    input.editContentHash !== undefined;
+    input.editContentHash !== undefined ||
+    input.semanticTransformKey !== undefined ||
+    input.semanticTransformIdentityHash !== undefined ||
+    input.semanticTransformContentHash !== undefined ||
+    input.projectionIdentityHash !== undefined;
   if (identityOnly && !hasIdentityFilter) return true;
   const hasScript = scriptValue !== undefined;
   const script = scriptValue === undefined ? undefined : semanticEditScriptFromUnknown(scriptValue);
@@ -87,7 +97,11 @@ export function matchesSemanticEditProjection(value: unknown, input: SemanticEdi
     && projectionArrayMatches(projection, 'semanticIdentityHashes', input.semanticIdentityHash, haystack)
     && projectionArrayMatches(projection, 'sourceIdentityHashes', input.sourceIdentityHash, haystack)
     && projectionArrayMatches(projection, 'operationContentHashes', input.operationContentHash, haystack)
-    && projectionArrayMatches(projection, 'editContentHashes', input.editContentHash, haystack);
+    && projectionArrayMatches(projection, 'editContentHashes', input.editContentHash, haystack)
+    && projectionArrayMatches(projection, 'semanticTransformKeys', input.semanticTransformKey, haystack)
+    && projectionArrayMatches(projection, 'semanticTransformIdentityHashes', input.semanticTransformIdentityHash, haystack)
+    && projectionArrayMatches(projection, 'semanticTransformContentHashes', input.semanticTransformContentHash, haystack)
+    && projectionArrayMatches(projection, 'projectionIdentityHashes', input.projectionIdentityHash, haystack);
 }
 
 export function matchesEvidenceSemanticEdit(entry: Record<string, unknown>, input: SemanticEditQuery, haystack: string): boolean {
@@ -139,6 +153,10 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     out.sourceIdentityHashes = uniqueStrings([...out.sourceIdentityHashes, ...readStringArray(projection.sourceIdentityHashes)]);
     out.operationContentHashes = uniqueStrings([...out.operationContentHashes, ...readStringArray(projection.operationContentHashes)]);
     out.editContentHashes = uniqueStrings([...out.editContentHashes, ...readStringArray(projection.editContentHashes)]);
+    out.semanticTransformKeys = uniqueStrings([...out.semanticTransformKeys, ...readStringArray(projection.semanticTransformKeys)]);
+    out.semanticTransformIdentityHashes = uniqueStrings([...out.semanticTransformIdentityHashes, ...readStringArray(projection.semanticTransformIdentityHashes)]);
+    out.semanticTransformContentHashes = uniqueStrings([...out.semanticTransformContentHashes, ...readStringArray(projection.semanticTransformContentHashes)]);
+    out.projectionIdentityHashes = uniqueStrings([...out.projectionIdentityHashes, ...readStringArray(projection.projectionIdentityHashes)]);
     out.workerMatches += nonNegativeNumber(projection.projectedSourceMatchesWorker);
     out.workerMismatches += nonNegativeNumber(projection.projectedSourceMismatchesWorker);
     out.workerUnknown += nonNegativeNumber(projection.projectedSourceMatchUnknown);
@@ -160,6 +178,10 @@ export function semanticEditProjectionSummary(jobs: Record<string, unknown>[]): 
     sourceIdentityHashes: [],
     operationContentHashes: [],
     editContentHashes: [],
+    semanticTransformKeys: [],
+    semanticTransformIdentityHashes: [],
+    semanticTransformContentHashes: [],
+    projectionIdentityHashes: [],
     workerMatches: 0,
     workerMismatches: 0,
     workerUnknown: 0
@@ -237,7 +259,11 @@ function facetsToSemanticEditProjection(facets: Record<string, unknown>): unknow
     semanticIdentityHashes: csvArray(facets.semanticEditProjectionSemanticIdentityHashes),
     sourceIdentityHashes: csvArray(facets.semanticEditProjectionSourceIdentityHashes),
     operationContentHashes: csvArray(facets.semanticEditProjectionOperationContentHashes),
-    editContentHashes: csvArray(facets.semanticEditProjectionEditContentHashes)
+    editContentHashes: csvArray(facets.semanticEditProjectionEditContentHashes),
+    semanticTransformKeys: csvArray(facets.semanticEditProjectionSemanticTransformKeys),
+    semanticTransformIdentityHashes: csvArray(facets.semanticEditProjectionSemanticTransformIdentityHashes),
+    semanticTransformContentHashes: csvArray(facets.semanticEditProjectionSemanticTransformContentHashes),
+    projectionIdentityHashes: csvArray(facets.semanticEditProjectionProjectionIdentityHashes)
   };
 }
 
@@ -271,7 +297,11 @@ function semanticEditScriptIdentityMatches(
   return projectionArrayMatches(entry as unknown as Record<string, unknown>, 'semanticKeys', input.semanticEditKey, haystack)
     && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'semanticIdentityHashes', input.semanticIdentityHash, haystack)
     && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'sourceIdentityHashes', input.sourceIdentityHash, haystack)
-    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'operationContentHashes', input.operationContentHash, haystack);
+    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'operationContentHashes', input.operationContentHash, haystack)
+    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'semanticTransformKeys', input.semanticTransformKey, haystack)
+    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'semanticTransformIdentityHashes', input.semanticTransformIdentityHash, haystack)
+    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'semanticTransformContentHashes', input.semanticTransformContentHash, haystack)
+    && projectionArrayMatches(entry as unknown as Record<string, unknown>, 'projectionIdentityHashes', input.projectionIdentityHash, haystack);
 }
 
 function csvRecord(value: unknown): Record<string, number> {

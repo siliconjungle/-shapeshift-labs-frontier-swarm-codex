@@ -15,6 +15,10 @@ export interface FrontierCodexSemanticPatchBundleOverlapEntry {
     sourceIdentityHashes: string[];
     operationContentHashes: string[];
     editContentHashes: string[];
+    semanticTransformKeys: string[];
+    semanticTransformIdentityHashes: string[];
+    semanticTransformContentHashes: string[];
+    projectionIdentityHashes: string[];
     regionKeys: string[];
     conflictKeys: string[];
     sourcePaths: string[];

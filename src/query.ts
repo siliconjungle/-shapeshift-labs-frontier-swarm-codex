@@ -42,6 +42,10 @@ export interface FrontierCodexQueryInput {
   sourceIdentityHash?: string;
   operationContentHash?: string;
   editContentHash?: string;
+  semanticTransformKey?: string;
+  semanticTransformIdentityHash?: string;
+  semanticTransformContentHash?: string;
+  projectionIdentityHash?: string;
   readiness?: string;
   passedTests?: boolean;
   limit?: number;
@@ -112,6 +116,10 @@ export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
     sourceIdentityHash: stringArg(args.sourceIdentityHash ?? args['source-identity-hash'] ?? args['semantic-source-identity-hash']),
     operationContentHash: stringArg(args.operationContentHash ?? args['operation-content-hash'] ?? args['semantic-operation-content-hash']),
     editContentHash: stringArg(args.editContentHash ?? args['edit-content-hash'] ?? args['semantic-edit-content-hash']),
+    semanticTransformKey: stringArg(args.semanticTransformKey ?? args['semantic-transform-key']),
+    semanticTransformIdentityHash: stringArg(args.semanticTransformIdentityHash ?? args['semantic-transform-identity-hash']),
+    semanticTransformContentHash: stringArg(args.semanticTransformContentHash ?? args['semantic-transform-content-hash']),
+    projectionIdentityHash: stringArg(args.projectionIdentityHash ?? args['projection-identity-hash']),
     readiness: stringArg(args.readiness ?? args.view),
     passedTests: optionalBoolArg(args.passedTests ?? args['passed-tests']),
     limit: numberArg(args.limit)

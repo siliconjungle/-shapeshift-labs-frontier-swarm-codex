@@ -31,6 +31,13 @@ export async function testSemanticEditProjectionSummary() {
       sourceIdentityHash: 'hash:source-identity',
       operationContentHash: 'hash:operation-content',
       editContentHash: 'hash:edit-content',
+      semanticTransformKey: 'transform:javascript:rust:run',
+      semanticTransformIdentityHash: 'hash:transform-identity',
+      semanticTransformContentHash: 'hash:transform-content',
+      projectionIdentityHash: 'hash:projection-identity',
+      sourceLanguage: 'javascript',
+      targetLanguage: 'rust',
+      targetPath: 'src/runtime.rs',
       deletedBytes: 4,
       replacementBytes: 8,
       replacementTextHash: 'hash:replacement'
@@ -52,12 +59,20 @@ export async function testSemanticEditProjectionSummary() {
   assert.deepStrictEqual(summary.sourceIdentityHashes, ['hash:source-identity']);
   assert.deepStrictEqual(summary.operationContentHashes, ['hash:operation-content']);
   assert.deepStrictEqual(summary.editContentHashes, ['hash:edit-content']);
+  assert.deepStrictEqual(summary.semanticTransformKeys, ['transform:javascript:rust:run']);
+  assert.deepStrictEqual(summary.semanticTransformIdentityHashes, ['hash:transform-identity']);
+  assert.deepStrictEqual(summary.semanticTransformContentHashes, ['hash:transform-content']);
+  assert.deepStrictEqual(summary.projectionIdentityHashes, ['hash:projection-identity']);
+  assert.deepStrictEqual(summary.transformSourceLanguages, ['javascript']);
+  assert.deepStrictEqual(summary.transformTargetLanguages, ['rust']);
+  assert.deepStrictEqual(summary.transformTargetPaths, ['src/runtime.rs']);
   assert.strictEqual(summary.projectedSourceMatchesWorker, 1);
   const merged = mergeSemanticEditProjectionSummaries([emptySemanticEditProjectionSummary(), summary]);
   assert.strictEqual(merged.editCount, 1);
   assert.strictEqual(merged.replacementBytes, 8);
   assert.deepStrictEqual(merged.anchorKeys, ['source#src/runtime.ts#function#run']);
   assert.deepStrictEqual(merged.semanticKeys, ['semantic-edit:replaceBody:modified:function:run']);
+  assert.deepStrictEqual(merged.semanticTransformContentHashes, ['hash:transform-content']);
   assert.strictEqual(merged.empty, false);
   const scriptSummary = summarizeSemanticEditScript({
     kind: 'frontier.lang.semanticEditScript',

@@ -253,6 +253,10 @@ function semanticEditProjectionFacets(
     semanticEditProjectionSemanticIdentityHashes: projection.semanticIdentityHashes.join(','),
     semanticEditProjectionSourceIdentityHashes: projection.sourceIdentityHashes.join(','),
     semanticEditProjectionOperationContentHashes: projection.operationContentHashes.join(','),
-    semanticEditProjectionEditContentHashes: projection.editContentHashes.join(',')
+    semanticEditProjectionEditContentHashes: projection.editContentHashes.join(','),
+    semanticEditProjectionSemanticTransformKeys: projection.semanticTransformKeys.join(','),
+    semanticEditProjectionSemanticTransformIdentityHashes: projection.semanticTransformIdentityHashes.join(','),
+    semanticEditProjectionSemanticTransformContentHashes: projection.semanticTransformContentHashes.join(','),
+    semanticEditProjectionProjectionIdentityHashes: projection.projectionIdentityHashes.join(',')
   };
 }
