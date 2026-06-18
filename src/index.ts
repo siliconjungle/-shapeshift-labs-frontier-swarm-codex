@@ -2912,6 +2912,9 @@ function createDashboardQueueMetadata(
   const staleCount = artifacts?.grouping.staleAgainstHeadCount ?? 0;
   const queueRerunCount = artifacts?.mergeQueue.rerunCount ?? 0;
   const rerunCount = queueRerunCount + decisionSummary.rerunDecisionCount;
+  const staleOrRerunCount = Math.max(staleCount, queueRerunCount)
+    + decisionSummary.rerunDecisionCount
+    + decisionSummary.conflictBlockedDecisionCount;
   const humanQuestions: FrontierCodexDashboardHumanQuestions = {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION,
@@ -2936,7 +2939,7 @@ function createDashboardQueueMetadata(
     promotedCount: artifacts?.mergeQueue.promoteCount ?? 0,
     appliedDecisionCount: decisionSummary.appliedDecisionCount,
     committedDecisionCount: decisionSummary.committedDecisionCount,
-    staleOrRerunCount: Math.max(staleCount, queueRerunCount) + decisionSummary.rerunDecisionCount,
+    staleOrRerunCount,
     staleCount,
     rerunCount,
     conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount,

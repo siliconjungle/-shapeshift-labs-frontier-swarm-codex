@@ -785,6 +785,66 @@ assert.strictEqual(autoDrainConflictRun.autoDrainArtifacts.coordinatorAgent.coun
 assert.strictEqual(autoDrainConflictRun.autoDrainArtifacts.summary.coordinatorAgentDrainCount >= 1, true);
 assert.ok(['first\n', 'second\n'].includes(await fs.readFile(path.join(autoDrainConflictRepo, 'src', 'apply.ts'), 'utf8')));
 
+const autoDrainConflictBlockedRepo = await createApplyFixtureRepo(tmp, 'auto-drain-conflict-blocked-repo');
+const autoDrainConflictBlockedPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-conflict-blocked',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'conflict-blocked-task',
+      lane: 'apply',
+      ownedFiles: ['src/apply.ts'],
+      verification: [{
+        name: 'worker-sees-new',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"]
+      }]
+    }]
+  }
+});
+const autoDrainConflictBlockedOutDir = path.join(autoDrainConflictBlockedRepo, 'agent-runs', 'auto-drain-conflict-blocked-run');
+const autoDrainConflictBlockedRun = await runCodexSwarm(autoDrainConflictBlockedPlan, {
+  outDir: autoDrainConflictBlockedOutDir,
+  cwd: autoDrainConflictBlockedRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainConflictBlockedOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    maxIterations: 2,
+    checkStale: false
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'conflict-blocked seeded\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'conflict-blocked seeded' };
+  },
+  onJobFinished: async () => {
+    await fs.writeFile(path.join(autoDrainConflictBlockedRepo, 'src', 'apply.ts'), 'new\n');
+    await execFileP('git', ['add', '--', 'src/apply.ts'], { cwd: autoDrainConflictBlockedRepo });
+    await execFileP('git', ['commit', '-m', 'Already applied before auto drain'], { cwd: autoDrainConflictBlockedRepo });
+  }
+});
+assert.strictEqual(autoDrainConflictBlockedRun.autoDrain.summary.blockedCount, 0);
+assert.strictEqual(autoDrainConflictBlockedRun.autoDrain.summary.conflictBlockedCount, 1);
+assert.strictEqual(autoDrainConflictBlockedRun.autoDrain.iterations[0].apply.decisions[0].status, 'conflict-blocked');
+const autoDrainConflictBlockedDashboard = JSON.parse(await fs.readFile(path.join(autoDrainConflictBlockedOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.rerunCount, 0);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.conflictBlockedDecisionCount, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.staleCount, 0);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.rerunCount, 0);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.staleOrRerunCount, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 1);
+
 const autoDrainDryRunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dry-run-repo');
 const autoDrainDryRun = await runCodexSwarm(autoDrainPlan, {
   outDir: path.join(autoDrainDryRunRepo, 'agent-runs', 'auto-drain-dry-run'),
@@ -1112,6 +1172,8 @@ assert.ok(cliSource.includes("args['auto-drain-limit']"));
 assert.ok(cliSource.includes("args['auto-drain-max-iterations']"));
 assert.ok(cliSource.includes("args['auto-drain-decision-log']"));
 assert.ok(cliSource.includes("args['auto-drain-lock-path']"));
+assert.ok(cliSource.includes('conflict/stale patch failures as rerun or stale debt'));
+assert.ok(cliSource.includes('human/authority question'));
 assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
 
 const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');

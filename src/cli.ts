@@ -207,8 +207,9 @@ function printHelp() {
     '  --focused-command <cmd> --global-command <cmd>',
     '',
     'Default run auto-drain is the coordinator-agent drain: it reads hierarchical',
-    'queue decisions, acquires leases/locks, applies only ready work, and records',
-    'terminal outcomes. A true blocker must name an owner and exact question.',
+    'queue decisions, acquires leases/locks, applies only ready work, and treats',
+    'conflict/stale patch failures as rerun or stale debt. True blockers require',
+    'an explicit human/authority question with an owner.',
     '',
     'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',
     'merge.json, changes.patch, and discovered debug/replay/watchpoint/trace artifacts.'

@@ -51,31 +51,21 @@ overlay is a derived coordinator view.
 
 ## Decision Statuses
 
-Coordinator-review debt should collapse into one of these terminal decision outcomes:
+Read a decision `status` as both the observed outcome and the next coordinator action.
+Every status except `human-blocked` is an automation instruction. Only
+`human-blocked` means the coordinator is waiting on an explicit external decision.
 
-- `applied`: the patch was applied to the coordinator worktree and required gates
-  passed. This satisfies the queue item.
-- `rejected`: the patch was attempted, a required gate failed, and rollback completed.
-  This satisfies the queue item as rejected evidence; it is not a human blocker.
-- `rerun`: the bundle was stale against the current repository head, or the head
-  changed while the lock was held. The right next action is to regenerate or rerun the
-  worker against current head.
-- `skipped`: the bundle had no source patch to apply, usually discovery-only evidence.
-  This satisfies the queue item without changing source.
-- `conflict-blocked`: `git apply --check` failed against current head. This is a merge
-  conflict or stale patch shape, not a true human blocker by itself. Prefer rerun,
-  rebase, or a focused conflict-resolution shard before escalating.
-- `human-blocked`: automation is not authorized to decide. Use this for ownership
-  violations, bundles that are not marked auto-mergeable, missing parent assignment, or
-  policy/risk conditions that require an explicit human decision.
-
-`committed` is stored by the implementation when `--commit` is enabled; for review-debt
-accounting it is an applied variant because the patch has passed gates and landed in a
-commit. `checked` is a dry-run result that keeps the item `ready-to-apply`; it is not a
-terminal non-dry-run outcome. `failed` is an operational failure in the runner or git
-workflow, such as failing to read HEAD or failing rollback. Triage it as failed
-evidence, then convert the queue item to `rerun`, `rejected`, `conflict-blocked`, or
-`human-blocked` once the coordinator has enough information.
+| Status | Meaning | Coordinator action |
+| --- | --- | --- |
+| `checked` | Dry-run mode proved the patch still applies under the autonomous apply lock. | Keep the item `ready-to-apply`; run a non-dry autonomous apply pass or an equivalent coordinator apply. |
+| `applied` | The patch was applied to the coordinator worktree and required gates passed. | Mark the queue item satisfied and continue with normal repository review or package gates. |
+| `committed` | Same as `applied`, with a commit created because `--commit` was enabled. | Mark the queue item satisfied, record the commit, and continue with post-commit gates. |
+| `rejected` | The patch was attempted, a required gate failed, and rollback completed. | Treat the item as rejected evidence; create a narrower follow-up only if the evidence is still useful. |
+| `rerun` | The bundle was stale against the current repository head, or the head changed while the lock was held. | Rerun the worker or regenerate the merge bundle against current head. |
+| `skipped` | The bundle had no source patch to apply, usually discovery-only evidence. | Mark the queue item satisfied without changing source; create a follow-up task only if the discovery warrants one. |
+| `conflict-blocked` | `git apply --check` failed against current head. This is a mechanical merge conflict or stale patch shape, not a human blocker by itself. | Rerun, rebase, or launch a focused conflict-resolution shard before considering escalation. |
+| `failed` | The runner or git workflow failed operationally, such as failing to read HEAD, apply a patch, create a commit, or roll back cleanly. | Inspect command tails, fix the transient/tooling problem or rerun, then replace the queue state with `rerun`, `rejected`, `conflict-blocked`, or `human-blocked` when the cause is known. |
+| `human-blocked` | Automation is not authorized to decide. Use this for ownership violations, bundles that are not marked auto-mergeable, missing parent assignment, or policy/risk conditions that require a human decision. | Pause automation for that queue item and ask the exact human question needed to unblock it. |
 
 ## Coordinator Workflow States Versus Human Blockers
 
@@ -94,10 +84,15 @@ Use workflow states to drive automated next actions:
 - `discovery-only` or no changed paths: record `skipped` unless the discovery created a
   new follow-up task.
 - `blocked`: preserve the specific blocker status. `conflict-blocked` means merge
-  mechanics blocked automation; `human-blocked` means authority or policy blocked it.
+  mechanics blocked the current patch and should trigger rerun, rebase, or focused
+  conflict-resolution; `human-blocked` means authority or policy blocked automation.
 
 Do not use `human-blocked` as a synonym for "the coordinator has not reviewed this yet."
-Unreviewed coordinator debt must collapse into `applied`, `rejected`, `rerun`,
-`skipped`, `conflict-blocked`, or `human-blocked` with a reason that names the actual
-condition. That keeps dashboards honest: most review debt can be drained by coordinator
-automation, while true human blockers remain rare and explicit.
+Unreviewed coordinator debt must collapse into a concrete ledger status with a reason
+that names the actual condition: `checked` for dry-run readiness, `applied` or
+`committed` for landed patches, `rejected` for gate failures with rollback, `rerun` for
+stale bundles, `skipped` for evidence-only bundles, `conflict-blocked` for mechanical
+patch conflicts, `failed` for operational failures that still need automated triage, or
+`human-blocked` for explicit external authority or policy questions. That keeps
+dashboards honest: most review debt can be drained by coordinator automation, while
+true human blockers remain rare and explicit.

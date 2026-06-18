@@ -5,7 +5,7 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 ## Read Order
 
 1. Start with `swarm-results.json` for the top-level run result, worker run/proof payload, and embedded `autoDrain` and `autoDrainArtifacts` summaries.
-2. Read `coordinator-dashboard.json` when a UI needs the dashboard-shaped snapshot with lane counts, merge readiness counts, proof, event stream, PID manifest path, and the same auto-drain summaries.
+2. Read `coordinator-dashboard.json` when a UI needs the dashboard-shaped snapshot with lane counts, merge readiness counts, `queueMetadata`, `queueHealth`, `humanQuestions`, proof, event stream, PID manifest path, and the same auto-drain summaries.
 3. Read `auto-drain/auto-drain.json` for the canonical auto-drain ledger, including every iteration, admission result, grouping result, apply result, lock summary, terminal jobs, blocked jobs, and aggregate counts.
 4. Use the `autoDrainArtifacts` object from either `swarm-results.json`, `coordinator-dashboard.json`, or `auto-drain/auto-drain.json` as the compact path index for per-iteration artifacts.
 5. Drill into `auto-drain/collection-NN/*`, `auto-drain/auto-drain-groups-NN.json`, and `auto-drain/apply-NN/*` only when a dashboard needs per-iteration details.
@@ -44,6 +44,19 @@ It is the preferred machine-readable index for dashboards because it groups arti
 | `patchStack.paths` | Per-iteration `patch-stack-plan.json`, `autonomous-apply.json`, `autonomous-queue-overlay.json`, and patch files | Show patch stack ordering, conflicts, applied patches, and remaining work. |
 | `iterations[]` | One compact row per auto-drain iteration | Render timelines without opening every detailed artifact first. |
 | `summary` | Aggregate counts | Render top-line totals such as iteration count, apply count, admission count, reviewer plan count, patch stack plan count, decision count, and patch count. |
+
+## Outcome Semantics For Dashboards
+
+Auto-drain emits workflow states, queue actions, and apply decisions. Dashboards should keep these separate so merge conflicts and stale work do not look like true human blockers.
+
+| Outcome | Whole-run summary fields | Per-iteration evidence | Dashboard treatment |
+| --- | --- | --- | --- |
+| Conflict-blocked apply | `auto-drain/auto-drain.json.summary.conflictBlockedCount`, `coordinator-dashboard.json.queueMetadata.queueHealth.conflictBlockedDecisionCount`, and `coordinator-dashboard.json.queueMetadata.actionCounts.conflictBlockedDecisionCount` | `auto-drain/apply-NN/autonomous-apply.json` `decisions[].status === "conflict-blocked"` and the matching `autonomous-merge-decisions.jsonl` records | Show as merge mechanics blocked by current head. Do not count it as a human question or true human blocker. The derived queue overlay maps it to `stale-against-head`, so the next action is rerun, rebase, or a focused conflict-resolution shard. |
+| Stale or rerun work | `autoDrainArtifacts.grouping.staleAgainstHeadCount`, `autoDrainArtifacts.mergeQueue.rerunCount`, `auto-drain/auto-drain.json.summary.remainingReadyCount`, `coordinator-dashboard.json.queueMetadata.bucketCounts.staleAgainstHeadCount`, and `coordinator-dashboard.json.queueMetadata.queueHealth.staleOrRerunCount` | `auto-drain/collection-NN/stale-against-head/<job>/merge.json`, `auto-drain/collection-NN/hierarchical-merge-queue.json` assignments with `action === "rerun"`, `autoDrainArtifacts.iterations[].staleAgainstHeadCount`, `autoDrainArtifacts.iterations[].mergeQueueRerunCount`, and apply decisions with `status === "rerun"` | Show as stale against head or needing a fresh worker result. It is coordinator-drain work, not a human blocker by itself. |
+| Human-blocked decision | `auto-drain/auto-drain.json.summary.humanBlockedCount`, `coordinator-dashboard.json.humanQuestions.count`, `coordinator-dashboard.json.humanQuestions.jobIds`, `coordinator-dashboard.json.humanQuestions.taskIds`, and `coordinator-dashboard.json.humanQuestions.reasons` | `auto-drain/apply-NN/autonomous-apply.json` `decisions[].status === "human-blocked"` and matching decision-log records | Show as a true human question only when the decision reason names the missing authority, parent assignment, ownership decision, or policy/risk decision. |
+| Queue true blocker | `autoDrainArtifacts.mergeQueue.blockCount`, `coordinator-dashboard.json.queueMetadata.actionCounts.trueBlockerCount`, and `coordinator-dashboard.json.queueMetadata.queueHealth.trueBlockerCount` | `auto-drain/collection-NN/hierarchical-merge-queue.json` assignments with `action === "block"` and reasons including `true-blocker` | Show separately from conflict-blocked. This is a pre-apply queue/planner blocker based on an already blocked bundle state. |
+
+`needs-human-port` is also a workflow bucket, not automatically a human blocker. Use `autoDrainArtifacts.grouping.needsHumanPortCount` and `auto-drain/collection-NN/needs-human-port/<job>/merge.json` to show work that may need manual porting or review, but only `human-blocked` decisions and queue `block` actions should feed blocker badges.
 
 ## Per-Iteration Collection Artifacts
 
