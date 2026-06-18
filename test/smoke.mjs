@@ -1499,12 +1499,74 @@ assert.strictEqual(autoDrainCommitRun.autoDrain.summary.committedDecisionCount, 
 assert.strictEqual(autoDrainCommitRun.autoDrain.summary.gatedDecisionCount, 1);
 assert.strictEqual(autoDrainCommitRun.autoDrain.summary.verificationGateCount, 1);
 assert.strictEqual(autoDrainCommitRun.autoDrain.summary.requiredVerificationGateCount, 1);
-const autoDrainCommitDecision = autoDrainCommitRun.autoDrain.iterations[0].apply.decisions[0];
+const autoDrainCommitIteration = autoDrainCommitRun.autoDrain.iterations[0];
+const autoDrainCommitJobId = autoDrainCommitRun.run.results[0].jobId;
+assert.strictEqual(autoDrainCommitIteration.collection.summary['ready-to-apply'], 1);
+assert.deepStrictEqual(autoDrainCommitIteration.readyJobIds, [autoDrainCommitJobId]);
+assert.deepStrictEqual(autoDrainCommitIteration.admittedJobIds, [autoDrainCommitJobId]);
+assert.deepStrictEqual(autoDrainCommitIteration.deferredJobIds, []);
+assert.deepStrictEqual(autoDrainCommitIteration.collection.mergeAdmission.admitted, [autoDrainCommitJobId]);
+assert.strictEqual(autoDrainCommitIteration.collection.summary.admittedCount, 1);
+assert.strictEqual(autoDrainCommitIteration.collection.summary.deferredCount, 0);
+assert.strictEqual(autoDrainCommitIteration.collection.summary.mergeQueueApplyLocalCount, 1);
+assert.strictEqual(autoDrainCommitIteration.collection.summary.mergeQueueQueueLocalCount, 0);
+assert.strictEqual(autoDrainCommitIteration.collection.summary.mergeQueuePromoteCount, 0);
+assert.strictEqual(autoDrainCommitIteration.grouping.summary.readyCount, 1);
+assert.strictEqual(autoDrainCommitIteration.grouping.summary.admittedCount, 1);
+assert.strictEqual(autoDrainCommitIteration.grouping.summary.deferredCount, 0);
+assert.strictEqual(autoDrainCommitIteration.grouping.summary.queueDebtCount, 0);
+const autoDrainCommitQueueAssignment = autoDrainCommitIteration.collection.hierarchicalMergeQueue.assignments.find((assignment) => assignment.jobId === autoDrainCommitJobId);
+assert.ok(autoDrainCommitQueueAssignment);
+assert.strictEqual(autoDrainCommitQueueAssignment.action, 'apply-local');
+assert.strictEqual(autoDrainCommitQueueAssignment.admitted, true);
+assert.deepStrictEqual(autoDrainCommitQueueAssignment.queueItemIds, ['apply-task']);
+assert.deepStrictEqual(autoDrainCommitQueueAssignment.changedPaths, ['src/apply.ts']);
+assert.deepStrictEqual(autoDrainCommitQueueAssignment.changedRegions, ['src/apply.ts#apply']);
+assert.ok(autoDrainCommitQueueAssignment.leaseKey.startsWith('merge:semantic:'));
+assert.ok(autoDrainCommitQueueAssignment.leaseKey.includes('src/apply.ts#apply'));
+assert.ok(await exists(autoDrainCommitIteration.collection.artifacts.collectionPath));
+assert.ok(await exists(autoDrainCommitIteration.collection.artifacts.mergeAdmissionPath));
+assert.ok(await exists(autoDrainCommitIteration.collection.artifacts.hierarchicalMergeQueuePath));
+assert.ok(await exists(autoDrainCommitIteration.coordinatorAgentDrainPath));
+assert.ok(await exists(autoDrainCommitIteration.coordinatorAgentDrainWorkPath));
+assert.strictEqual(autoDrainCommitIteration.coordinatorAgentDrain.summary.assignmentCount, 1);
+assert.strictEqual(autoDrainCommitIteration.coordinatorAgentDrain.summary.selectedCount, 1);
+assert.strictEqual(autoDrainCommitIteration.coordinatorAgentDrain.summary.deferredCount, 0);
+assert.strictEqual(autoDrainCommitIteration.coordinatorAgentDrain.summary.applyLocalCount, 1);
+assert.strictEqual(autoDrainCommitIteration.coordinatorAgentDrain.summary.queueLocalCount, 0);
+assert.strictEqual(autoDrainCommitIteration.coordinatorAgentDrain.summary.promoteCount, 0);
+const autoDrainCommitDrainWork = autoDrainCommitIteration.coordinatorAgentDrainWork;
+assert.ok(autoDrainCommitDrainWork.summary.leaseCount >= 1);
+assert.strictEqual(autoDrainCommitDrainWork.summary.assignmentCount, 1);
+assert.strictEqual(autoDrainCommitDrainWork.summary.terminalCount, 1);
+assert.strictEqual(autoDrainCommitDrainWork.summary.nonTerminalCount, 0);
+assert.strictEqual(autoDrainCommitDrainWork.summary.appliedCount, 1);
+assert.strictEqual(autoDrainCommitDrainWork.summary.queuedCount, 0);
+assert.strictEqual(autoDrainCommitDrainWork.summary.escalatedCount, 0);
+const autoDrainCommitDrainAssignment = autoDrainCommitDrainWork.assignments[0];
+assert.strictEqual(autoDrainCommitDrainAssignment.jobId, autoDrainCommitJobId);
+assert.strictEqual(autoDrainCommitDrainAssignment.assignedAction, 'apply-local');
+assert.strictEqual(autoDrainCommitDrainAssignment.decision, 'applied');
+assert.strictEqual(autoDrainCommitDrainAssignment.terminal, true);
+assert.deepStrictEqual(autoDrainCommitDrainAssignment.queueItemIds, ['apply-task']);
+assert.ok(autoDrainCommitDrainAssignment.leaseId.startsWith('swarm-coordinator-agent-drain-lease:'));
+assert.strictEqual(autoDrainCommitDrainAssignment.leaseScope, autoDrainCommitQueueAssignment.leaseKey);
+assert.ok(autoDrainCommitDrainWork.leases.some((lease) => (
+  lease.id === autoDrainCommitDrainAssignment.leaseId
+    && lease.leaseScope === autoDrainCommitDrainAssignment.leaseScope
+)));
+assert.deepStrictEqual(autoDrainCommitDrainWork.terminalDecisions.map((decision) => decision.jobId), [autoDrainCommitJobId]);
+assert.deepStrictEqual(autoDrainCommitDrainWork.terminalDecisions.map((decision) => decision.decision), ['applied']);
+assert.strictEqual(autoDrainCommitDrainWork.terminalDecisions[0].leaseId, autoDrainCommitDrainAssignment.leaseId);
+assert.strictEqual(autoDrainCommitDrainWork.terminalDecisions[0].leaseScope, autoDrainCommitDrainAssignment.leaseScope);
+assert.deepStrictEqual(autoDrainCommitDrainWork.byAction['apply-local'], [autoDrainCommitJobId]);
+assert.deepStrictEqual(autoDrainCommitDrainWork.byLeaseScope[autoDrainCommitDrainAssignment.leaseScope], [autoDrainCommitJobId]);
+const autoDrainCommitDecision = autoDrainCommitIteration.apply.decisions[0];
 assert.strictEqual(autoDrainCommitDecision.status, 'committed');
-assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.committed, 1);
-assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.gatedDecisionCount, 1);
-assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.verificationGateCount, 1);
-assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.requiredVerificationGateCount, 1);
+assert.strictEqual(autoDrainCommitIteration.apply.summary.committed, 1);
+assert.strictEqual(autoDrainCommitIteration.apply.summary.gatedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitIteration.apply.summary.verificationGateCount, 1);
+assert.strictEqual(autoDrainCommitIteration.apply.summary.requiredVerificationGateCount, 1);
 assert.deepStrictEqual(autoDrainCommitDecision.verification, {
   planned: 1,
   run: 1,
@@ -1518,8 +1580,23 @@ assert.deepStrictEqual(autoDrainCommitDecision.verification, {
 assert.match(autoDrainCommitDecision.headAfter, /^[0-9a-f]{40}$/);
 assert.strictEqual(autoDrainCommitDecision.commit, autoDrainCommitDecision.headAfter);
 assert.notStrictEqual(autoDrainCommitDecision.headAfter, autoDrainCommitDecision.headBefore);
-assert.strictEqual(autoDrainCommitDecision.jobId, autoDrainCommitRun.run.results[0].jobId);
+assert.strictEqual(autoDrainCommitDecision.jobId, autoDrainCommitJobId);
 assert.deepStrictEqual(autoDrainCommitDecision.queueItemIds, ['apply-task']);
+assert.deepStrictEqual(autoDrainCommitDecision.lockKeys, ['region:src/apply.ts#apply']);
+assert.ok(autoDrainCommitDecision.commands.some((entry) => (
+  entry.command[0] === 'git'
+    && entry.command[1] === 'apply'
+    && entry.command[2] === '--check'
+    && entry.command[3] === autoDrainCommitDecision.patchPath
+)));
+assert.ok(autoDrainCommitDecision.commands.some((entry) => (
+  entry.command[0] === 'node'
+    && entry.command[1] === '-e'
+    && entry.command[2].includes("readFileSync('src/apply.ts','utf8')")
+)));
+const autoDrainCommitDecisionLog = (await fs.readFile(autoDrainCommitIteration.apply.decisionLogPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+assert.deepStrictEqual(autoDrainCommitDecisionLog.map((decision) => decision.status), ['committed']);
+assert.strictEqual(autoDrainCommitDecisionLog[0].id, autoDrainCommitDecision.id);
 assert.strictEqual(await fs.readFile(path.join(autoDrainCommitRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autoDrainCommitRepo })).stdout, '');
 assert.strictEqual((await execFileP('git', ['rev-parse', 'HEAD'], { cwd: autoDrainCommitRepo })).stdout.trim(), autoDrainCommitDecision.headAfter);
@@ -1552,6 +1629,46 @@ assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.committedDecisi
 assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.gatedDecisionCount, 1);
 assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.verificationGateCount, 1);
 assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.requiredVerificationGateCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.summary.remainingReadyCount, 0);
+assert.deepStrictEqual(autoDrainCommitRun.autoDrain.terminalJobIds, [autoDrainCommitJobId]);
+assert.deepStrictEqual(autoDrainCommitRun.autoDrain.blockedJobIds, []);
+assert.strictEqual(autoDrainCommitIteration.postApplyCollection.buckets['ready-to-apply'].length, 0);
+assert.strictEqual(autoDrainCommitIteration.postApplyCollection.buckets['needs-human-port'].length, 0);
+assert.strictEqual(autoDrainCommitIteration.postApplyCollection.buckets['failed-evidence'].length, 0);
+assert.strictEqual(autoDrainCommitIteration.postApplyCollection.summary.admittedCount, 0);
+assert.ok(await exists(autoDrainCommitIteration.postApplyCollectionPath));
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.rerunManifest.taskCount, 0);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.coordinatorAgentDrainWork.appliedCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.coordinatorAgentDrainWork.queuedCount, 0);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.coordinatorAgentDrainWork.escalatedCount, 0);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.mergeQueue.applyLocalCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.mergeQueue.queueLocalCount, 0);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.mergeQueue.promoteCount, 0);
+const autoDrainCommitDashboard = JSON.parse(await fs.readFile(path.join(autoDrainCommitOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainCommitDashboard.autoDrain.summary.committedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitDashboard.autoDrain.summary.remainingReadyCount, 0);
+assert.deepStrictEqual(autoDrainCommitDashboard.autoDrain.terminalJobIds, [autoDrainCommitJobId]);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.queueHealth.leaseCount, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.queueHealth.localQueueCount, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.queueHealth.promotedCount, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.queueHealth.committedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.humanQuestions.count, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.operatorSummary.status, 'ok');
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 1);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.operatorSummary.counts.currentHeadConflicts, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.operatorSummary.counts.deferredCoordinatorQueues, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.operatorSummary.counts.deferredPromoteQueues, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
+assert.strictEqual(autoDrainCommitDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
+const autoDrainCommitCards = new Map(autoDrainCommitDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
+assert.strictEqual(autoDrainCommitCards.get('coordination-debt').value, 0);
+assert.strictEqual(autoDrainCommitCards.get('coordination-debt').status, 'ok');
+assert.strictEqual(autoDrainCommitCards.get('stale-rerun').value, 0);
+assert.strictEqual(autoDrainCommitCards.get('true-blockers').value, 0);
 
 const autoDrainCommitRerunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-commit-rerun-repo');
 const autoDrainCommitRerunPlan = createCodexSwarmPlan({
