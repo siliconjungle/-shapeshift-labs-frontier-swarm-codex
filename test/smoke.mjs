@@ -1338,6 +1338,19 @@ assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').status, 'o
 
 const collapsedDecisionOutDir = path.join(tmp, 'collapsed-decision-dashboard');
 const collapsedDecisionArtifacts = createSyntheticAutoDrainArtifacts(collapsedDecisionOutDir);
+Object.assign(collapsedDecisionArtifacts.grouping, { staleAgainstHeadCount: 1 });
+Object.assign(collapsedDecisionArtifacts.coordinatorAgentDrainWork, {
+  count: 1,
+  leaseCount: 1,
+  assignmentCount: 1,
+  terminalCount: 1,
+  rerunCount: 1
+});
+Object.assign(collapsedDecisionArtifacts.mergeQueue, {
+  count: 1,
+  scopeCount: 1,
+  rerunCount: 1
+});
 const collapsedDecisionAutoDrain = {
   kind: 'frontier.swarm-codex.auto-drain',
   version: 1,
@@ -1349,17 +1362,32 @@ const collapsedDecisionAutoDrain = {
   generatedAt: collapsedDecisionArtifacts.generatedAt,
   iterations: [{
     index: 1,
+    collection: {
+      buckets: {
+        'ready-to-apply': [],
+        'needs-human-port': [],
+        'failed-evidence': [],
+        'stale-against-head': [{ jobId: 'collapsed-rerun-old-job' }]
+      },
+      hierarchicalMergeQueue: {
+        assignments: [{
+          jobId: 'collapsed-rerun-old-job',
+          queueItemIds: ['collapsed-rerun-task'],
+          action: 'rerun'
+        }]
+      }
+    },
     coordinatorAgentDrainWork: {
       summary: {
-        leaseCount: 0,
-        assignmentCount: 0,
-        terminalCount: 0,
+        leaseCount: 1,
+        assignmentCount: 1,
+        terminalCount: 1,
         nonTerminalCount: 0,
         promotedWorkCount: 0,
         appliedCount: 0,
         queuedCount: 0,
         escalatedCount: 0,
-        rerunCount: 0,
+        rerunCount: 1,
         rejectedCount: 0,
         recordedCount: 0,
         blockedCount: 0
@@ -1450,6 +1478,9 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.staleOrR
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.rerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.rerunCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.humanQuestions.count, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.status, 'ok');
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 0);

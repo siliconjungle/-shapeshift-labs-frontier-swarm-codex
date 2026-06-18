@@ -117,6 +117,8 @@ For human-facing status views and cards, read `coordinator-dashboard.json.operat
 
 `operatorSummary.status` is one of `ok`, `info`, `warning`, `blocked`, or `unavailable`. Treat `blocked` as the only summary status that asks for human-facing blocker treatment. It is derived from true queue blockers and explicit `humanQuestions`; stale work, rerun work, conflict-blocked apply decisions, and `needs-human-port` buckets are not human blockers by themselves.
 
+`queueMetadata.actionCounts` separates historical coordinator work from latest queue debt. `applyLocalCount`, `queueLocalCount`, and `promoteCount` remain counts of coordinator-agent queue work, while rerun, reject, record-only, and block counts prefer the latest collection with terminal autonomous decisions and explicit human-blocked decisions removed. This keeps old rerun, stale, conflict, reject, or block debt from staying visible after a newer decision closes the queue item. `autoDrainArtifacts.mergeQueue`, `autoDrainArtifacts.grouping`, and `autoDrainArtifacts.summary` remain historical aggregate counters for audit timelines.
+
 Stable card ids are `coordinator-queues`, `applied-decisions`, `stale-rerun`, `true-blockers`, and `coordinator-review-artifacts`. Each card carries its own `label`, `value`, `detail`, `status`, `action`, and `sourceFields`; dashboards should use `sourceFields` to link diagnostics without changing the card's human-facing meaning.
 
 The `cards[]` field contract is:

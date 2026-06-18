@@ -3061,7 +3061,7 @@ function createDashboardQueueMetadata(
   const decisionSummary = summarizeDashboardAutonomousDecisions(autoDrain);
   const collectOnly = createDashboardCollectOnlyMetadata(autoDrain);
   const coordinatorAgentDrainWork = createDashboardCoordinatorAgentDrainWorkMetadata(artifacts);
-  const actionCounts = createDashboardQueueActionCounts(artifacts, coordinatorAgentDrainWork);
+  const actionCounts = createDashboardQueueActionCounts(artifacts, coordinatorAgentDrainWork, autoDrain);
   const unresolvedPressure = summarizeDashboardUnresolvedQueuePressure(autoDrain, artifacts);
   const activePressure = summarizeDashboardActiveQueuePressure(autoDrain, artifacts, collectOnly);
   const staleCount = unresolvedPressure.staleCount;
@@ -3167,6 +3167,24 @@ function createDashboardCoordinatorAgentDrainWorkMetadata(
 
 function createDashboardQueueActionCounts(
   artifacts: FrontierCodexAutoDrainArtifactMetadata | null,
+  coordinatorAgentDrainWork: FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata,
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null
+): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> {
+  const historicalActionCounts = createHistoricalDashboardQueueActionCounts(artifacts, coordinatorAgentDrainWork);
+  const latestActionCounts = createLatestDashboardQueueActionCounts(autoDrain);
+  if (latestActionCounts) {
+    return {
+      ...latestActionCounts,
+      applyLocalCount: historicalActionCounts.applyLocalCount,
+      queueLocalCount: historicalActionCounts.queueLocalCount,
+      promoteCount: historicalActionCounts.promoteCount
+    };
+  }
+  return historicalActionCounts;
+}
+
+function createHistoricalDashboardQueueActionCounts(
+  artifacts: FrontierCodexAutoDrainArtifactMetadata | null,
   coordinatorAgentDrainWork: FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata
 ): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> {
   if (coordinatorAgentDrainWork.assignmentCount > 0) {
@@ -3190,6 +3208,37 @@ function createDashboardQueueActionCounts(
     blockCount: artifacts?.mergeQueue.blockCount ?? 0,
     trueBlockerCount: artifacts?.mergeQueue.blockCount ?? 0,
     recordOnlyCount: artifacts?.mergeQueue.recordOnlyCount ?? 0
+  };
+}
+
+function createLatestDashboardQueueActionCounts(
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null
+): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> | undefined {
+  const latestCollection = latestDashboardAutoDrainCollection(autoDrain);
+  const assignments = latestCollection?.hierarchicalMergeQueue?.assignments;
+  if (!assignments) return undefined;
+  const terminalJobIds = new Set(autoDrain?.terminalJobIds ?? []);
+  const blockedJobIds = new Set(autoDrain?.blockedJobIds ?? []);
+  return countDashboardQueueAssignments(
+    assignments.filter((assignment) => !terminalJobIds.has(assignment.jobId) && !blockedJobIds.has(assignment.jobId))
+  );
+}
+
+function countDashboardQueueAssignments(
+  assignments: readonly { action: FrontierSwarmMergeQueueAssignmentAction }[]
+): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> {
+  const count = (action: FrontierSwarmMergeQueueAssignmentAction) =>
+    assignments.filter((assignment) => assignment.action === action).length;
+  const blockCount = count('block');
+  return {
+    applyLocalCount: count('apply-local'),
+    queueLocalCount: count('queue-local'),
+    promoteCount: count('promote'),
+    rerunCount: count('rerun'),
+    rejectCount: count('reject'),
+    blockCount,
+    trueBlockerCount: blockCount,
+    recordOnlyCount: count('record-only')
   };
 }
 
@@ -3222,8 +3271,7 @@ function summarizeDashboardActiveQueuePressure(
     };
   }
   if (!autoDrain) return fallback;
-  const latestIteration = autoDrain.iterations.at(-1);
-  const latestCollection = latestIteration?.postApplyCollection ?? latestIteration?.collection;
+  const latestCollection = latestDashboardAutoDrainCollection(autoDrain);
   if (!latestCollection) return fallback;
   const assignments = latestCollection?.hierarchicalMergeQueue?.assignments ?? [];
   const terminalJobIds = new Set(autoDrain.terminalJobIds ?? []);
@@ -3243,8 +3291,7 @@ function summarizeDashboardUnresolvedQueuePressure(
   autoDrain: FrontierCodexSwarmAutoDrainResult | null,
   artifacts: FrontierCodexAutoDrainArtifactMetadata | null
 ): { staleCount: number; queueRerunCount: number } {
-  const latestIteration = autoDrain?.iterations.at(-1);
-  const latestCollection = latestIteration?.postApplyCollection ?? latestIteration?.collection;
+  const latestCollection = latestDashboardAutoDrainCollection(autoDrain);
   if (!latestCollection) {
     return {
       staleCount: artifacts?.grouping.staleAgainstHeadCount ?? 0,
@@ -3269,6 +3316,11 @@ function summarizeDashboardUnresolvedQueuePressure(
     staleCount: staleJobIds.length,
     queueRerunCount: queueRerunJobIds.length
   };
+}
+
+function latestDashboardAutoDrainCollection(autoDrain: FrontierCodexSwarmAutoDrainResult | null): FrontierCodexCollectResult | undefined {
+  const latestIteration = autoDrain?.iterations.at(-1);
+  return latestIteration?.postApplyCollection ?? latestIteration?.collection;
 }
 
 function createDashboardCollectOnlyMetadata(autoDrain: FrontierCodexSwarmAutoDrainResult | null): FrontierCodexDashboardCollectOnlyMetadata | undefined {
