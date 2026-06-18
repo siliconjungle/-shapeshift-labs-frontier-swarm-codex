@@ -41,6 +41,20 @@ When auto-drain has coordinator verification gates (`--focused-command`, or matc
 
 If the coordinator checkout is dirty when auto-drain starts, auto-drain still collects worker bundles and writes queue, admission, grouping, reviewer, dashboard, and operator-summary artifacts. It does not apply patches into the dirty checkout. The run records `autoDrain.ok: false`, `autoDrain.skippedReason: "dirty-worktree"`, and `autoDrain.dirtyPaths[]`; `operatorSummary.status` remains `info` when work is only queued for a clean apply window. Clean, commit, or intentionally stash those paths, then run `frontier-swarm-codex drain --run agent-runs/my-run` with the same focused/global gates when the coordinator is ready to apply. Queued or promoted candidates from the collect-only run remain pending until that clean drain writes an `applied` or `committed` decision.
 
+If `auto-drain/rerun-manifest.json` has `summary.taskCount > 0`, feed it directly into the next worker wave:
+
+```sh
+frontier-swarm-codex run \
+  --manifest path/to/agent-ownership.json \
+  --rerun-manifest agent-runs/previous-run/auto-drain/rerun-manifest.json \
+  --outDir agent-runs/rerun-current-head \
+  --workspace copy \
+  --semantic-import \
+  --focused-command "npm test"
+```
+
+`--rerun-manifest` is a validated task-input alias for the generated rerun manifest. It preserves each task's `metadata.rerun`, source patch and bundle references, original queue item ids, source heads, target refs, and allowed writes so workers can rerun against the current checkout without manual queue surgery. It starts fresh leased workers and then follows the normal auto-drain path; it does not apply the stale patch refs, skip coordinator leases, or bypass focused/global gates. If the manifest is empty, no continuation wave is needed for reruns.
+
 Use `--no-auto-drain` only when you want a raw diagnostic run, for example to inspect worker output without any coordinator apply attempt:
 
 ```sh

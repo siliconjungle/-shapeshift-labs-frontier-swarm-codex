@@ -8,6 +8,8 @@ import {
   coerceCodexSwarmTasksInput,
   collectCodexSwarmRun,
   createCodexSwarmPlan,
+  FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
+  FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION,
   FRONTIER_SWARM_CODEX_SUPPORTED_MODELS,
   runCodexSwarm,
   scoreCodexSwarmPatches,
@@ -190,7 +192,7 @@ function printHelp() {
     'frontier-swarm <command> [options]',
     '',
     'Commands:',
-    '  plan      Build a swarm plan from --manifest and --tasks',
+    '  plan      Build a swarm plan from --manifest and --tasks/--rerun-manifest',
     '  run       Run workers, then produce/drain coordinator-agent work by default',
     '  stop      Stop a run using pids.json',
     '  collect   Collect merge bundles into ready/needs-port/failed/stale buckets',
@@ -202,6 +204,8 @@ function printHelp() {
     '  verify    Verify a swarm-results.json proof',
     '',
     'Useful options:',
+    '  --manifest <file> --tasks <file>',
+    '  --rerun-manifest <file> (use auto-drain/rerun-manifest.json as the next run task set)',
     `  --model <${FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.join('|')}> (validated; omit for local Codex config)`,
     '  --model-policy config-default|plan|explicit',
     '  --approval never|on-request|on-failure|untrusted',
@@ -233,6 +237,11 @@ function printHelp() {
     'leases and repo locks, applies only admitted ready work, and records',
     'terminal coordinator decisions.',
     '',
+    'When auto-drain writes a non-empty auto-drain/rerun-manifest.json, feed',
+    'it into the next worker wave with --rerun-manifest. That preserves rerun',
+    'source metadata and starts fresh leased workers; it does not apply old',
+    'patches or bypass autonomous apply gates.',
+    '',
     'Terminal coordinator decisions such as applied, committed, checked,',
     'rejected, rerun, skipped, and conflict-blocked are queue outcomes, not',
     'human blockers. True blockers require an explicit human/authority question',
@@ -245,11 +254,15 @@ function printHelp() {
 
 async function loadPlan(options: CliArgs) {
   const manifestPath = String(options.manifest ?? '');
-  const tasksPath = String(options.tasks ?? '');
+  const tasksPath = stringArg(options.tasks);
+  const rerunManifestPath = stringArg(options.rerunManifest ?? options['rerun-manifest']);
   if (!manifestPath) throw new Error('missing --manifest <file>');
-  if (!tasksPath) throw new Error('missing --tasks <file>');
+  if (tasksPath && rerunManifestPath) throw new Error('use either --tasks <file> or --rerun-manifest <file>, not both');
+  const taskInputPath = tasksPath ?? rerunManifestPath;
+  if (!taskInputPath) throw new Error('missing --tasks <file> or --rerun-manifest <file>');
   const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
-  const tasks = JSON.parse(await fs.readFile(tasksPath, 'utf8'));
+  const tasks = JSON.parse(await fs.readFile(taskInputPath, 'utf8'));
+  if (rerunManifestPath) assertRerunManifestInput(tasks, rerunManifestPath);
   return createCodexSwarmPlan({
     manifest: coerceCodexSwarmManifestInput(manifest),
     tasks: coerceCodexSwarmTasksInput(tasks),
@@ -263,6 +276,19 @@ async function loadPlan(options: CliArgs) {
       compute: stringArg(options.compute)
     }
   });
+}
+
+function assertRerunManifestInput(value: unknown, manifestPath: string): void {
+  if (!isRecord(value)
+    || value.kind !== FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND
+    || value.version !== FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION
+    || !Array.isArray(value.items)) {
+    throw new Error(`--rerun-manifest ${manifestPath} must be a ${FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND} v${FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION} file with items[]`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parseArgs(argv: string[]): CliArgs {

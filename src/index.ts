@@ -2062,9 +2062,17 @@ export function coerceCodexSwarmTasksInput(value: unknown): FrontierSwarmTaskInp
       capabilities: readStringArray(task.capabilities),
       resourceRequirements: isObject(task.resourceRequirements) ? task.resourceRequirements as FrontierSwarmTaskInput['resourceRequirements'] : undefined,
       tags: readStringArray(task.tags),
-      metadata: { source: task }
+      metadata: coerceCodexTaskMetadata(task)
     };
   }).filter((task) => task.id.length > 0);
+}
+
+function coerceCodexTaskMetadata(task: Record<string, unknown>): Record<string, unknown> {
+  const metadata = isObject(task.metadata) ? task.metadata as Record<string, unknown> : {};
+  return {
+    ...metadata,
+    source: task
+  };
 }
 
 export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {

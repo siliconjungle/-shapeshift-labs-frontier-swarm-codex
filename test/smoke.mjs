@@ -902,6 +902,8 @@ assert.ok(cliHelp.stdout.includes('Terminal coordinator decisions such as applie
 assert.ok(cliHelp.stdout.includes('queue outcomes, not\nhuman blockers.'));
 assert.ok(cliHelp.stdout.includes('--no-auto-drain (raw worker diagnostics only; skips coordinator drain-work)'));
 assert.ok(cliHelp.stdout.includes('--focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)'));
+assert.ok(cliHelp.stdout.includes('--rerun-manifest <file>'));
+assert.ok(cliHelp.stdout.includes('it does not apply old\npatches or bypass autonomous apply gates.'));
 await assert.rejects(
   () => applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo, dryRun: false }),
   /dirty worktree/
@@ -1833,7 +1835,37 @@ assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourcePatchPaths.some((entry) 
 assert.ok(autoDrainCommitRerunTask.sourceRefs.some((entry) => entry.endsWith('changes.patch')));
 assert.ok(autoDrainCommitRerunTask.sourceRefs.includes(autoDrainCommitRerunSecondIteration.collection.artifacts.queueOverlayPath));
 assert.ok(autoDrainCommitRerunTask.sourceRefs.includes(autoDrainCommitRerunSecondIteration.collection.artifacts.hierarchicalMergeQueuePath));
-assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainCommitRerunManifest).map((task) => task.id), ['apply-second-commit-task-rerun-current-head']);
+const autoDrainCommitRerunContinuationTasks = coerceCodexSwarmTasksInput(autoDrainCommitRerunManifest);
+assert.deepStrictEqual(autoDrainCommitRerunContinuationTasks.map((task) => task.id), ['apply-second-commit-task-rerun-current-head']);
+assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].metadata.rerun.originalTaskId, 'apply-second-commit-task');
+assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].metadata.source.metadata.rerun.originalTaskId, 'apply-second-commit-task');
+const autoDrainCommitRerunContinuationManifestInput = {
+  id: 'auto-drain-commit-rerun-continuation',
+  lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+};
+const autoDrainCommitRerunContinuationPlan = createCodexSwarmPlan({
+  manifest: autoDrainCommitRerunContinuationManifestInput,
+  tasks: autoDrainCommitRerunManifest
+});
+assert.strictEqual(autoDrainCommitRerunContinuationPlan.validation.valid, true);
+assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].task.metadata.rerun.originalTaskId, 'apply-second-commit-task');
+assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].metadata.rerun.originalTaskId, 'apply-second-commit-task');
+const autoDrainCommitRerunContinuationManifestPath = path.join(tmp, 'auto-drain-commit-rerun-continuation-manifest.json');
+await fs.writeFile(autoDrainCommitRerunContinuationManifestPath, JSON.stringify(autoDrainCommitRerunContinuationManifestInput, null, 2) + '\n');
+const cliRerunContinuationPlan = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'plan',
+  '--manifest',
+  autoDrainCommitRerunContinuationManifestPath,
+  '--rerun-manifest',
+  autoDrainCommitRerunManifestPath,
+  '--outDir',
+  path.join(tmp, 'cli-rerun-continuation-plan')
+], { cwd: autoDrainCommitRerunRepo });
+const cliRerunContinuationPlanOutput = JSON.parse(cliRerunContinuationPlan.stdout);
+assert.strictEqual(cliRerunContinuationPlanOutput.ok, true);
+assert.strictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].taskId, 'apply-second-commit-task-rerun-current-head');
+assert.strictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].task.metadata.rerun.originalTaskId, 'apply-second-commit-task');
 
 const autoDrainPromotedDebtRepo = path.join(tmp, 'auto-drain-promoted-debt-repo');
 await fs.mkdir(path.join(autoDrainPromotedDebtRepo, 'src'), { recursive: true });
@@ -3831,6 +3863,9 @@ assert.ok(cliSource.includes('--semantic-import-exclude <glob>'));
 assert.ok(cliSource.includes('--semantic-import-max-files <n>'));
 assert.ok(cliSource.includes('autonomous-apply'));
 assert.ok(cliSource.includes('drain'));
+assert.ok(cliSource.includes('--rerun-manifest <file>'));
+assert.ok(cliSource.includes("options['rerun-manifest']"));
+assert.ok(cliSource.includes('assertRerunManifestInput(tasks, rerunManifestPath)'));
 assert.ok(cliSource.includes('--no-auto-drain'));
 assert.ok(cliSource.includes('--auto-drain-out-dir <path>'));
 assert.ok(cliSource.includes('--auto-drain-allow-dirty'));
@@ -3865,6 +3900,7 @@ assert.ok(cliSource.includes('autonomous coordinator drain work'));
 assert.ok(cliSource.includes('frontier.swarm.coordinator-agent-drain-work contract'));
 assert.ok(cliSource.includes('Terminal coordinator decisions such as applied, committed, checked'));
 assert.ok(cliSource.includes('queue outcomes, not'));
+assert.ok(cliSource.includes('it does not apply old'));
 assert.ok(cliSource.includes('human/authority question'));
 assert.ok(cliSource.includes('--focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)'));
 assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
