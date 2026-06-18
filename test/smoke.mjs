@@ -5936,6 +5936,7 @@ const changedResult = await runCodexSwarm(plan, {
     await fs.writeFile(path.join(input.workspacePath, 'agent-runs/noisy/evidence.json'), '{}\n');
     await fs.mkdir(path.join(input.workspacePath, 'packages/frontier-swarm/dist'), { recursive: true });
     await fs.writeFile(path.join(input.workspacePath, 'packages/frontier-swarm/dist/index.js'), 'generated\n');
+    await fs.writeFile(path.join(input.workspacePath, 'packages/frontier-swarm/tsconfig.tsbuildinfo'), '{}\n');
     await fs.mkdir(path.join(input.workspacePath, 'packages/frontier-swarm/node_modules/.cache'), { recursive: true });
     await fs.writeFile(path.join(input.workspacePath, 'packages/frontier-swarm/node_modules/.cache/tsconfig.tsbuildinfo'), '{}\n');
     await fs.writeFile(input.paths.lastMessagePath, 'changed\n');
@@ -5951,7 +5952,8 @@ const changedWorkspaceProof = JSON.parse(await fs.readFile(changedWorkspaceProof
 assert.deepStrictEqual(changedWorkspaceProof.ignoredChangedPaths, [
   'agent-runs/noisy/evidence.json',
   'packages/frontier-swarm/dist/index.js',
-  'packages/frontier-swarm/node_modules/.cache/tsconfig.tsbuildinfo'
+  'packages/frontier-swarm/node_modules/.cache/tsconfig.tsbuildinfo',
+  'packages/frontier-swarm/tsconfig.tsbuildinfo'
 ]);
 
 const ignoredCopyRepo = path.join(tmp, 'ignored-copy-repo');

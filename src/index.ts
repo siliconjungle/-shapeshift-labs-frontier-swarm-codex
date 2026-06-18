@@ -11328,7 +11328,14 @@ function isGeneratedPatchRejectLeftoverPath(file: string): boolean {
   const normalized = file.trim().replace(/\\/g, '/');
   if (!normalized || normalized.includes('\0')) return false;
   const name = normalized.split('/').filter(Boolean).pop()?.toLowerCase() ?? normalized.toLowerCase();
-  return GENERATED_PATCH_REJECT_LEFTOVER_SUFFIXES.some((suffix) => name.endsWith(suffix));
+  return GENERATED_PATCH_REJECT_LEFTOVER_SUFFIXES.some((suffix) => name.endsWith(suffix))
+    || isGeneratedBuildArtifactPath(normalized);
+}
+
+function isGeneratedBuildArtifactPath(file: string): boolean {
+  const normalized = file.trim().replace(/\\/g, '/').toLowerCase();
+  if (!normalized || normalized.includes('\0')) return false;
+  return normalized.endsWith('.tsbuildinfo');
 }
 
 async function gitChangedPaths(cwd: string): Promise<string[]> {
@@ -11458,6 +11465,7 @@ function filterWorkspaceChangedPaths(
 
 function isIgnoredWorkspaceChangedPath(file: string, plan: FrontierCodexWorkspacePlan): boolean {
   if (plan.mode !== 'copy' && plan.mode !== 'snapshot') return false;
+  if (isGeneratedBuildArtifactPath(file)) return true;
   if (pathHasIgnoredSegment(file, ['node_modules', 'dist', 'coverage', '.frontier-framework', 'agent-runs'])) return true;
   const ignored = [
     ...plan.excludes,
