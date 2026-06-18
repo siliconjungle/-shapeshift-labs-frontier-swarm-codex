@@ -4374,6 +4374,26 @@ async function applyCodexMergeBundleAutonomously(input: {
       headAfter
     });
   }
+  const preCommitHead = await readGitHead(input.cwd, commands);
+  if (!preCommitHead) {
+    const rollback = await runLoggedProcess('git', ['apply', '-R', patchPath], input.cwd);
+    commands.push(rollback);
+    const headAfterRollback = await readGitHead(input.cwd, commands);
+    return finish('failed', rollback.status === 0 ? 'unable to re-read repository head before commit; patch rolled back' : 'unable to re-read repository head before commit and rollback failed', {
+      headBefore,
+      headAfter: headAfterRollback,
+      error: 'unable to read repository head before commit'
+    });
+  }
+  if (preCommitHead !== headBefore) {
+    const rollback = await runLoggedProcess('git', ['apply', '-R', patchPath], input.cwd);
+    commands.push(rollback);
+    return finish(rollback.status === 0 ? 'rerun' : 'failed', rollback.status === 0 ? 'repository head changed before commit; patch rolled back for rerun' : 'repository head changed before commit and rollback failed', {
+      headBefore,
+      headAfter: preCommitHead,
+      ...(rollback.status === 0 ? {} : { error: 'repository head changed before commit and rollback failed' })
+    });
+  }
   const add = await runLoggedProcess('git', ['add', '--', ...input.bundle.changedPaths], input.cwd);
   commands.push(add);
   if (add.status !== 0) {

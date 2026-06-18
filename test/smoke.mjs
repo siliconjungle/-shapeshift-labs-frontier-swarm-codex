@@ -523,6 +523,44 @@ assert.strictEqual(rollbackResult.queueOverlay.entries[0].status, 'satisfied');
 assert.strictEqual(await fs.readFile(path.join(rollbackRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: rollbackRepo })).stdout, '');
 
+const autonomousStaleCommitRepo = await createApplyFixtureRepo(tmp, 'autonomous-stale-commit-repo');
+const autonomousStaleCommitResult = await autonomousApplyCodexSwarmRun({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: autonomousStaleCommitRepo,
+  outDir: path.join(tmp, 'autonomous-stale-commit-out'),
+  commit: true,
+  focusedCommands: [{
+    name: 'advance-head-before-commit',
+    command: process.execPath,
+    args: ['-e', [
+      "const fs = require('fs');",
+      "const cp = require('child_process');",
+      "fs.writeFileSync('src/head.txt', 'advanced\\n');",
+      "cp.execFileSync('git', ['add', '--', 'src/head.txt'], { stdio: 'inherit' });",
+      "cp.execFileSync('git', ['commit', '-m', 'Advance head before autonomous commit'], { stdio: 'inherit' });"
+    ].join(' ')]
+  }]
+});
+const autonomousStaleCommitDecision = autonomousStaleCommitResult.decisions[0];
+assert.strictEqual(autonomousStaleCommitResult.ok, false);
+assert.strictEqual(autonomousStaleCommitResult.summary.rerun, 1);
+assert.strictEqual(autonomousStaleCommitDecision.status, 'rerun');
+assert.strictEqual(autonomousStaleCommitDecision.reason, 'repository head changed before commit; patch rolled back for rerun');
+assert.match(autonomousStaleCommitDecision.headBefore, /^[0-9a-f]{40}$/);
+assert.match(autonomousStaleCommitDecision.headAfter, /^[0-9a-f]{40}$/);
+assert.notStrictEqual(autonomousStaleCommitDecision.headAfter, autonomousStaleCommitDecision.headBefore);
+assert.strictEqual(autonomousStaleCommitDecision.commit, undefined);
+assert.strictEqual(autonomousStaleCommitResult.queueOverlay.entries[0].status, 'stale-against-head');
+assert.strictEqual(autonomousStaleCommitResult.queueOverlay.entries[0].mergeReadiness, 'stale-against-head');
+assert.strictEqual(autonomousStaleCommitResult.queueOverlay.entries[0].disposition, 'stale-against-head');
+assert.strictEqual(await fs.readFile(path.join(autonomousStaleCommitRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+assert.strictEqual(await fs.readFile(path.join(autonomousStaleCommitRepo, 'src', 'head.txt'), 'utf8'), 'advanced\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autonomousStaleCommitRepo })).stdout, '');
+assert.strictEqual((await execFileP('git', ['rev-parse', 'HEAD'], { cwd: autonomousStaleCommitRepo })).stdout.trim(), autonomousStaleCommitDecision.headAfter);
+const autonomousStaleCommitLog = (await execFileP('git', ['log', '-1', '--format=%B'], { cwd: autonomousStaleCommitRepo })).stdout;
+assert.ok(autonomousStaleCommitLog.includes('Advance head before autonomous commit'));
+assert.ok(!autonomousStaleCommitLog.includes('Autonomous apply: apply-task'));
+
 const cliAutonomousRepo = await createApplyFixtureRepo(tmp, 'cli-autonomous-apply-repo');
 const cliAutonomous = await execFileP(process.execPath, [
   new URL('../dist/cli.js', import.meta.url).pathname,
