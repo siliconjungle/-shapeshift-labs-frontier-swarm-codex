@@ -1872,6 +1872,120 @@ assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourcePatchPaths.some((entry) 
 assert.ok(autoDrainCommitRerunTask.sourceRefs.some((entry) => entry.endsWith('changes.patch')));
 assert.ok(autoDrainCommitRerunTask.sourceRefs.includes(autoDrainCommitRerunSecondIteration.collection.artifacts.queueOverlayPath));
 assert.ok(autoDrainCommitRerunTask.sourceRefs.includes(autoDrainCommitRerunSecondIteration.collection.artifacts.hierarchicalMergeQueuePath));
+
+const autoDrainApplyRerunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-apply-rerun-repo');
+await fs.writeFile(path.join(autoDrainApplyRerunRepo, 'src', 'other.ts'), 'old-other\n');
+await execFileP('git', ['add', '--', 'src/other.ts'], { cwd: autoDrainApplyRerunRepo });
+await execFileP('git', ['commit', '-m', 'Add second apply fixture'], { cwd: autoDrainApplyRerunRepo });
+const autoDrainApplyRerunPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-apply-rerun',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'a-commit-task',
+      lane: 'apply',
+      ownedFiles: ['src/apply.ts'],
+      changedRegions: ['src/apply.ts#apply'],
+      verification: [{
+        name: 'worker-sees-first',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='first\\n') process.exit(1);"]
+      }]
+    }, {
+      id: 'b-rerun-task',
+      lane: 'apply',
+      ownedFiles: ['src/other.ts'],
+      changedRegions: ['src/other.ts#other'],
+      verification: [{
+        name: 'worker-sees-second',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/other.ts','utf8')!=='second\\n') process.exit(1);"]
+      }]
+    }]
+  }
+});
+const autoDrainApplyRerunOutDir = path.join(tmp, 'auto-drain-apply-rerun-run');
+const autoDrainApplyRerunRun = await runCodexSwarm(autoDrainApplyRerunPlan, {
+  outDir: autoDrainApplyRerunOutDir,
+  cwd: autoDrainApplyRerunRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainApplyRerunOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    commit: true,
+    maxIterations: 2,
+    focusedCommands: [{
+      name: 'coordinator-sees-first-commit',
+      command: 'node',
+      args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='first\\n') process.exit(1);"]
+    }]
+  },
+  executor: async (input) => {
+    if (input.job.taskId === 'a-commit-task') {
+      await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'first\n');
+      await fs.writeFile(input.paths.lastMessagePath, 'first committed\n');
+      return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'first committed' };
+    }
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'other.ts'), 'second\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'second rerun\n');
+    return { exitCode: 0, changedPaths: ['src/other.ts'], lastMessage: 'second rerun' };
+  }
+});
+assert.strictEqual(autoDrainApplyRerunRun.ok, true);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrain.ok, true);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrain.summary.finalGateOk, true);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrain.summary.finalGateState, 'passed');
+assert.strictEqual(autoDrainApplyRerunRun.autoDrain.summary.skippedRequiredGateCount, 0);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrain.summary.finalGateContinuationDecisionCount, 1);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrain.summary.finalGateContinuationSkippedRequiredGateCount, 1);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrain.summary.rerunTaskCount, 1);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.summary.finalGateOk, true);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.summary.finalGateState, 'passed');
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.summary.skippedRequiredGateCount, 0);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.summary.finalGateContinuationDecisionCount, 1);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.summary.finalGateContinuationSkippedRequiredGateCount, 1);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.summary.rerunTaskCount, 1);
+const autoDrainApplyRerunApply = autoDrainApplyRerunRun.autoDrain.iterations[0].apply;
+assert.strictEqual(autoDrainApplyRerunApply.ok, false);
+assert.strictEqual(autoDrainApplyRerunApply.summary.committed, 1);
+assert.strictEqual(autoDrainApplyRerunApply.summary.rerun, 1);
+assert.strictEqual(autoDrainApplyRerunApply.summary.finalGateOk, true);
+assert.strictEqual(autoDrainApplyRerunApply.summary.finalGateState, 'passed');
+assert.strictEqual(autoDrainApplyRerunApply.summary.skippedRequiredGateCount, 0);
+assert.strictEqual(autoDrainApplyRerunApply.summary.finalGateContinuationDecisionCount, 1);
+assert.strictEqual(autoDrainApplyRerunApply.summary.finalGateContinuationSkippedRequiredGateCount, 1);
+const autoDrainApplyRerunCommittedDecision = autoDrainApplyRerunApply.decisions.find((decision) => decision.status === 'committed');
+const autoDrainApplyRerunDecision = autoDrainApplyRerunApply.decisions.find((decision) => decision.status === 'rerun');
+assert.ok(autoDrainApplyRerunCommittedDecision);
+assert.ok(autoDrainApplyRerunDecision);
+assert.deepStrictEqual(autoDrainApplyRerunApply.finalGateSummary.failedDecisionIds, []);
+assert.deepStrictEqual(autoDrainApplyRerunApply.finalGateSummary.skippedRequiredDecisionIds, []);
+assert.deepStrictEqual(autoDrainApplyRerunApply.finalGateSummary.continuationDecisionIds, [autoDrainApplyRerunDecision.id]);
+assert.deepStrictEqual(autoDrainApplyRerunApply.finalGateSummary.skippedRequiredGateNames, []);
+assert.deepStrictEqual(autoDrainApplyRerunApply.finalGateSummary.continuationGateNames, ['coordinator-sees-first-commit']);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.iterations[0].finalGateOk, true);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.iterations[0].skippedRequiredGateCount, 0);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.iterations[0].finalGateContinuationDecisionCount, 1);
+assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.iterations[0].finalGateContinuationSkippedRequiredGateCount, 1);
+const autoDrainApplyRerunManifest = JSON.parse(await fs.readFile(autoDrainApplyRerunRun.autoDrainArtifacts.rerunManifest.paths[0], 'utf8'));
+assert.strictEqual(autoDrainApplyRerunManifest.summary.taskCount, 1);
+assert.strictEqual(autoDrainApplyRerunManifest.summary.decisionRerunCount, 1);
+assert.deepStrictEqual(autoDrainApplyRerunManifest.items[0].metadata.rerun.decisionStatuses, ['rerun']);
+const autoDrainApplyRerunResults = JSON.parse(await fs.readFile(path.join(autoDrainApplyRerunOutDir, 'swarm-results.json'), 'utf8'));
+assert.strictEqual(autoDrainApplyRerunResults.ok, true);
+assert.strictEqual(autoDrainApplyRerunResults.autoDrain.summary.finalGateOk, true);
+assert.strictEqual(autoDrainApplyRerunResults.autoDrain.summary.rerunTaskCount, 1);
+assert.strictEqual(await fs.readFile(path.join(autoDrainApplyRerunRepo, 'src', 'apply.ts'), 'utf8'), 'first\n');
+assert.strictEqual(await fs.readFile(path.join(autoDrainApplyRerunRepo, 'src', 'other.ts'), 'utf8'), 'old-other\n');
+
 const autoDrainCommitRerunContinuationTasks = coerceCodexSwarmTasksInput(autoDrainCommitRerunManifest);
 assert.deepStrictEqual(autoDrainCommitRerunContinuationTasks.map((task) => task.id), ['apply-second-commit-task-rerun-current-head']);
 assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].metadata.rerun.originalTaskId, 'apply-second-commit-task');

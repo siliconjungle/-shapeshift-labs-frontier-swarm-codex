@@ -640,7 +640,7 @@ export interface FrontierCodexAutonomousDecisionVerification {
 }
 
 export type FrontierCodexAutonomousFinalGateStatus = 'passed' | 'failed' | 'skipped';
-export type FrontierCodexAutonomousFinalGateState = 'not-configured' | 'passed' | 'failed' | 'skipped-required';
+export type FrontierCodexAutonomousFinalGateState = 'not-configured' | 'passed' | 'failed' | 'skipped-required' | 'continuation';
 
 export interface FrontierCodexAutonomousFinalGateEntry {
   index: number;
@@ -678,6 +678,7 @@ export interface FrontierCodexAutonomousFinalGateDecisionSummary {
   queueItemIds: string[];
   status: FrontierCodexAutonomousDecisionStatus;
   reason: string;
+  continuation: boolean;
   ok: boolean;
   state: FrontierCodexAutonomousFinalGateState;
   planned: number;
@@ -698,16 +699,22 @@ export interface FrontierCodexAutonomousFinalGateRunEntry extends FrontierCodexA
   taskId?: string;
   queueItemIds: string[];
   decisionStatus: FrontierCodexAutonomousDecisionStatus;
+  continuation: boolean;
 }
 
 export interface FrontierCodexAutonomousFinalGateRunSummary {
   ok: boolean;
   state: FrontierCodexAutonomousFinalGateState;
   decisionCount: number;
+  evaluatedDecisionCount: number;
+  continuationDecisionCount: number;
   gatedDecisionCount: number;
   passedDecisionCount: number;
   failedDecisionCount: number;
   skippedRequiredDecisionCount: number;
+  continuationGateCount: number;
+  continuationRequiredGateCount: number;
+  continuationSkippedRequiredGateCount: number;
   plannedGateCount: number;
   runGateCount: number;
   requiredGateCount: number;
@@ -718,6 +725,8 @@ export interface FrontierCodexAutonomousFinalGateRunSummary {
   skippedRequiredGateCount: number;
   failedDecisionIds: string[];
   skippedRequiredDecisionIds: string[];
+  continuationDecisionIds: string[];
+  continuationGateNames: string[];
   failedRequiredGateNames: string[];
   skippedRequiredGateNames: string[];
   decisions: FrontierCodexAutonomousFinalGateDecisionSummary[];
@@ -870,6 +879,8 @@ export interface FrontierCodexAutonomousApplyResult {
     finalGateState: FrontierCodexAutonomousFinalGateState;
     failedRequiredGateCount: number;
     skippedRequiredGateCount: number;
+    finalGateContinuationDecisionCount: number;
+    finalGateContinuationSkippedRequiredGateCount: number;
   };
 }
 
@@ -1248,6 +1259,8 @@ export interface FrontierCodexAutoDrainArtifactIteration {
   finalGateState: FrontierCodexAutonomousFinalGateState;
   failedRequiredGateCount: number;
   skippedRequiredGateCount: number;
+  finalGateContinuationDecisionCount: number;
+  finalGateContinuationSkippedRequiredGateCount: number;
   admittedCount: number;
   deferredCount: number;
   reviewerAssignmentCount: number;
@@ -1446,6 +1459,8 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     finalGateState: FrontierCodexAutonomousFinalGateState;
     failedRequiredGateCount: number;
     skippedRequiredGateCount: number;
+    finalGateContinuationDecisionCount: number;
+    finalGateContinuationSkippedRequiredGateCount: number;
     promotedPatchCandidateCount: number;
     patchCount: number;
     rerunManifestCount: number;
@@ -1955,7 +1970,10 @@ export interface FrontierCodexSwarmAutoDrainResult {
     finalGateState: FrontierCodexAutonomousFinalGateState;
     failedRequiredGateCount: number;
     skippedRequiredGateCount: number;
+    finalGateContinuationDecisionCount: number;
+    finalGateContinuationSkippedRequiredGateCount: number;
     remainingReadyCount: number;
+    rerunTaskCount: number;
     admittedCount: number;
     deferredCount: number;
     reviewerAssignmentCount: number;
@@ -2425,7 +2443,10 @@ async function runCodexSwarmAutoDrain(input: {
       finalGateState: finalGateSummary.state,
       failedRequiredGateCount: finalGateSummary.failedRequiredGateCount,
       skippedRequiredGateCount: finalGateSummary.skippedRequiredGateCount,
+      finalGateContinuationDecisionCount: finalGateSummary.continuationDecisionCount,
+      finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount,
       remainingReadyCount: finalRemainingReadyCount,
+      rerunTaskCount: rerunManifest.summary.taskCount,
       admittedCount,
       deferredCount,
       reviewerAssignmentCount: latestCollection?.reviewerLanePlan?.summary.assignmentCount ?? 0,
@@ -3381,6 +3402,7 @@ function summarizeAutonomousFinalGateRun(decisions: readonly FrontierCodexAutono
     queueItemIds: [...decision.queueItemIds],
     status: decision.status,
     reason: decision.reason,
+    continuation: autonomousDecisionDefersFinalGateToRerun(decision.status),
     ok: decision.finalGateSummary.ok,
     state: decision.finalGateSummary.state,
     planned: decision.finalGateSummary.planned,
@@ -3401,15 +3423,23 @@ function summarizeAutonomousFinalGateRun(decisions: readonly FrontierCodexAutono
       ...(decision.taskId ? { taskId: decision.taskId } : {}),
       queueItemIds: [...decision.queueItemIds],
       decisionStatus: decision.status,
+      continuation: autonomousDecisionDefersFinalGateToRerun(decision.status),
       ...gate,
       command: [...gate.command]
     }))
   ));
-  const plannedGateCount = sumNumbers(decisionSummaries.map((decision) => decision.planned));
-  const failedRequiredGateCount = sumNumbers(decisionSummaries.map((decision) => decision.failedRequired));
-  const skippedRequiredGateCount = sumNumbers(decisionSummaries.map((decision) => decision.skippedRequired));
+  const evaluatedDecisionSummaries = decisionSummaries.filter((decision) => !decision.continuation);
+  const continuationDecisionSummaries = decisionSummaries.filter((decision) => decision.continuation);
+  const plannedGateCount = sumNumbers(evaluatedDecisionSummaries.map((decision) => decision.planned));
+  const failedRequiredGateCount = sumNumbers(evaluatedDecisionSummaries.map((decision) => decision.failedRequired));
+  const skippedRequiredGateCount = sumNumbers(evaluatedDecisionSummaries.map((decision) => decision.skippedRequired));
+  const continuationGateCount = sumNumbers(continuationDecisionSummaries.map((decision) => decision.planned));
+  const continuationRequiredGateCount = sumNumbers(continuationDecisionSummaries.map((decision) => decision.required));
+  const continuationSkippedRequiredGateCount = sumNumbers(continuationDecisionSummaries.map((decision) => decision.skippedRequired));
   const state: FrontierCodexAutonomousFinalGateState = plannedGateCount === 0
-    ? 'not-configured'
+    ? continuationDecisionSummaries.length > 0
+      ? 'continuation'
+      : 'not-configured'
     : failedRequiredGateCount > 0
       ? 'failed'
       : skippedRequiredGateCount > 0
@@ -3419,25 +3449,36 @@ function summarizeAutonomousFinalGateRun(decisions: readonly FrontierCodexAutono
     ok: failedRequiredGateCount === 0 && skippedRequiredGateCount === 0,
     state,
     decisionCount: decisions.length,
-    gatedDecisionCount: decisionSummaries.filter((decision) => decision.required > 0 && decision.ok).length,
-    passedDecisionCount: decisionSummaries.filter((decision) => decision.state === 'passed').length,
-    failedDecisionCount: decisionSummaries.filter((decision) => decision.failedRequired > 0).length,
-    skippedRequiredDecisionCount: decisionSummaries.filter((decision) => decision.skippedRequired > 0).length,
+    evaluatedDecisionCount: evaluatedDecisionSummaries.length,
+    continuationDecisionCount: continuationDecisionSummaries.length,
+    gatedDecisionCount: evaluatedDecisionSummaries.filter((decision) => decision.required > 0 && decision.ok).length,
+    passedDecisionCount: evaluatedDecisionSummaries.filter((decision) => decision.state === 'passed').length,
+    failedDecisionCount: evaluatedDecisionSummaries.filter((decision) => decision.failedRequired > 0).length,
+    skippedRequiredDecisionCount: evaluatedDecisionSummaries.filter((decision) => decision.skippedRequired > 0).length,
+    continuationGateCount,
+    continuationRequiredGateCount,
+    continuationSkippedRequiredGateCount,
     plannedGateCount,
-    runGateCount: sumNumbers(decisionSummaries.map((decision) => decision.run)),
-    requiredGateCount: sumNumbers(decisionSummaries.map((decision) => decision.required)),
-    passedGateCount: sumNumbers(decisionSummaries.map((decision) => decision.passed)),
-    failedGateCount: sumNumbers(decisionSummaries.map((decision) => decision.failed)),
+    runGateCount: sumNumbers(evaluatedDecisionSummaries.map((decision) => decision.run)),
+    requiredGateCount: sumNumbers(evaluatedDecisionSummaries.map((decision) => decision.required)),
+    passedGateCount: sumNumbers(evaluatedDecisionSummaries.map((decision) => decision.passed)),
+    failedGateCount: sumNumbers(evaluatedDecisionSummaries.map((decision) => decision.failed)),
     failedRequiredGateCount,
-    skippedGateCount: sumNumbers(decisionSummaries.map((decision) => decision.skipped)),
+    skippedGateCount: sumNumbers(evaluatedDecisionSummaries.map((decision) => decision.skipped)),
     skippedRequiredGateCount,
-    failedDecisionIds: decisionSummaries.filter((decision) => decision.failedRequired > 0).map((decision) => decision.decisionId),
-    skippedRequiredDecisionIds: decisionSummaries.filter((decision) => decision.skippedRequired > 0).map((decision) => decision.decisionId),
-    failedRequiredGateNames: uniqueStrings(decisionSummaries.flatMap((decision) => decision.failedRequiredGateNames)),
-    skippedRequiredGateNames: uniqueStrings(decisionSummaries.flatMap((decision) => decision.skippedRequiredGateNames)),
+    failedDecisionIds: evaluatedDecisionSummaries.filter((decision) => decision.failedRequired > 0).map((decision) => decision.decisionId),
+    skippedRequiredDecisionIds: evaluatedDecisionSummaries.filter((decision) => decision.skippedRequired > 0).map((decision) => decision.decisionId),
+    continuationDecisionIds: continuationDecisionSummaries.map((decision) => decision.decisionId),
+    continuationGateNames: uniqueStrings(continuationDecisionSummaries.flatMap((decision) => decision.skippedRequiredGateNames)),
+    failedRequiredGateNames: uniqueStrings(evaluatedDecisionSummaries.flatMap((decision) => decision.failedRequiredGateNames)),
+    skippedRequiredGateNames: uniqueStrings(evaluatedDecisionSummaries.flatMap((decision) => decision.skippedRequiredGateNames)),
     decisions: decisionSummaries,
     gates
   };
+}
+
+function autonomousDecisionDefersFinalGateToRerun(status: FrontierCodexAutonomousDecisionStatus): boolean {
+  return status === 'rerun' || status === 'conflict-blocked';
 }
 
 function sumNumbers(values: readonly number[]): number {
@@ -6719,6 +6760,8 @@ function createAutoDrainArtifactMetadata(input: {
       finalGateState: finalGateSummary.state,
       failedRequiredGateCount: finalGateSummary.failedRequiredGateCount,
       skippedRequiredGateCount: finalGateSummary.skippedRequiredGateCount,
+      finalGateContinuationDecisionCount: finalGateSummary.continuationDecisionCount,
+      finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount,
       admittedCount: iteration.admittedJobIds.length,
       deferredCount: iteration.deferredJobIds.length,
       reviewerAssignmentCount: collectionArtifacts.counts.reviewerAssignmentCount,
@@ -6884,6 +6927,8 @@ function createAutoDrainArtifactMetadata(input: {
       finalGateState: finalGateSummary.state,
       failedRequiredGateCount: finalGateSummary.failedRequiredGateCount,
       skippedRequiredGateCount: finalGateSummary.skippedRequiredGateCount,
+      finalGateContinuationDecisionCount: finalGateSummary.continuationDecisionCount,
+      finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount,
       promotedPatchCandidateCount: sum((iteration) => iteration.promotedPatchCandidateCount),
       patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length,
       rerunManifestCount: rerunManifestPaths.length,
@@ -7477,7 +7522,9 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
       finalGateOk: finalGateSummary.ok,
       finalGateState: finalGateSummary.state,
       failedRequiredGateCount: finalGateSummary.failedRequiredGateCount,
-      skippedRequiredGateCount: finalGateSummary.skippedRequiredGateCount
+      skippedRequiredGateCount: finalGateSummary.skippedRequiredGateCount,
+      finalGateContinuationDecisionCount: finalGateSummary.continuationDecisionCount,
+      finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount
     }
   };
   await fs.writeFile(path.join(outDir, 'autonomous-apply.json'), JSON.stringify(result, null, 2) + '\n');

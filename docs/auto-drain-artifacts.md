@@ -132,6 +132,8 @@ For human-facing status views and cards, read `coordinator-dashboard.json.operat
 
 Fresh terminal `applied` or `committed` decisions close earlier stale, rerun, or conflict-blocked queue subjects when they share queue item, task, or job keys. In that state the `stale-rerun` card and current-head conflict counters should collapse to zero, while latest deferred coordinator or deferred promotion counts can still keep `operatorSummary.status` at `warning`. That warning is live coordinator-drain debt, not reopened stale history.
 
+`autoDrain.finalGateSummary` and `autoDrainArtifacts.finalGateSummary` report the gate verdict for decisions that reached gate evaluation, such as applied, committed, checked, rejected, or failed decisions. Intentional rerun continuation decisions (`rerun` and `conflict-blocked`) keep their per-decision skipped gate details in `decisions[]` and `gates[]`, but their skipped required gates are counted under `continuationDecisionCount`, `continuationGateCount`, and `continuationSkippedRequiredGateCount` instead of `skippedRequiredGateCount`. A run can therefore have `finalGateOk: true` and a non-empty `rerunManifest.taskCount`: show that as committed gates passing with follow-up rerun work, not as failed verification. The rerun manifest remains the source of truth for the next swarm's task set.
+
 Stable card ids are `coordinator-queues`, `applied-decisions`, `coordination-debt`, `stale-rerun`, `true-blockers`, and `coordinator-review-artifacts`. Each card carries its own `label`, `value`, `detail`, `status`, `action`, and `sourceFields`; dashboards should use `sourceFields` to link diagnostics without changing the card's human-facing meaning.
 
 The `cards[]` field contract is:
