@@ -826,6 +826,60 @@ assert.deepStrictEqual(autonomousDecisionLogEntry.lockKeys, ['path:src/apply.ts'
 const autonomousApplyArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'autonomous-apply-out', 'autonomous-apply.json'), 'utf8'));
 assert.deepStrictEqual(autonomousApplyArtifact.lockKeys, ['path:src/apply.ts']);
 
+const autonomousHumanQuestionRepo = await createApplyFixtureRepo(tmp, 'autonomous-human-question-repo');
+const autonomousHumanQuestionCollection = path.join(tmp, 'autonomous-human-question-collection');
+const autonomousHumanQuestionDir = path.join(autonomousHumanQuestionCollection, 'ready-to-apply', 'human-question-job');
+const autonomousHumanQuestionReason = 'human-question: Should the parent coordinator approve this ownership exception?';
+await fs.mkdir(autonomousHumanQuestionDir, { recursive: true });
+await fs.writeFile(path.join(autonomousHumanQuestionDir, 'changes.patch'), [
+  'diff --git a/src/apply.ts b/src/apply.ts',
+  '--- a/src/apply.ts',
+  '+++ b/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'));
+await fs.writeFile(path.join(autonomousHumanQuestionDir, 'merge.json'), JSON.stringify({
+  ...mergeBundle,
+  jobId: 'human-question-job',
+  taskId: 'human-question-task',
+  status: 'verified',
+  mergeReadiness: 'verified-patch',
+  disposition: 'auto-mergeable',
+  riskLevel: 'low',
+  autoMergeable: true,
+  changedPaths: ['src/apply.ts'],
+  changedRegions: ['src/apply.ts#apply'],
+  ownedFilesTouched: ['src/apply.ts'],
+  patchPath: 'changes.patch',
+  commandsPassed: [],
+  commandsFailed: [],
+  queueItemIds: ['human-question-task'],
+  staleAgainstHead: false,
+  reasons: [autonomousHumanQuestionReason]
+}, null, 2) + '\n');
+const autonomousHumanQuestionResult = await autonomousApplyCodexSwarmRun({
+  collection: autonomousHumanQuestionCollection,
+  cwd: autonomousHumanQuestionRepo,
+  outDir: path.join(tmp, 'autonomous-human-question-out'),
+  focusedCommands: [{ name: 'would-see-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
+});
+assert.strictEqual(autonomousHumanQuestionResult.ok, false);
+assert.strictEqual(autonomousHumanQuestionResult.summary['human-blocked'], 1);
+assert.strictEqual(autonomousHumanQuestionResult.summary.gatedDecisionCount, 0);
+assert.strictEqual(autonomousHumanQuestionResult.decisions[0].status, 'human-blocked');
+assert.strictEqual(autonomousHumanQuestionResult.decisions[0].reason, autonomousHumanQuestionReason);
+assert.deepStrictEqual(autonomousHumanQuestionResult.decisions[0].queueItemIds, ['human-question-task']);
+assert.strictEqual(autonomousHumanQuestionResult.decisions[0].verification.planned, 1);
+assert.strictEqual(autonomousHumanQuestionResult.decisions[0].verification.run, 0);
+assert.deepStrictEqual(autonomousHumanQuestionResult.decisions[0].commands, []);
+assert.strictEqual(autonomousHumanQuestionResult.queueOverlay.entries[0].status, 'blocked');
+assert.strictEqual(autonomousHumanQuestionResult.queueOverlay.entries[0].mergeReadiness, 'blocked');
+assert.strictEqual(autonomousHumanQuestionResult.queueOverlay.entries[0].disposition, 'blocked');
+assert.strictEqual(await fs.readFile(path.join(autonomousHumanQuestionRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autonomousHumanQuestionRepo })).stdout, '');
+
 const autonomousConflictRepo = await createApplyFixtureRepo(tmp, 'autonomous-conflict-repo');
 await fs.writeFile(path.join(autonomousConflictRepo, 'src', 'apply.ts'), 'new\n');
 await execFileP('git', ['add', '--', 'src/apply.ts'], { cwd: autonomousConflictRepo });

@@ -4663,6 +4663,10 @@ function dashboardTextIsExplicitHumanQuestion(text: string): boolean {
   return DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
+function explicitHumanQuestionReasonFromBundle(bundle: FrontierSwarmMergeBundle): string | undefined {
+  return bundle.reasons.find(dashboardTextIsExplicitHumanQuestion);
+}
+
 function latestDashboardAutonomousDecisions(
   decisions: readonly FrontierCodexAutonomousMergeDecision[]
 ): FrontierCodexAutonomousMergeDecision[] {
@@ -6258,6 +6262,10 @@ async function applyCodexMergeBundleAutonomously(input: {
   }
   if (!patchPath) {
     return finish('rejected', 'missing patch');
+  }
+  const explicitHumanQuestionReason = explicitHumanQuestionReasonFromBundle(input.bundle);
+  if (explicitHumanQuestionReason) {
+    return finish('human-blocked', explicitHumanQuestionReason);
   }
   if (input.bundle.ownershipViolations.length) {
     return finish('human-blocked', `ownership violations: ${input.bundle.ownershipViolations.join(', ')}`);
