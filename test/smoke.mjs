@@ -764,7 +764,7 @@ assert.strictEqual(activeCostHealthSections.get('active-workers').value, 2);
 assert.strictEqual(activeCostHealthSections.get('active-workers').status, 'info');
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
-assert.strictEqual(collection.summary['needs-human-port'], 1);
+assert.strictEqual(collection.summary['coordinator-review'], 1);
 assert.strictEqual(collection.mergeIndex.summary.entryCount, 1);
 assert.strictEqual(collection.mergeAdmission.summary.deferredCount, 1);
 assert.strictEqual(collection.hierarchicalMergeQueue.summary.promoteCount, 1);
@@ -778,7 +778,11 @@ assert.strictEqual(collection.summary.promotedPatchCandidateCount, 0);
 assert.strictEqual(collection.reviewerLanePlan.summary.taskCount, 1);
 assert.strictEqual(collection.patchStackPlan.summary.jobCount, 1);
 assert.strictEqual(collection.queueOverlay.summary.entryCount, 1);
-assert.ok(await exists(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json')));
+assert.strictEqual(collection.queueOverlay.summary.coordinatorReviewCount, 1);
+assert.strictEqual(collection.queueOverlay.summary.needsHumanPortCount, 0);
+assert.strictEqual(collection.queueOverlay.entries[0].status, 'coordinator-review');
+assert.deepStrictEqual(collection.queueOverlay.entries[0].reasons, ['coordinator-review-required']);
+assert.ok(await exists(path.join(collection.outDir, 'coordinator-review', 'runtime-runtime-action', 'merge.json')));
 assert.ok(await exists(path.join(collection.outDir, 'merge-index.json')));
 assert.ok(await exists(path.join(collection.outDir, 'hierarchical-merge-queue.json')));
 assert.ok(await exists(path.join(collection.outDir, 'merge-admission.json')));
@@ -791,8 +795,9 @@ assert.strictEqual(collection.artifacts.counts.mergeQueuePromoteCount, collectio
 assert.strictEqual(collection.artifacts.counts.mergeQueueApplyLocalCount, collection.hierarchicalMergeQueue.summary.applyLocalCount);
 assert.strictEqual(collection.artifacts.counts.promotedPatchCandidateCount, 0);
 assert.ok(await exists(collection.artifacts.hierarchicalMergeQueuePath));
-const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
+const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'coordinator-review', 'runtime-runtime-action', 'merge.json'), 'utf8'));
 assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
+assert.deepStrictEqual(collectedMergeBundle.reasons, ['coordinator-review-required']);
 
 const patchOnlyRepo = await createApplyFixtureRepo(tmp, 'patch-only-repo');
 const patchOnlyRunDir = path.join(tmp, 'patch-only-run');
@@ -957,7 +962,7 @@ const failedOrigCollection = await collectCodexSwarmRun({
   checkStale: false
 });
 assert.strictEqual(failedOrigCollection.summary['failed-evidence'], 2);
-assert.strictEqual(failedOrigCollection.summary['needs-human-port'], 0);
+assert.strictEqual(failedOrigCollection.summary['coordinator-review'], 0);
 assert.strictEqual(failedOrigCollection.summary.mergeQueueRejectCount, 2);
 assert.strictEqual(failedOrigCollection.summary.mergeQueueBlockCount, 0);
 const failedOrigCollectedEntries = new Map(failedOrigCollection.buckets['failed-evidence'].map((entry) => [entry.jobId, entry]));
@@ -2231,7 +2236,7 @@ assert.strictEqual(autoDrainCommitRun.autoDrain.summary.remainingReadyCount, 0);
 assert.deepStrictEqual(autoDrainCommitRun.autoDrain.terminalJobIds, [autoDrainCommitJobId]);
 assert.deepStrictEqual(autoDrainCommitRun.autoDrain.blockedJobIds, []);
 assert.strictEqual(autoDrainCommitIteration.postApplyCollection.buckets['ready-to-apply'].length, 0);
-assert.strictEqual(autoDrainCommitIteration.postApplyCollection.buckets['needs-human-port'].length, 0);
+assert.strictEqual(autoDrainCommitIteration.postApplyCollection.buckets['coordinator-review'].length, 0);
 assert.strictEqual(autoDrainCommitIteration.postApplyCollection.buckets['failed-evidence'].length, 0);
 assert.strictEqual(autoDrainCommitIteration.postApplyCollection.summary.admittedCount, 0);
 assert.ok(await exists(autoDrainCommitIteration.postApplyCollectionPath));
@@ -3028,12 +3033,13 @@ assert.strictEqual(autoDrainUngatedCandidateRun.ok, true);
 assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.summary.applyCount, 0);
 assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.summary.terminalCount, 0);
 assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.iterations[0].collection.buckets['ready-to-apply'].length, 0);
-assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.iterations[0].collection.buckets['needs-human-port'].length, 1);
-const autoDrainUngatedCandidateCollected = autoDrainUngatedCandidateRun.autoDrain.iterations[0].collection.buckets['needs-human-port'][0].bundle;
+assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.iterations[0].collection.buckets['coordinator-review'].length, 1);
+const autoDrainUngatedCandidateCollected = autoDrainUngatedCandidateRun.autoDrain.iterations[0].collection.buckets['coordinator-review'][0].bundle;
 assert.strictEqual(autoDrainUngatedCandidateCollected.mergeReadiness, 'patch-candidate');
 assert.strictEqual(autoDrainUngatedCandidateCollected.disposition, 'needs-port');
+assert.deepStrictEqual(autoDrainUngatedCandidateCollected.reasons, ['coordinator-review-required']);
 assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.grouping.readyToApplyCount, 0);
-assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.grouping.needsHumanPortCount, 1);
+assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.grouping.coordinatorReviewCount, 1);
 assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.mergeQueue.applyLocalCount, 0);
 assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.mergeQueue.promoteCount, 1);
 assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.mergeQueue.promotedPatchCandidateCount, 0);
@@ -3041,7 +3047,8 @@ assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.summary.promo
 assert.strictEqual(await fs.readFile(path.join(autoDrainUngatedCandidateRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 const autoDrainUngatedCandidateDashboard = JSON.parse(await fs.readFile(path.join(autoDrainUngatedCandidateOutDir, 'coordinator-dashboard.json'), 'utf8'));
 assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.bucketCounts.readyToApplyCount, 0);
-assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.bucketCounts.needsHumanPortCount, 1);
+assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.bucketCounts.coordinatorReviewCount, 1);
+assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.humanQuestions.count, 0);
 assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.bucketCounts.promotedPatchCandidateCount, 0);
 assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.actionCounts.applyLocalCount, 0);
 assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.actionCounts.promoteCount, 1);
@@ -3068,7 +3075,7 @@ const cliCollectPromoted = await execFileP(process.execPath, [
 const cliCollectPromotedResult = JSON.parse(cliCollectPromoted.stdout);
 assert.strictEqual(cliCollectPromotedResult.ok, true);
 assert.strictEqual(cliCollectPromotedResult.summary['ready-to-apply'], 1);
-assert.strictEqual(cliCollectPromotedResult.summary['needs-human-port'], 0);
+assert.strictEqual(cliCollectPromotedResult.summary['coordinator-review'], 0);
 assert.strictEqual(cliCollectPromotedResult.summary.promotedPatchCandidateCount, 1);
 assert.strictEqual(cliCollectPromotedResult.artifacts.counts.promotedPatchCandidateCount, 1);
 const cliCollectPromotedBundle = cliCollectPromotedResult.buckets['ready-to-apply'][0].bundle;
@@ -3178,7 +3185,7 @@ assert.strictEqual(await fs.readFile(path.join(cliAutonomousPromoteRepo, 'src', 
 const cliAutonomousPromoteCollection = JSON.parse(await fs.readFile(path.join(cliAutonomousPromoteResult.collectionDir, 'collection.json'), 'utf8'));
 assert.strictEqual(cliAutonomousPromoteCollection.summary.promotedPatchCandidateCount, 1);
 assert.strictEqual(cliAutonomousPromoteCollection.summary['ready-to-apply'], 1);
-assert.strictEqual(cliAutonomousPromoteCollection.summary['needs-human-port'], 0);
+assert.strictEqual(cliAutonomousPromoteCollection.summary['coordinator-review'], 0);
 
 const explicitDrainRerunRepo = await createApplyFixtureRepo(tmp, 'explicit-drain-rerun-repo');
 await fs.writeFile(path.join(explicitDrainRerunRepo, 'src', 'stale.ts'), 'old-stale\n');
@@ -3818,7 +3825,7 @@ const collapsedDecisionAutoDrain = {
     collection: {
       buckets: {
         'ready-to-apply': [],
-        'needs-human-port': [],
+        'coordinator-review': [],
         'failed-evidence': [],
         'stale-against-head': [{
           jobId: 'collapsed-rerun-old-job',
@@ -4118,7 +4125,7 @@ const collapsedDecisionManifest = createCodexAutoDrainRerunManifest({
       mergeIndex: { runId: 'collapsed-decision-run' },
       buckets: {
         'ready-to-apply': [],
-        'needs-human-port': [],
+        'coordinator-review': [],
         'failed-evidence': [],
         'stale-against-head': [closedStaleEntry, closedRejectedEntry, openRerunEntry]
       },
@@ -4636,7 +4643,8 @@ assert.strictEqual(autoDrainClassificationCards.get('true-blockers').status, 'bl
 assert.strictEqual(autoDrainClassificationCards.get('stale-rerun').value, 1);
 assert.strictEqual(autoDrainClassificationCards.get('stale-rerun').status, 'warning');
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.readyToApplyCount, 0);
-assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.needsHumanPortCount, 3);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.coordinatorReviewCount, 3);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.humanQuestions.count, 0);
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.failedEvidenceCount, 2);
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 1);
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.mergeQueueHealth.counts.rerunCandidateCount, 1);
@@ -5213,7 +5221,7 @@ function createSyntheticAutoDrainArtifacts(outDir) {
       collectionCount: 0,
       groupedBundleCount: 0,
       readyToApplyCount: 0,
-      needsHumanPortCount: 0,
+      coordinatorReviewCount: 0,
       failedEvidenceCount: 0,
       staleAgainstHeadCount: 0
     },

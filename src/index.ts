@@ -431,11 +431,18 @@ export interface FrontierCodexResourceAllocation {
   browser?: FrontierCodexBrowserAllocation;
 }
 
+const FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET = 'coordinator-review';
+const FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET = 'needs-human-port';
+const FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_REASON = 'coordinator-review-required';
+const FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_REASON = 'needs-human-port';
+
 export type FrontierCodexCollectBucket =
   | 'ready-to-apply'
-  | 'needs-human-port'
+  | 'coordinator-review'
   | 'failed-evidence'
   | 'stale-against-head';
+
+export type FrontierCodexLegacyCollectBucket = 'needs-human-port';
 
 export interface FrontierCodexCollectInput {
   run: string;
@@ -471,7 +478,7 @@ export interface FrontierCodexCollectArtifacts {
   counts: {
     groupedBundleCount: number;
     readyToApplyCount: number;
-    needsHumanPortCount: number;
+    coordinatorReviewCount: number;
     failedEvidenceCount: number;
     staleAgainstHeadCount: number;
     admittedCount: number;
@@ -544,7 +551,7 @@ export interface FrontierCodexApplyInput {
   run?: string;
   outDir?: string;
   cwd?: string;
-  bucket?: FrontierCodexCollectBucket | 'all';
+  bucket?: FrontierCodexCollectBucket | FrontierCodexLegacyCollectBucket | 'all';
   jobIds?: readonly string[];
   dryRun?: boolean;
   allowDirty?: boolean;
@@ -1314,7 +1321,7 @@ export interface FrontierCodexPatchScoreInput {
   run?: string;
   outDir?: string;
   cwd?: string;
-  bucket?: FrontierCodexCollectBucket | 'all';
+  bucket?: FrontierCodexCollectBucket | FrontierCodexLegacyCollectBucket | 'all';
   jobIds?: readonly string[];
   workspaceIncludes?: readonly string[];
   workspaceExcludes?: readonly string[];
@@ -1542,7 +1549,7 @@ export interface FrontierCodexAutoDrainArtifactIteration {
   readyJobCount: number;
   groupedBundleCount: number;
   readyToApplyCount: number;
-  needsHumanPortCount: number;
+  coordinatorReviewCount: number;
   failedEvidenceCount: number;
   staleAgainstHeadCount: number;
   decisionCount: number;
@@ -1709,7 +1716,7 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     collectionCount: number;
     groupedBundleCount: number;
     readyToApplyCount: number;
-    needsHumanPortCount: number;
+    coordinatorReviewCount: number;
     failedEvidenceCount: number;
     staleAgainstHeadCount: number;
   };
@@ -2031,7 +2038,7 @@ export interface FrontierCodexDashboardQueueMetadata {
   conflictRetryWork: FrontierCodexDashboardConflictRetryWork[];
   bucketCounts: {
     readyToApplyCount: number;
-    needsHumanPortCount: number;
+    coordinatorReviewCount: number;
     failedEvidenceCount: number;
     staleAgainstHeadCount: number;
     promotedPatchCandidateCount: number;
@@ -5650,7 +5657,7 @@ function createDashboardQueueMetadata(
     conflictRetryWork,
     bucketCounts: {
       readyToApplyCount: artifacts?.grouping.readyToApplyCount ?? 0,
-      needsHumanPortCount: artifacts?.grouping.needsHumanPortCount ?? 0,
+      coordinatorReviewCount: artifacts?.grouping.coordinatorReviewCount ?? 0,
       failedEvidenceCount: artifacts?.grouping.failedEvidenceCount ?? 0,
       staleAgainstHeadCount: artifacts?.grouping.staleAgainstHeadCount ?? 0,
       promotedPatchCandidateCount: artifacts?.mergeQueue.promotedPatchCandidateCount ?? 0
@@ -7532,7 +7539,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const collectionHead = await readCurrentGitHead(cwd);
   const buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]> = {
     'ready-to-apply': [],
-    'needs-human-port': [],
+    'coordinator-review': [],
     'failed-evidence': [],
     'stale-against-head': []
   };
@@ -7542,7 +7549,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     'collected',
     'patch-scores',
     'ready-to-apply',
-    'needs-human-port',
+    FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET,
+    FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET,
     'failed-evidence',
     'stale-against-head'
   ];
@@ -7576,13 +7584,14 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       : bundle;
     if (collectBundle !== bundle) promotedPatchCandidateCount += 1;
     const bucket = classifyCodexCollectBucket(collectBundle, staleAgainstHead);
+    const outputBundle = normalizeCodexCoordinatorReviewMergeBundle(collectBundle);
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(bundle.jobId)}` : bundle.branchName;
     const nextBundle = withCodexCollectionHeadMetadata({
-      ...collectBundle,
+      ...outputBundle,
       ...(branchName ? { branchName } : {}),
-      staleAgainstHead: collectBundle.staleAgainstHead || staleAgainstHead,
-      disposition: staleAgainstHead ? 'stale-against-head' : collectBundle.disposition,
-      autoMergeable: bucket === 'ready-to-apply' && collectBundle.autoMergeable
+      staleAgainstHead: outputBundle.staleAgainstHead || staleAgainstHead,
+      disposition: staleAgainstHead ? 'stale-against-head' : outputBundle.disposition,
+      autoMergeable: bucket === 'ready-to-apply' && outputBundle.autoMergeable
     }, {
       currentHead: collectionHead,
       generatedAt,
@@ -7634,14 +7643,14 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     generatedAt,
     metadata: { source: FRONTIER_SWARM_CODEX_COLLECTION_KIND }
   });
-  const queueOverlay = createSwarmQueueOverlay({
+  const queueOverlay = createCodexCollectionQueueOverlay({
     runId: path.basename(runDir),
     bundles: collectedBundles
   });
   const summary = {
     total: mergeRecords.length,
     'ready-to-apply': buckets['ready-to-apply'].length,
-    'needs-human-port': buckets['needs-human-port'].length,
+    'coordinator-review': buckets['coordinator-review'].length,
     'failed-evidence': buckets['failed-evidence'].length,
     'stale-against-head': buckets['stale-against-head'].length,
     admittedCount: mergeAdmission.summary.admittedCount,
@@ -7716,14 +7725,14 @@ function createCollectArtifacts(input: {
     patchStackPlanPath: path.join(input.outDir, 'patch-stack-plan.json'),
     bucketDirs: {
       'ready-to-apply': path.join(input.outDir, 'ready-to-apply'),
-      'needs-human-port': path.join(input.outDir, 'needs-human-port'),
+      'coordinator-review': path.join(input.outDir, FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET),
       'failed-evidence': path.join(input.outDir, 'failed-evidence'),
       'stale-against-head': path.join(input.outDir, 'stale-against-head')
     },
     counts: {
       groupedBundleCount: input.summary.total,
       readyToApplyCount: input.summary['ready-to-apply'],
-      needsHumanPortCount: input.summary['needs-human-port'],
+      coordinatorReviewCount: input.summary['coordinator-review'],
       failedEvidenceCount: input.summary['failed-evidence'],
       staleAgainstHeadCount: input.summary['stale-against-head'],
       admittedCount: input.mergeAdmission.summary.admittedCount,
@@ -7749,7 +7758,8 @@ function createCollectArtifacts(input: {
 }
 
 function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): FrontierCodexCollectArtifacts {
-  return collection.artifacts ?? {
+  if (collection.artifacts) return normalizeCodexCollectArtifactsForSnapshot(collection.artifacts, collection);
+  return {
     collectionPath: path.join(collection.outDir, 'collection.json'),
     mergeIndexPath: path.join(collection.outDir, 'merge-index.json'),
     hierarchicalMergeQueuePath: path.join(collection.outDir, 'hierarchical-merge-queue.json'),
@@ -7759,14 +7769,14 @@ function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): Fr
     patchStackPlanPath: path.join(collection.outDir, 'patch-stack-plan.json'),
     bucketDirs: {
       'ready-to-apply': path.join(collection.outDir, 'ready-to-apply'),
-      'needs-human-port': path.join(collection.outDir, 'needs-human-port'),
+      'coordinator-review': path.join(collection.outDir, FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET),
       'failed-evidence': path.join(collection.outDir, 'failed-evidence'),
       'stale-against-head': path.join(collection.outDir, 'stale-against-head')
     },
     counts: {
       groupedBundleCount: collection.summary.total,
       readyToApplyCount: collection.summary['ready-to-apply'],
-      needsHumanPortCount: collection.summary['needs-human-port'],
+      coordinatorReviewCount: readCollectionCoordinatorReviewCount(collection.summary),
       failedEvidenceCount: collection.summary['failed-evidence'],
       staleAgainstHeadCount: collection.summary['stale-against-head'],
       admittedCount: collection.summary.admittedCount ?? 0,
@@ -7789,6 +7799,32 @@ function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): Fr
       patchCount: 0
     }
   };
+}
+
+function normalizeCodexCollectArtifactsForSnapshot(
+  artifacts: FrontierCodexCollectArtifacts,
+  collection: FrontierCodexCollectResult
+): FrontierCodexCollectArtifacts {
+  const counts = artifacts.counts as FrontierCodexCollectArtifacts['counts'] & { needsHumanPortCount?: number };
+  return {
+    ...artifacts,
+    bucketDirs: {
+      ...artifacts.bucketDirs,
+      'coordinator-review': artifacts.bucketDirs['coordinator-review'] ?? path.join(collection.outDir, FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET)
+    },
+    counts: {
+      ...artifacts.counts,
+      coordinatorReviewCount: counts.coordinatorReviewCount ?? counts.needsHumanPortCount ?? readCollectionCoordinatorReviewCount(collection.summary)
+    }
+  };
+}
+
+function readCollectionCoordinatorReviewCount(
+  summary: Partial<Record<FrontierCodexCollectBucket | FrontierCodexLegacyCollectBucket, number>>
+): number {
+  return summary[FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET]
+    ?? summary[FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET]
+    ?? 0;
 }
 
 function createAutoDrainArtifactMetadata(input: {
@@ -7827,7 +7863,7 @@ function createAutoDrainArtifactMetadata(input: {
       readyJobCount: iteration.readyJobIds.length,
       groupedBundleCount: collectionArtifacts.counts.groupedBundleCount,
       readyToApplyCount: collectionArtifacts.counts.readyToApplyCount,
-      needsHumanPortCount: collectionArtifacts.counts.needsHumanPortCount,
+      coordinatorReviewCount: collectionArtifacts.counts.coordinatorReviewCount,
       failedEvidenceCount: collectionArtifacts.counts.failedEvidenceCount,
       staleAgainstHeadCount: collectionArtifacts.counts.staleAgainstHeadCount,
       decisionCount: iteration.apply?.decisions.length ?? 0,
@@ -7904,7 +7940,7 @@ function createAutoDrainArtifactMetadata(input: {
       collectionCount: iterations.length,
       groupedBundleCount: sum((iteration) => iteration.groupedBundleCount),
       readyToApplyCount: sum((iteration) => iteration.readyToApplyCount),
-      needsHumanPortCount: sum((iteration) => iteration.needsHumanPortCount),
+      coordinatorReviewCount: sum((iteration) => iteration.coordinatorReviewCount),
       failedEvidenceCount: sum((iteration) => iteration.failedEvidenceCount),
       staleAgainstHeadCount: sum((iteration) => iteration.staleAgainstHeadCount)
     },
@@ -8500,6 +8536,26 @@ function compactArtifactPaths(paths: readonly (string | undefined)[]): string[] 
   return uniqueStrings(paths.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0));
 }
 
+function collectBucketDirectoryNames(bucket: FrontierCodexCollectBucket | FrontierCodexLegacyCollectBucket | 'all'): string[] {
+  if (bucket === 'all') {
+    return [
+      'ready-to-apply',
+      FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET,
+      'failed-evidence',
+      'stale-against-head',
+      FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET
+    ];
+  }
+  if (bucket === FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET || bucket === FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET) {
+    return [FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET, FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET];
+  }
+  return [bucket];
+}
+
+function collectBucketRoots(collectionDir: string, bucket: FrontierCodexCollectBucket | FrontierCodexLegacyCollectBucket | 'all'): string[] {
+  return uniqueStrings(collectBucketDirectoryNames(bucket)).map((entry) => path.join(collectionDir, entry));
+}
+
 export async function applyCodexSwarmCollection(input: FrontierCodexApplyInput): Promise<FrontierCodexApplyResult> {
   const generatedAt = Date.now();
   const cwd = path.resolve(input.cwd ?? process.cwd());
@@ -8514,9 +8570,7 @@ export async function applyCodexSwarmCollection(input: FrontierCodexApplyInput):
     if (dirty.length) throw new Error(`refusing to apply into dirty worktree; pass allowDirty to override (${dirty.slice(0, 8).join(', ')})`);
   }
   const bucket = input.bucket ?? 'ready-to-apply';
-  const roots = bucket === 'all'
-    ? ['ready-to-apply', 'needs-human-port', 'failed-evidence', 'stale-against-head'].map((entry) => path.join(collectionDir, entry))
-    : [path.join(collectionDir, bucket)];
+  const roots = collectBucketRoots(collectionDir, bucket);
   const wanted = new Set(input.jobIds ?? []);
   const mergePaths = (await Promise.all(roots.map((root) => findFilesByName(root, 'merge.json')))).flat().sort();
   const entries: FrontierCodexApplyEntry[] = [];
@@ -8735,7 +8789,7 @@ async function synthesizeCodexCollectResultForAutonomousApply(input: {
 }): Promise<FrontierCodexCollectResult> {
   const buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]> = {
     'ready-to-apply': [],
-    'needs-human-port': [],
+    'coordinator-review': [],
     'failed-evidence': [],
     'stale-against-head': []
   };
@@ -8784,11 +8838,11 @@ async function synthesizeCodexCollectResultForAutonomousApply(input: {
     generatedAt: input.generatedAt,
     metadata: { source: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND }
   });
-  const queueOverlay = createSwarmQueueOverlay({ runId, bundles });
+  const queueOverlay = createCodexCollectionQueueOverlay({ runId, bundles });
   const summary = {
     total: bundles.length,
     'ready-to-apply': buckets['ready-to-apply'].length,
-    'needs-human-port': 0,
+    'coordinator-review': 0,
     'failed-evidence': 0,
     'stale-against-head': 0,
     admittedCount: mergeAdmission.summary.admittedCount,
@@ -8876,9 +8930,7 @@ export async function scoreCodexSwarmPatches(input: FrontierCodexPatchScoreInput
     : (await collectCodexSwarmRun({ run: String(input.run ?? ''), cwd, outDir: input.outDir })).outDir;
   const outDir = path.resolve(cwd, input.outDir ?? path.join(collectionDir, 'patch-scores'));
   const bucket = input.bucket ?? 'all';
-  const roots = bucket === 'all'
-    ? ['ready-to-apply', 'needs-human-port', 'failed-evidence', 'stale-against-head'].map((entry) => path.join(collectionDir, entry))
-    : [path.join(collectionDir, bucket)];
+  const roots = collectBucketRoots(collectionDir, bucket);
   const wanted = new Set(input.jobIds ?? []);
   const mergePaths = (await Promise.all(roots.map((root) => findFilesByName(root, 'merge.json')))).flat().sort();
   const entries: FrontierCodexPatchScoreEntry[] = [];
@@ -9687,6 +9739,49 @@ async function appendAutonomousDecision(file: string, decision: FrontierCodexAut
   await fs.appendFile(file, JSON.stringify(decision) + '\n');
 }
 
+function createCodexCollectionQueueOverlay(input: Parameters<typeof createSwarmQueueOverlay>[0]): FrontierSwarmQueueOverlay {
+  return normalizeCodexCoordinatorReviewQueueOverlay(createSwarmQueueOverlay(input));
+}
+
+function normalizeCodexCoordinatorReviewQueueOverlay(overlay: FrontierSwarmQueueOverlay): FrontierSwarmQueueOverlay {
+  const entries: FrontierSwarmQueueOverlay['entries'] = overlay.entries.map((entry) => ({
+    ...entry,
+    status: entry.status === FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET
+      ? FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET
+      : entry.status,
+    reasons: entry.reasons.map(normalizeCodexCoordinatorReviewReason)
+  }));
+  const byQueueItemId = groupAutonomousQueueOverlayEntries(entries);
+  return {
+    ...overlay,
+    entries,
+    byQueueItemId,
+    summary: {
+      ...overlay.summary,
+      needsHumanPortCount: entries.filter((entry) => entry.status === FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET).length,
+      coordinatorReviewCount: entries.filter((entry) => entry.status === FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET).length
+    } as FrontierSwarmQueueOverlay['summary'] & { coordinatorReviewCount: number }
+  };
+}
+
+function normalizeCodexCoordinatorReviewMergeBundle(bundle: FrontierSwarmMergeBundle): FrontierSwarmMergeBundle {
+  return {
+    ...bundle,
+    reasons: bundle.reasons.map(normalizeCodexCoordinatorReviewReason)
+  };
+}
+
+function normalizeCodexCoordinatorReviewReason(reason: string): string {
+  return reason === FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_REASON
+    ? FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_REASON
+    : reason;
+}
+
+function isCodexCoordinatorReviewReason(reason: string): boolean {
+  return reason === FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_REASON
+    || reason === FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_REASON;
+}
+
 function createAutonomousQueueOverlay(input: {
   decisions: readonly FrontierCodexAutonomousMergeDecision[];
   generatedAt: number;
@@ -9716,7 +9811,7 @@ function createAutonomousQueueOverlay(input: {
           evidencePaths: [decision.bundlePath],
           changedPaths: [...decision.changedPaths],
           changedRegions: [...decision.changedRegions],
-          reasons: [decision.reason],
+          reasons: [normalizeCodexCoordinatorReviewReason(decision.reason)],
           generatedAt: decision.finishedAt
         }
       });
@@ -9742,11 +9837,12 @@ function createAutonomousQueueOverlay(input: {
       entryCount: entries.length,
       queueItemCount: Object.keys(byQueueItemId).length,
       readyToApplyCount: entries.filter((entry) => entry.status === 'ready-to-apply').length,
-      needsHumanPortCount: entries.filter((entry) => entry.status === 'needs-human-port').length,
+      needsHumanPortCount: entries.filter((entry) => entry.status === FRONTIER_SWARM_CODEX_LEGACY_HUMAN_PORT_BUCKET).length,
+      coordinatorReviewCount: entries.filter((entry) => entry.status === FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET).length,
       failedEvidenceCount: entries.filter((entry) => entry.status === 'failed-evidence').length,
       staleAgainstHeadCount: entries.filter((entry) => entry.status === 'stale-against-head').length,
       discoveryOnlyCount: entries.filter((entry) => entry.status === 'discovery-only').length
-    },
+    } as FrontierSwarmQueueOverlay['summary'] & { coordinatorReviewCount: number },
     metadata: {
       source: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND,
       terminalCount,
@@ -11605,7 +11701,7 @@ function patchOnlyBundleReasons(input: {
   ]).sort();
   if (input.blockedEvidence) return ['blocked'];
   if (input.discoveryOnly || input.disposition === 'discovery-only') return ['patch-only-record-only'];
-  return ['needs-human-port'];
+  return [FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_REASON];
 }
 
 function inferPatchOnlyJobDir(runDir: string, patchPath: string): string {
@@ -11842,7 +11938,7 @@ function classifyCodexCollectBucket(bundle: FrontierSwarmMergeBundle, staleAgain
     return 'failed-evidence';
   }
   if (bundle.disposition === 'auto-mergeable' && bundle.autoMergeable) return 'ready-to-apply';
-  return 'needs-human-port';
+  return FRONTIER_SWARM_CODEX_COORDINATOR_REVIEW_BUCKET;
 }
 
 function promoteCodexPatchCandidateBundle(
@@ -11856,7 +11952,7 @@ function promoteCodexPatchCandidateBundle(
     disposition: 'auto-mergeable',
     riskLevel: bundle.riskLevel,
     autoMergeable: true,
-    reasons: bundle.reasons.filter((reason) => reason !== 'needs-human-port'),
+    reasons: bundle.reasons.filter((reason) => !isCodexCoordinatorReviewReason(reason)),
     metadata: {
       ...(bundle.metadata ?? {}),
       coordinatorPatchCandidatePromotion: {
@@ -11883,7 +11979,7 @@ function isPromotableCodexPatchCandidate(
   if (!bundle.changedPaths.every((file) => bundle.allowedWrites.some((glob) => matchesGlob(file, glob)))) return false;
   const owned = new Set(bundle.ownedFilesTouched);
   if (!bundle.changedPaths.every((file) => owned.has(file))) return false;
-  if (bundle.reasons.some((reason) => reason !== 'needs-human-port')) return false;
+  if (bundle.reasons.some((reason) => !isCodexCoordinatorReviewReason(reason))) return false;
   return true;
 }
 
