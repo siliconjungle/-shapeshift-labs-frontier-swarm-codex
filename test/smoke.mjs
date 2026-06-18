@@ -892,6 +892,82 @@ assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.gatedDecisionCo
 assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.verificationGateCount, 1);
 assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.requiredVerificationGateCount, 1);
 
+const autoDrainCommitRerunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-commit-rerun-repo');
+const autoDrainCommitRerunPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-commit-rerun',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'apply-first-commit-task',
+      lane: 'apply',
+      ownedFiles: ['src/apply.ts'],
+      changedRegions: ['src/apply.ts#apply'],
+      verification: [{
+        name: 'worker-sees-first-commit',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='first-commit\\n') process.exit(1);"]
+      }]
+    }, {
+      id: 'apply-second-commit-task',
+      lane: 'apply',
+      ownedFiles: ['src/apply.ts'],
+      changedRegions: ['src/apply.ts#apply'],
+      verification: [{
+        name: 'worker-sees-second-commit',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='second-commit\\n') process.exit(1);"]
+      }]
+    }]
+  }
+});
+const autoDrainCommitRerunOutDir = path.join(tmp, 'auto-drain-commit-rerun-run');
+const autoDrainCommitRerunRun = await runCodexSwarm(autoDrainCommitRerunPlan, {
+  outDir: autoDrainCommitRerunOutDir,
+  cwd: autoDrainCommitRerunRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainCommitRerunOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    commit: true,
+    maxIterations: 3
+  },
+  executor: async (input) => {
+    const value = input.job.taskId === 'apply-first-commit-task' ? 'first-commit\n' : 'second-commit\n';
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), value);
+    await fs.writeFile(input.paths.lastMessagePath, `${input.job.taskId} changed\n`);
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: `${input.job.taskId} changed` };
+  }
+});
+assert.strictEqual(autoDrainCommitRerunRun.ok, true);
+assert.strictEqual(autoDrainCommitRerunRun.autoDrain.iterations.length, 2);
+assert.strictEqual(autoDrainCommitRerunRun.autoDrain.summary.applyCount, 1);
+assert.strictEqual(autoDrainCommitRerunRun.autoDrain.summary.remainingReadyCount, 0);
+assert.strictEqual(autoDrainCommitRerunRun.autoDrain.summary.committedDecisionCount, 1);
+const autoDrainCommitRerunFirstIteration = autoDrainCommitRerunRun.autoDrain.iterations[0];
+const autoDrainCommitRerunSecondIteration = autoDrainCommitRerunRun.autoDrain.iterations[1];
+assert.strictEqual(autoDrainCommitRerunFirstIteration.apply.decisions[0].status, 'committed');
+assert.strictEqual(autoDrainCommitRerunFirstIteration.deferredJobIds.length, 1);
+assert.strictEqual(autoDrainCommitRerunSecondIteration.apply, undefined);
+assert.deepStrictEqual(autoDrainCommitRerunSecondIteration.readyJobIds, []);
+assert.strictEqual(autoDrainCommitRerunSecondIteration.coordinatorAgentDrainWork.summary.assignmentCount, 1);
+assert.strictEqual(autoDrainCommitRerunSecondIteration.coordinatorAgentDrainWork.summary.terminalCount, 1);
+assert.strictEqual(autoDrainCommitRerunSecondIteration.coordinatorAgentDrainWork.summary.nonTerminalCount, 0);
+assert.strictEqual(autoDrainCommitRerunSecondIteration.coordinatorAgentDrainWork.summary.rerunCount, 1);
+assert.deepStrictEqual(autoDrainCommitRerunSecondIteration.coordinatorAgentDrainWork.terminalDecisions.map((decision) => decision.decision), ['rerun']);
+assert.deepStrictEqual(autoDrainCommitRerunSecondIteration.coordinatorAgentDrainWork.terminalDecisions.map((decision) => decision.jobId), autoDrainCommitRerunFirstIteration.deferredJobIds);
+assert.strictEqual(autoDrainCommitRerunRun.autoDrainArtifacts.summary.coordinatorAgentDrainWorkCount, 2);
+assert.strictEqual(autoDrainCommitRerunRun.autoDrainArtifacts.coordinatorAgentDrainWork.rerunCount, 1);
+assert.strictEqual(await fs.readFile(path.join(autoDrainCommitRerunRepo, 'src', 'apply.ts'), 'utf8'), 'first-commit\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autoDrainCommitRerunRepo })).stdout, '');
+
 const cliAutoDrainCommitRepo = await createApplyFixtureRepo(tmp, 'cli-auto-drain-commit-run-repo');
 const cliAutoDrainCommitOutDir = path.join(tmp, 'cli-auto-drain-commit-run-out');
 const cliAutoDrainCommitPlanPath = path.join(tmp, 'cli-auto-drain-commit-plan.json');

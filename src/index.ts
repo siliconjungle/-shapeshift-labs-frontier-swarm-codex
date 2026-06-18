@@ -1427,12 +1427,15 @@ async function runCodexSwarmAutoDrain(input: {
       ...admission.deferred.map((entry) => entry.jobId),
       ...admittedCandidateJobIds.filter((jobId) => !admittedJobIds.includes(jobId))
     ]).sort();
+    const terminalQueueDebtJobIds = terminalAutoDrainQueueDebtJobIds(collection, terminalJobIds, blockedJobIds);
+    const drainWorkJobIds = uniqueStrings([...allReadyJobIds, ...terminalQueueDebtJobIds]).sort();
     const coordinatorAgentDrain = await writeAutoDrainCoordinatorAgentDrainArtifact({
       collection,
       outDir,
       iteration: index + 1,
       admission,
       readyJobIds: allReadyJobIds,
+      drainWorkJobIds,
       admittedJobIds,
       deferredJobIds
     });
@@ -1535,7 +1538,8 @@ async function runCodexSwarmAutoDrain(input: {
     remainingReadyCount = postApplyCollection.buckets['ready-to-apply']
       .map((entry) => entry.jobId)
       .filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId)).length;
-    if (!apply.decisions.length || remainingReadyCount === 0) break;
+    const remainingTerminalQueueDebtCount = terminalAutoDrainQueueDebtJobIds(postApplyCollection, terminalJobIds, blockedJobIds).length;
+    if (!apply.decisions.length || (remainingReadyCount === 0 && remainingTerminalQueueDebtCount === 0)) break;
   }
   const lockSummary = summarizeAutonomousDecisionLockScopes(iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
   const artifacts = createAutoDrainArtifactMetadata({ outDir, autoDrainPath, generatedAt, iterations });
@@ -1600,6 +1604,7 @@ async function writeAutoDrainCoordinatorAgentDrainArtifact(input: {
   iteration: number;
   admission: FrontierSwarmMergeAdmission;
   readyJobIds: readonly string[];
+  drainWorkJobIds?: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
 }): Promise<{
@@ -1629,6 +1634,7 @@ function createAutoDrainCoordinatorAgentDrainArtifact(input: {
   iteration: number;
   admission: FrontierSwarmMergeAdmission;
   readyJobIds: readonly string[];
+  drainWorkJobIds?: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
   workArtifactId?: string;
@@ -1730,11 +1736,13 @@ function createAutoDrainCoordinatorAgentDrainWorkArtifact(input: {
   artifactPath: string;
   admission: FrontierSwarmMergeAdmission;
   readyJobIds: readonly string[];
+  drainWorkJobIds?: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
 }): FrontierSwarmCoordinatorAgentDrainWork {
   const generatedAt = Date.now();
-  const readyIndex = filterMergeIndexForJobIds(input.collection.mergeIndex, input.readyJobIds);
+  const drainWorkJobIds = uniqueStrings(input.drainWorkJobIds ?? input.readyJobIds).sort();
+  const readyIndex = filterMergeIndexForJobIds(input.collection.mergeIndex, drainWorkJobIds);
   const scopedAdmission = scopeAutoDrainCoordinatorAdmission({
     index: readyIndex,
     admission: input.admission,
@@ -1761,10 +1769,32 @@ function createAutoDrainCoordinatorAgentDrainWorkArtifact(input: {
       collectionDir: input.collection.outDir,
       selectedDeferredArtifactPath: input.artifactPath,
       readyJobIds: [...input.readyJobIds],
+      drainWorkJobIds,
       admittedJobIds: [...input.admittedJobIds],
       deferredJobIds: [...input.deferredJobIds]
     }
   });
+}
+
+const AUTO_DRAIN_TERMINAL_QUEUE_ACTIONS: ReadonlySet<FrontierSwarmMergeQueueAssignmentAction> = new Set([
+  'rerun',
+  'reject',
+  'record-only',
+  'block'
+]);
+
+function terminalAutoDrainQueueDebtJobIds(
+  collection: FrontierCodexCollectResult,
+  terminalJobIds: ReadonlySet<string>,
+  blockedJobIds: ReadonlySet<string>
+): string[] {
+  return uniqueStrings((collection.hierarchicalMergeQueue?.assignments ?? [])
+    .filter((assignment) => (
+      AUTO_DRAIN_TERMINAL_QUEUE_ACTIONS.has(assignment.action)
+      && !terminalJobIds.has(assignment.jobId)
+      && !blockedJobIds.has(assignment.jobId)
+    ))
+    .map((assignment) => assignment.jobId)).sort();
 }
 
 function scopeAutoDrainCoordinatorAdmission(input: {
@@ -3223,9 +3253,9 @@ function createDashboardQueueActionCounts(
   if (latestActionCounts) {
     return {
       ...latestActionCounts,
-      applyLocalCount: historicalActionCounts.applyLocalCount,
-      queueLocalCount: historicalActionCounts.queueLocalCount,
-      promoteCount: historicalActionCounts.promoteCount
+      applyLocalCount: Math.max(historicalActionCounts.applyLocalCount, latestActionCounts.applyLocalCount),
+      queueLocalCount: Math.max(historicalActionCounts.queueLocalCount, latestActionCounts.queueLocalCount),
+      promoteCount: Math.max(historicalActionCounts.promoteCount, latestActionCounts.promoteCount)
     };
   }
   return historicalActionCounts;
