@@ -16,6 +16,7 @@ import {
   FRONTIER_SWARM_CODEX_MODEL_PRICING,
   FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
   FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
+  FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
   FRONTIER_SWARM_CODEX_SUPPORTED_MODELS,
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
@@ -1298,6 +1299,36 @@ assert.strictEqual(autoDrainCommitRerunRun.autoDrainArtifacts.summary.coordinato
 assert.strictEqual(autoDrainCommitRerunRun.autoDrainArtifacts.coordinatorAgentDrainWork.rerunCount, 1);
 assert.strictEqual(await fs.readFile(path.join(autoDrainCommitRerunRepo, 'src', 'apply.ts'), 'utf8'), 'first-commit\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autoDrainCommitRerunRepo })).stdout, '');
+const autoDrainCommitRerunManifestPath = path.join(autoDrainCommitRerunOutDir, 'auto-drain', 'rerun-manifest.json');
+const autoDrainCommitRerunManifest = JSON.parse(await fs.readFile(autoDrainCommitRerunManifestPath, 'utf8'));
+const autoDrainCommitRerunHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: autoDrainCommitRerunRepo })).stdout.trim();
+assert.strictEqual(autoDrainCommitRerunManifest.kind, FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND);
+assert.strictEqual(autoDrainCommitRerunManifest.currentHead, autoDrainCommitRerunHead);
+assert.strictEqual(autoDrainCommitRerunManifest.sourceHead, autoDrainCommitRerunHead);
+assert.deepStrictEqual(autoDrainCommitRerunManifest.sourceHeads, [autoDrainCommitRerunHead]);
+assert.deepStrictEqual(autoDrainCommitRerunRun.autoDrainArtifacts.rerunManifest.paths, [autoDrainCommitRerunManifestPath]);
+assert.strictEqual(autoDrainCommitRerunRun.autoDrainArtifacts.rerunManifest.taskCount, 1);
+assert.strictEqual(autoDrainCommitRerunRun.autoDrainArtifacts.rerunManifest.sourceHead, autoDrainCommitRerunHead);
+assert.strictEqual(autoDrainCommitRerunManifest.summary.taskCount, 1);
+assert.strictEqual(autoDrainCommitRerunManifest.summary.staleAgainstHeadCount, 1);
+assert.strictEqual(autoDrainCommitRerunManifest.summary.queueRerunCount, 1);
+assert.strictEqual(autoDrainCommitRerunManifest.summary.conflictBlockedCount, 0);
+assert.strictEqual(autoDrainCommitRerunManifest.summary.sourceHeadCount, 1);
+assert.strictEqual(autoDrainCommitRerunManifest.items.length, 1);
+const autoDrainCommitRerunTask = autoDrainCommitRerunManifest.items[0];
+assert.strictEqual(autoDrainCommitRerunTask.id, 'apply-second-commit-task-rerun-current-head');
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.originalTaskId, 'apply-second-commit-task');
+assert.deepStrictEqual(autoDrainCommitRerunTask.metadata.rerun.queueItemIds, ['apply-second-commit-task']);
+assert.deepStrictEqual(autoDrainCommitRerunTask.targetRefs, ['src/apply.ts']);
+assert.deepStrictEqual(autoDrainCommitRerunTask.allowedWrites, ['src/apply.ts']);
+assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourceKinds.includes('stale-against-head'));
+assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourceKinds.includes('queue-rerun'));
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.currentHead, autoDrainCommitRerunHead);
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceHead, autoDrainCommitRerunHead);
+assert.deepStrictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceHeads, [autoDrainCommitRerunHead]);
+assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourcePatchPaths.some((entry) => entry.endsWith('changes.patch')));
+assert.ok(autoDrainCommitRerunTask.sourceRefs.some((entry) => entry.endsWith('changes.patch')));
+assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainCommitRerunManifest).map((task) => task.id), ['apply-second-commit-task-rerun-current-head']);
 
 const autoDrainPromotedDebtRepo = path.join(tmp, 'auto-drain-promoted-debt-repo');
 await fs.mkdir(path.join(autoDrainPromotedDebtRepo, 'src'), { recursive: true });
@@ -2042,6 +2073,35 @@ assert.match(autoDrainConflictBlockedCards.get('stale-rerun').action, /not a hum
 assert.ok(autoDrainConflictBlockedCards.get('stale-rerun').sourceFields.includes('queueHealth.conflictRetryWork'));
 assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').value, 0);
 assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').status, 'ok');
+const autoDrainConflictBlockedManifestPath = autoDrainConflictBlockedRun.autoDrainArtifacts.rerunManifest.paths[0];
+const autoDrainConflictBlockedManifest = JSON.parse(await fs.readFile(autoDrainConflictBlockedManifestPath, 'utf8'));
+const autoDrainConflictBlockedHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: autoDrainConflictBlockedRepo })).stdout.trim();
+assert.strictEqual(autoDrainConflictBlockedManifest.kind, FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND);
+assert.strictEqual(autoDrainConflictBlockedManifest.currentHead, autoDrainConflictBlockedHead);
+assert.strictEqual(autoDrainConflictBlockedManifest.sourceHead, autoDrainConflictBlockedDecision.headBefore);
+assert.deepStrictEqual(autoDrainConflictBlockedManifest.sourceHeads, [autoDrainConflictBlockedDecision.headBefore]);
+assert.strictEqual(autoDrainConflictBlockedManifest.summary.taskCount, 1);
+assert.strictEqual(autoDrainConflictBlockedManifest.summary.conflictBlockedCount, 1);
+assert.strictEqual(autoDrainConflictBlockedManifest.summary.staleAgainstHeadCount, 0);
+assert.strictEqual(autoDrainConflictBlockedManifest.summary.sourceHeadCount, 1);
+assert.strictEqual(autoDrainConflictBlockedManifest.summary.sourcePatchCount, 1);
+assert.strictEqual(autoDrainConflictBlockedRun.autoDrainArtifacts.rerunManifest.taskCount, 1);
+assert.strictEqual(autoDrainConflictBlockedRun.autoDrainArtifacts.rerunManifest.conflictBlockedCount, 1);
+assert.strictEqual(autoDrainConflictBlockedRun.autoDrainArtifacts.rerunManifest.sourceHead, autoDrainConflictBlockedDecision.headBefore);
+const autoDrainConflictBlockedRerunTask = autoDrainConflictBlockedManifest.items[0];
+assert.strictEqual(autoDrainConflictBlockedRerunTask.id, 'conflict-blocked-task-rerun-current-head');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.originalJobId, autoDrainConflictBlockedDecision.jobId);
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.originalTaskId, 'conflict-blocked-task');
+assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourceKinds, ['conflict-blocked']);
+assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.decisionStatuses, ['conflict-blocked']);
+assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.targetRefs, ['src/apply.ts']);
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.currentHead, autoDrainConflictBlockedHead);
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourceHead, autoDrainConflictBlockedDecision.headBefore);
+assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourceHeads, [autoDrainConflictBlockedDecision.headBefore]);
+assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourcePatchPaths, [autoDrainConflictBlockedDecision.patchPath]);
+assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(autoDrainConflictBlockedDecision.patchPath));
+assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(autoDrainConflictBlockedDecision.bundlePath));
+assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainConflictBlockedManifest).map((task) => task.targetRefs), [['src/apply.ts']]);
 
 const collapsedDecisionOutDir = path.join(tmp, 'collapsed-decision-dashboard');
 const collapsedDecisionArtifacts = createSyntheticAutoDrainArtifacts(collapsedDecisionOutDir);
@@ -3082,6 +3142,18 @@ function createSyntheticAutoDrainArtifacts(outDir) {
       recordOnlyCount: 0,
       promotedPatchCandidateCount: 0
     },
+    rerunManifest: {
+      paths: [],
+      count: 0,
+      taskCount: 0,
+      conflictBlockedCount: 0,
+      decisionRerunCount: 0,
+      staleAgainstHeadCount: 0,
+      queueRerunCount: 0,
+      sourceHeadCount: 0,
+      sourcePatchCount: 0,
+      targetRefCount: 0
+    },
     iterations: [],
     summary: {
       pathCount: 0,
@@ -3096,7 +3168,9 @@ function createSyntheticAutoDrainArtifacts(outDir) {
       patchStackPlanCount: 0,
       decisionCount: 4,
       promotedPatchCandidateCount: 0,
-      patchCount: 0
+      patchCount: 0,
+      rerunManifestCount: 0,
+      rerunTaskCount: 0
     }
   };
 }

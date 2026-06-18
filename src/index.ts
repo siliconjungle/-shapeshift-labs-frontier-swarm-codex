@@ -85,6 +85,8 @@ export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_KIND = 'frontier.swarm-cod
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND = 'frontier.swarm-codex.auto-drain-artifacts';
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND = 'frontier.swarm-codex.rerun-manifest';
+export const FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND = 'frontier.swarm-codex.coordinator-agent-drain';
 export const FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND = 'frontier.swarm-codex.patch-score';
@@ -1122,6 +1124,86 @@ export interface FrontierCodexAutoDrainArtifactPathGroup {
   count: number;
 }
 
+export type FrontierCodexAutoDrainRerunSourceKind =
+  | 'stale-against-head'
+  | 'queue-rerun'
+  | 'decision-rerun'
+  | 'conflict-blocked';
+
+export interface FrontierCodexAutoDrainRerunTaskMetadata {
+  source: typeof FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND;
+  sourceAutoDrainPath: string;
+  sourceCollectionPaths: string[];
+  sourceMergeQueuePaths: string[];
+  sourceDecisionLogPaths: string[];
+  originalJobId: string;
+  originalTaskId?: string;
+  queueItemIds: string[];
+  sourceKinds: FrontierCodexAutoDrainRerunSourceKind[];
+  reasons: string[];
+  currentHead?: string;
+  sourceHead?: string;
+  sourceHeads: string[];
+  sourcePatchPaths: string[];
+  sourceBundlePaths: string[];
+  evidencePaths: string[];
+  targetRefs: string[];
+  changedRegions: string[];
+  queueActions: FrontierSwarmMergeQueueAssignmentAction[];
+  decisionStatuses: FrontierCodexAutonomousDecisionStatus[];
+  conflictHeadBefore: string[];
+  conflictHeadAfter: string[];
+  conflictingJobIds: string[];
+  scopeIds: string[];
+  leaseKeys: string[];
+  generatedAt: number;
+}
+
+export interface FrontierCodexAutoDrainRerunTask extends FrontierSwarmTaskInput {
+  id: string;
+  title: string;
+  objective: string;
+  status: 'todo';
+  sourceRefs: string[];
+  targetRefs: string[];
+  allowedWrites: string[];
+  changedRegions: string[];
+  tags: string[];
+  metadata: {
+    source: typeof FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND;
+    rerun: FrontierCodexAutoDrainRerunTaskMetadata;
+  };
+}
+
+export interface FrontierCodexAutoDrainRerunManifest {
+  kind: typeof FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION;
+  id: string;
+  runId?: string;
+  path: string;
+  outDir: string;
+  sourceAutoDrainPath: string;
+  generatedAt: number;
+  currentHead?: string;
+  sourceHead?: string;
+  sourceHeads: string[];
+  items: FrontierCodexAutoDrainRerunTask[];
+  sourcePatchPaths: string[];
+  targetRefs: string[];
+  taskIds: string[];
+  jobIds: string[];
+  summary: {
+    taskCount: number;
+    conflictBlockedCount: number;
+    decisionRerunCount: number;
+    staleAgainstHeadCount: number;
+    queueRerunCount: number;
+    sourceHeadCount: number;
+    sourcePatchCount: number;
+    targetRefCount: number;
+  };
+}
+
 export interface FrontierCodexAutoDrainArtifactMetadata {
   kind: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND;
   version: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_VERSION;
@@ -1183,6 +1265,18 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     recordOnlyCount: number;
     promotedPatchCandidateCount: number;
   };
+  rerunManifest: FrontierCodexAutoDrainArtifactPathGroup & {
+    taskCount: number;
+    conflictBlockedCount: number;
+    decisionRerunCount: number;
+    staleAgainstHeadCount: number;
+    queueRerunCount: number;
+    sourceHeadCount: number;
+    sourcePatchCount: number;
+    targetRefCount: number;
+    currentHead?: string;
+    sourceHead?: string;
+  };
   iterations: FrontierCodexAutoDrainArtifactIteration[];
   summary: {
     pathCount: number;
@@ -1202,6 +1296,8 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     requiredVerificationGateCount: number;
     promotedPatchCandidateCount: number;
     patchCount: number;
+    rerunManifestCount: number;
+    rerunTaskCount: number;
   };
 }
 
@@ -1862,7 +1958,16 @@ async function runCodexSwarmAutoDrain(input: {
     if (!apply.decisions.length || (remainingReadyCount === 0 && remainingTerminalQueueDebtCount === 0 && remainingPromotedQueueDebtCount === 0)) break;
   }
   const lockSummary = summarizeAutonomousDecisionLockScopes(iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
-  const artifacts = createAutoDrainArtifactMetadata({ outDir, autoDrainPath, generatedAt, iterations });
+  const rerunManifest = await writeAutoDrainRerunManifest({
+    cwd: input.cwd,
+    outDir,
+    autoDrainPath,
+    generatedAt,
+    iterations,
+    terminalJobIds: [...terminalJobIds],
+    blockedJobIds: [...blockedJobIds]
+  });
+  const artifacts = createAutoDrainArtifactMetadata({ outDir, autoDrainPath, generatedAt, iterations, rerunManifest });
   const latestIteration = iterations[iterations.length - 1];
   const admittedCount = uniqueStrings(iterations.flatMap((iteration) => iteration.admittedJobIds)).length;
   const deferredCount = latestIteration?.deferredJobIds.length ?? 0;
@@ -5205,6 +5310,7 @@ function createAutoDrainArtifactMetadata(input: {
   autoDrainPath: string;
   generatedAt?: number;
   iterations: readonly FrontierCodexSwarmAutoDrainIteration[];
+  rerunManifest?: FrontierCodexAutoDrainRerunManifest;
 }): FrontierCodexAutoDrainArtifactMetadata {
   const iterations: FrontierCodexAutoDrainArtifactIteration[] = input.iterations.map((iteration) => {
     const collectionArtifacts = collectArtifactsForSnapshot(iteration.collection);
@@ -5282,6 +5388,7 @@ function createAutoDrainArtifactMetadata(input: {
     iteration.autonomousQueueOverlayPath,
     ...iteration.patchPaths
   ]));
+  const rerunManifestPaths = compactArtifactPaths([input.rerunManifest?.path]);
   const sum = (select: (iteration: FrontierCodexAutoDrainArtifactIteration) => number): number =>
     iterations.reduce((total, iteration) => total + select(iteration), 0);
   return {
@@ -5359,6 +5466,20 @@ function createAutoDrainArtifactMetadata(input: {
       recordOnlyCount: sum((iteration) => iteration.mergeQueueRecordOnlyCount),
       promotedPatchCandidateCount: sum((iteration) => iteration.promotedPatchCandidateCount)
     },
+    rerunManifest: {
+      paths: rerunManifestPaths,
+      count: rerunManifestPaths.length,
+      taskCount: input.rerunManifest?.summary.taskCount ?? 0,
+      conflictBlockedCount: input.rerunManifest?.summary.conflictBlockedCount ?? 0,
+      decisionRerunCount: input.rerunManifest?.summary.decisionRerunCount ?? 0,
+      staleAgainstHeadCount: input.rerunManifest?.summary.staleAgainstHeadCount ?? 0,
+      queueRerunCount: input.rerunManifest?.summary.queueRerunCount ?? 0,
+      sourceHeadCount: input.rerunManifest?.summary.sourceHeadCount ?? 0,
+      sourcePatchCount: input.rerunManifest?.summary.sourcePatchCount ?? 0,
+      targetRefCount: input.rerunManifest?.summary.targetRefCount ?? 0,
+      ...(input.rerunManifest?.currentHead ? { currentHead: input.rerunManifest.currentHead } : {}),
+      ...(input.rerunManifest?.sourceHead ? { sourceHead: input.rerunManifest.sourceHead } : {})
+    },
     iterations,
     summary: {
       pathCount: compactArtifactPaths([
@@ -5369,7 +5490,8 @@ function createAutoDrainArtifactMetadata(input: {
         ...mergeQueuePaths,
         ...groupingPaths,
         ...reviewerPaths,
-        ...patchStackPaths
+        ...patchStackPaths,
+        ...rerunManifestPaths
       ]).length,
       iterationCount: iterations.length,
       collectionCount: iterations.length,
@@ -5386,9 +5508,388 @@ function createAutoDrainArtifactMetadata(input: {
       verificationGateCount: sum((iteration) => iteration.verificationGateCount),
       requiredVerificationGateCount: sum((iteration) => iteration.requiredVerificationGateCount),
       promotedPatchCandidateCount: sum((iteration) => iteration.promotedPatchCandidateCount),
-      patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length
+      patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length,
+      rerunManifestCount: rerunManifestPaths.length,
+      rerunTaskCount: input.rerunManifest?.summary.taskCount ?? 0
     }
   };
+}
+
+interface AutoDrainRerunCandidate {
+  jobId: string;
+  taskId?: string;
+  lane?: string;
+  title?: string;
+  queueItemIds: string[];
+  sourceKinds: FrontierCodexAutoDrainRerunSourceKind[];
+  reasons: string[];
+  sourceHead?: string;
+  sourceHeads: string[];
+  sourcePatchPaths: string[];
+  sourceBundlePaths: string[];
+  sourceCollectionPaths: string[];
+  sourceMergeQueuePaths: string[];
+  sourceDecisionLogPaths: string[];
+  evidencePaths: string[];
+  targetRefs: string[];
+  changedRegions: string[];
+  allowedWrites: string[];
+  queueActions: FrontierSwarmMergeQueueAssignmentAction[];
+  decisionStatuses: FrontierCodexAutonomousDecisionStatus[];
+  conflictHeadBefore: string[];
+  conflictHeadAfter: string[];
+  conflictingJobIds: string[];
+  scopeIds: string[];
+  leaseKeys: string[];
+  generatedAt: number;
+}
+
+async function writeAutoDrainRerunManifest(input: {
+  cwd: string;
+  outDir: string;
+  autoDrainPath: string;
+  generatedAt: number;
+  iterations: readonly FrontierCodexSwarmAutoDrainIteration[];
+  terminalJobIds: readonly string[];
+  blockedJobIds: readonly string[];
+}): Promise<FrontierCodexAutoDrainRerunManifest> {
+  const manifestPath = path.join(input.outDir, 'rerun-manifest.json');
+  const currentHead = await readCurrentGitHead(input.cwd);
+  const manifest = createAutoDrainRerunManifest({
+    ...input,
+    manifestPath,
+    currentHead
+  });
+  await writeJsonAtomic(manifestPath, manifest);
+  return manifest;
+}
+
+function createAutoDrainRerunManifest(input: {
+  outDir: string;
+  autoDrainPath: string;
+  manifestPath: string;
+  generatedAt: number;
+  currentHead?: string;
+  iterations: readonly FrontierCodexSwarmAutoDrainIteration[];
+  terminalJobIds: readonly string[];
+  blockedJobIds: readonly string[];
+}): FrontierCodexAutoDrainRerunManifest {
+  const candidates = new Map<string, AutoDrainRerunCandidate>();
+  const latestIteration = input.iterations.at(-1);
+  const latestCollection = latestIteration?.postApplyCollection ?? latestIteration?.collection;
+  const latestCollectionPath = latestCollection
+    ? latestCollection.artifacts?.collectionPath ?? path.join(latestCollection.outDir, 'collection.json')
+    : undefined;
+  const latestMergeQueuePath = latestCollection
+    ? latestCollection.artifacts?.hierarchicalMergeQueuePath ?? path.join(latestCollection.outDir, 'hierarchical-merge-queue.json')
+    : undefined;
+  const latestSourceHeads = compactArtifactPaths([input.currentHead]);
+  const terminalJobIds = new Set(input.terminalJobIds);
+  const blockedJobIds = new Set(input.blockedJobIds);
+  const decisions = latestDashboardAutonomousDecisions(input.iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
+  const resolvedQueueKeys = new Set(decisions
+    .filter((decision) => decision.status === 'applied' || decision.status === 'committed')
+    .flatMap(dashboardAutonomousDecisionQueueKeys));
+  const decisionLogPathById = new Map<string, string>();
+  for (const iteration of input.iterations) {
+    for (const decision of iteration.apply?.decisions ?? []) {
+      if (iteration.apply?.decisionLogPath) decisionLogPathById.set(decision.id, iteration.apply.decisionLogPath);
+    }
+  }
+
+  if (latestCollection) {
+    const entriesByJobId = collectionEntriesByJobId(latestCollection);
+    const assignments = latestCollection.hierarchicalMergeQueue?.assignments ?? [];
+    const assignmentsByJobId = new Map(assignments.map((assignment) => [assignment.jobId, assignment]));
+    for (const entry of latestCollection.buckets['stale-against-head']) {
+      const record = autoDrainGroupingRecord(entry);
+      if (!record.patchPath || !record.changedPaths.length) continue;
+      const subject = { jobId: record.jobId, taskId: record.taskId, queueItemIds: record.queueItemIds };
+      if (!dashboardQueueSubjectIsOpen(subject, terminalJobIds, blockedJobIds, resolvedQueueKeys)) continue;
+      const assignment = assignmentsByJobId.get(record.jobId);
+      mergeAutoDrainRerunCandidate(candidates, subject, {
+        jobId: record.jobId,
+        taskId: record.taskId,
+        lane: record.lane,
+        queueItemIds: record.queueItemIds,
+        sourceKinds: assignment?.action === 'rerun' ? ['stale-against-head', 'queue-rerun'] : ['stale-against-head'],
+        reasons: uniqueStrings(['stale-against-head', ...entry.bundle.reasons, ...(assignment?.reasons ?? [])]),
+        sourceHeads: latestSourceHeads,
+        sourcePatchPaths: autoDrainRerunPatchPathsForEntry(entry, record),
+        sourceBundlePaths: autoDrainRerunBundlePathsForEntry(entry),
+        sourceCollectionPaths: latestCollectionPath ? [latestCollectionPath] : [],
+        sourceMergeQueuePaths: latestMergeQueuePath ? [latestMergeQueuePath] : [],
+        evidencePaths: entry.bundle.evidencePaths,
+        targetRefs: record.changedPaths,
+        changedRegions: record.changedRegions,
+        allowedWrites: entry.bundle.allowedWrites,
+        queueActions: assignment ? [assignment.action] : [],
+        conflictingJobIds: assignment?.conflictingJobIds ?? [],
+        scopeIds: assignment ? [assignment.scopeId] : [],
+        leaseKeys: assignment ? [assignment.leaseKey] : []
+      });
+    }
+    for (const assignment of assignments.filter((entry) => entry.action === 'rerun')) {
+      if (!dashboardQueueSubjectIsOpen(assignment, terminalJobIds, blockedJobIds, resolvedQueueKeys)) continue;
+      const entry = entriesByJobId.get(assignment.jobId);
+      if (!entry) continue;
+      const record = autoDrainGroupingRecord(entry);
+      if (!record.patchPath || !assignment.changedPaths.length) continue;
+      mergeAutoDrainRerunCandidate(candidates, assignment, {
+        jobId: assignment.jobId,
+        taskId: assignment.taskId ?? record.taskId,
+        lane: assignment.lane ?? record.lane,
+        title: assignment.title,
+        queueItemIds: assignment.queueItemIds.length ? assignment.queueItemIds : record.queueItemIds,
+        sourceKinds: ['queue-rerun'],
+        reasons: uniqueStrings(['queue-rerun', ...assignment.reasons]),
+        sourceHeads: latestSourceHeads,
+        sourcePatchPaths: autoDrainRerunPatchPathsForEntry(entry, record),
+        sourceBundlePaths: autoDrainRerunBundlePathsForEntry(entry),
+        sourceCollectionPaths: latestCollectionPath ? [latestCollectionPath] : [],
+        sourceMergeQueuePaths: latestMergeQueuePath ? [latestMergeQueuePath] : [],
+        evidencePaths: entry.bundle.evidencePaths,
+        targetRefs: assignment.changedPaths,
+        changedRegions: assignment.changedRegions,
+        allowedWrites: entry.bundle.allowedWrites,
+        queueActions: [assignment.action],
+        conflictingJobIds: assignment.conflictingJobIds,
+        scopeIds: [assignment.scopeId],
+        leaseKeys: [assignment.leaseKey]
+      });
+    }
+  }
+
+  for (const decision of decisions.filter((entry) => entry.status === 'conflict-blocked' || entry.status === 'rerun')) {
+    if (!decision.patchPath || !decision.changedPaths.length) continue;
+    const sourceKind: FrontierCodexAutoDrainRerunSourceKind = decision.status === 'conflict-blocked' ? 'conflict-blocked' : 'decision-rerun';
+    mergeAutoDrainRerunCandidate(candidates, decision, {
+      jobId: decision.jobId,
+      taskId: decision.taskId,
+      queueItemIds: decision.queueItemIds.length ? decision.queueItemIds : [decision.taskId ?? decision.jobId],
+      sourceKinds: [sourceKind],
+      reasons: uniqueStrings([decision.status, decision.reason]),
+      sourceHeads: compactArtifactPaths([sourceHeadForAutonomousDecision(decision)]),
+      sourcePatchPaths: [decision.patchPath],
+      sourceBundlePaths: [decision.bundlePath],
+      sourceDecisionLogPaths: compactArtifactPaths([decisionLogPathById.get(decision.id)]),
+      targetRefs: decision.changedPaths,
+      changedRegions: decision.changedRegions,
+      decisionStatuses: [decision.status],
+      conflictHeadBefore: compactArtifactPaths([decision.headBefore]),
+      conflictHeadAfter: compactArtifactPaths([decision.headAfter])
+    });
+  }
+
+  const tasks = Array.from(candidates.values())
+    .filter((candidate) => candidate.sourcePatchPaths.length > 0 && candidate.targetRefs.length > 0)
+    .sort((left, right) => autoDrainRerunTaskSubject(left).localeCompare(autoDrainRerunTaskSubject(right)))
+    .map((candidate) => createAutoDrainRerunTask(candidate, input));
+  const sourceHeads = compactArtifactPaths(tasks.flatMap((task) => task.metadata.rerun.sourceHeads)).sort();
+  const sourcePatchPaths = compactArtifactPaths(tasks.flatMap((task) => task.metadata.rerun.sourcePatchPaths));
+  const targetRefs = uniqueWorkspacePaths(tasks.flatMap((task) => task.targetRefs)).sort();
+  const taskIds = uniqueStrings(tasks.map((task) => task.metadata.rerun.originalTaskId ?? task.id)).sort();
+  const jobIds = uniqueStrings(tasks.map((task) => task.metadata.rerun.originalJobId)).sort();
+  const summary = {
+    taskCount: tasks.length,
+    conflictBlockedCount: tasks.filter((task) => task.metadata.rerun.sourceKinds.includes('conflict-blocked')).length,
+    decisionRerunCount: tasks.filter((task) => task.metadata.rerun.sourceKinds.includes('decision-rerun')).length,
+    staleAgainstHeadCount: tasks.filter((task) => task.metadata.rerun.sourceKinds.includes('stale-against-head')).length,
+    queueRerunCount: tasks.filter((task) => task.metadata.rerun.sourceKinds.includes('queue-rerun')).length,
+    sourceHeadCount: sourceHeads.length,
+    sourcePatchCount: sourcePatchPaths.length,
+    targetRefCount: targetRefs.length
+  };
+  return {
+    kind: FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
+    version: FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION,
+    id: `frontier-swarm-codex-rerun-manifest:${stableHash([input.outDir, input.currentHead, tasks.map((task) => task.metadata.rerun)])}`,
+    ...(latestCollection?.mergeIndex.runId ? { runId: latestCollection.mergeIndex.runId } : {}),
+    path: input.manifestPath,
+    outDir: input.outDir,
+    sourceAutoDrainPath: input.autoDrainPath,
+    generatedAt: input.generatedAt,
+    ...(input.currentHead ? { currentHead: input.currentHead } : {}),
+    ...(sourceHeads.length === 1 ? { sourceHead: sourceHeads[0] } : {}),
+    sourceHeads,
+    items: tasks,
+    sourcePatchPaths,
+    targetRefs,
+    taskIds,
+    jobIds,
+    summary
+  };
+}
+
+function mergeAutoDrainRerunCandidate(
+  candidates: Map<string, AutoDrainRerunCandidate>,
+  subject: { jobId: string; taskId?: string; queueItemIds?: readonly string[] },
+  input: Partial<AutoDrainRerunCandidate> & { jobId: string }
+): void {
+  const key = dashboardQueueSubjectKeys(subject)[0] ?? `job:${input.jobId}`;
+  const existing = candidates.get(key);
+  const base: AutoDrainRerunCandidate = existing ?? {
+    jobId: input.jobId,
+    taskId: input.taskId,
+    lane: input.lane,
+    title: input.title,
+    queueItemIds: [],
+    sourceKinds: [],
+    reasons: [],
+    sourceHeads: [],
+    sourcePatchPaths: [],
+    sourceBundlePaths: [],
+    sourceCollectionPaths: [],
+    sourceMergeQueuePaths: [],
+    sourceDecisionLogPaths: [],
+    evidencePaths: [],
+    targetRefs: [],
+    changedRegions: [],
+    allowedWrites: [],
+    queueActions: [],
+    decisionStatuses: [],
+    conflictHeadBefore: [],
+    conflictHeadAfter: [],
+    conflictingJobIds: [],
+    scopeIds: [],
+    leaseKeys: [],
+    generatedAt: input.generatedAt ?? Date.now()
+  };
+  const sourceHeads = compactArtifactPaths([...base.sourceHeads, ...(input.sourceHeads ?? [])]).sort();
+  candidates.set(key, {
+    ...base,
+    taskId: base.taskId ?? input.taskId,
+    lane: base.lane ?? input.lane,
+    title: base.title ?? input.title,
+    queueItemIds: uniqueStrings([...base.queueItemIds, ...(input.queueItemIds ?? [])]).sort(),
+    sourceKinds: uniqueStrings([...base.sourceKinds, ...(input.sourceKinds ?? [])]) as FrontierCodexAutoDrainRerunSourceKind[],
+    reasons: uniqueStrings([...base.reasons, ...(input.reasons ?? [])]).sort(),
+    sourceHead: sourceHeads.length === 1 ? sourceHeads[0] : undefined,
+    sourceHeads,
+    sourcePatchPaths: compactArtifactPaths([...base.sourcePatchPaths, ...(input.sourcePatchPaths ?? [])]).sort(),
+    sourceBundlePaths: compactArtifactPaths([...base.sourceBundlePaths, ...(input.sourceBundlePaths ?? [])]).sort(),
+    sourceCollectionPaths: compactArtifactPaths([...base.sourceCollectionPaths, ...(input.sourceCollectionPaths ?? [])]).sort(),
+    sourceMergeQueuePaths: compactArtifactPaths([...base.sourceMergeQueuePaths, ...(input.sourceMergeQueuePaths ?? [])]).sort(),
+    sourceDecisionLogPaths: compactArtifactPaths([...base.sourceDecisionLogPaths, ...(input.sourceDecisionLogPaths ?? [])]).sort(),
+    evidencePaths: compactArtifactPaths([...base.evidencePaths, ...(input.evidencePaths ?? [])]).slice(0, 100),
+    targetRefs: uniqueWorkspacePaths([...base.targetRefs, ...(input.targetRefs ?? [])]).sort(),
+    changedRegions: uniqueStrings([...base.changedRegions, ...(input.changedRegions ?? [])]).sort(),
+    allowedWrites: uniqueWorkspacePaths([...base.allowedWrites, ...(input.allowedWrites ?? [])]).sort(),
+    queueActions: uniqueStrings([...base.queueActions, ...(input.queueActions ?? [])]) as FrontierSwarmMergeQueueAssignmentAction[],
+    decisionStatuses: uniqueStrings([...base.decisionStatuses, ...(input.decisionStatuses ?? [])]) as FrontierCodexAutonomousDecisionStatus[],
+    conflictHeadBefore: compactArtifactPaths([...base.conflictHeadBefore, ...(input.conflictHeadBefore ?? [])]).sort(),
+    conflictHeadAfter: compactArtifactPaths([...base.conflictHeadAfter, ...(input.conflictHeadAfter ?? [])]).sort(),
+    conflictingJobIds: uniqueStrings([...base.conflictingJobIds, ...(input.conflictingJobIds ?? [])]).sort(),
+    scopeIds: uniqueStrings([...base.scopeIds, ...(input.scopeIds ?? [])]).sort(),
+    leaseKeys: uniqueStrings([...base.leaseKeys, ...(input.leaseKeys ?? [])]).sort()
+  });
+}
+
+function createAutoDrainRerunTask(
+  candidate: AutoDrainRerunCandidate,
+  input: {
+    autoDrainPath: string;
+    generatedAt: number;
+    currentHead?: string;
+  }
+): FrontierCodexAutoDrainRerunTask {
+  const originalTaskId = candidate.taskId ?? candidate.queueItemIds[0] ?? candidate.jobId;
+  const id = autoDrainRerunTaskId(originalTaskId);
+  const targetRefs = uniqueWorkspacePaths(candidate.targetRefs).sort();
+  const sourceKinds = uniqueStrings(candidate.sourceKinds) as FrontierCodexAutoDrainRerunSourceKind[];
+  const sourceHeads = compactArtifactPaths(candidate.sourceHeads).sort();
+  const reasonLabel = sourceKinds.includes('conflict-blocked')
+    ? 'current-head conflict'
+    : sourceKinds.includes('decision-rerun')
+      ? 'autonomous rerun decision'
+      : 'stale-against-head queue debt';
+  const sourceRefs = compactArtifactPaths([
+    ...candidate.sourcePatchPaths,
+    ...candidate.sourceBundlePaths,
+    ...candidate.sourceDecisionLogPaths,
+    ...candidate.sourceCollectionPaths,
+    ...candidate.sourceMergeQueuePaths
+  ]);
+  const rerun: FrontierCodexAutoDrainRerunTaskMetadata = {
+    source: FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
+    sourceAutoDrainPath: input.autoDrainPath,
+    sourceCollectionPaths: [...candidate.sourceCollectionPaths],
+    sourceMergeQueuePaths: [...candidate.sourceMergeQueuePaths],
+    sourceDecisionLogPaths: [...candidate.sourceDecisionLogPaths],
+    originalJobId: candidate.jobId,
+    ...(candidate.taskId ? { originalTaskId: candidate.taskId } : {}),
+    queueItemIds: candidate.queueItemIds.length ? [...candidate.queueItemIds] : [originalTaskId],
+    sourceKinds,
+    reasons: [...candidate.reasons],
+    ...(input.currentHead ? { currentHead: input.currentHead } : {}),
+    ...(sourceHeads.length === 1 ? { sourceHead: sourceHeads[0] } : {}),
+    sourceHeads,
+    sourcePatchPaths: [...candidate.sourcePatchPaths],
+    sourceBundlePaths: [...candidate.sourceBundlePaths],
+    evidencePaths: [...candidate.evidencePaths],
+    targetRefs,
+    changedRegions: [...candidate.changedRegions],
+    queueActions: uniqueStrings(candidate.queueActions) as FrontierSwarmMergeQueueAssignmentAction[],
+    decisionStatuses: uniqueStrings(candidate.decisionStatuses) as FrontierCodexAutonomousDecisionStatus[],
+    conflictHeadBefore: [...candidate.conflictHeadBefore],
+    conflictHeadAfter: [...candidate.conflictHeadAfter],
+    conflictingJobIds: [...candidate.conflictingJobIds],
+    scopeIds: [...candidate.scopeIds],
+    leaseKeys: [...candidate.leaseKeys],
+    generatedAt: input.generatedAt
+  };
+  return {
+    id,
+    title: `Rerun ${originalTaskId}`,
+    objective: `Rerun ${originalTaskId} against ${input.currentHead ? `current head ${input.currentHead}` : 'the current checkout'} after ${reasonLabel}.`,
+    kind: 'agent-task',
+    status: 'todo',
+    ...(candidate.lane ? { lane: candidate.lane } : {}),
+    sourceRefs,
+    targetRefs,
+    allowedWrites: candidate.allowedWrites.length ? uniqueWorkspacePaths(candidate.allowedWrites).sort() : targetRefs,
+    changedRegions: [...candidate.changedRegions],
+    tags: uniqueStrings(['auto-drain-rerun', ...sourceKinds.map((kind) => `auto-drain-${kind}`)]),
+    metadata: {
+      source: FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
+      rerun
+    }
+  };
+}
+
+function autoDrainRerunPatchPathsForEntry(entry: FrontierCodexCollectedBundle, record: AutoDrainGroupingRecord): string[] {
+  return compactArtifactPaths([
+    record.patchPath,
+    record.patchPath ? path.join(entry.outputDir, 'changes.patch') : undefined
+  ]);
+}
+
+function autoDrainRerunBundlePathsForEntry(entry: FrontierCodexCollectedBundle): string[] {
+  return compactArtifactPaths([
+    entry.mergePath,
+    path.join(entry.outputDir, 'merge.json')
+  ]);
+}
+
+function autoDrainRerunTaskSubject(candidate: AutoDrainRerunCandidate): string {
+  return candidate.taskId ?? candidate.queueItemIds[0] ?? candidate.jobId;
+}
+
+function autoDrainRerunTaskId(taskId: string): string {
+  const rerunSuffix = 'rerun-current-head';
+  return slug(taskId.endsWith(`-${rerunSuffix}`) ? taskId : `${taskId}-${rerunSuffix}`);
+}
+
+function sourceHeadForAutonomousDecision(decision: FrontierCodexAutonomousMergeDecision): string | undefined {
+  return decision.status === 'rerun'
+    ? decision.headAfter ?? decision.headBefore
+    : decision.headBefore ?? decision.headAfter;
+}
+
+async function readCurrentGitHead(cwd: string): Promise<string | undefined> {
+  const result = await runProcess('git', ['rev-parse', 'HEAD'], { cwd, allowFailure: true });
+  const head = result.stdout.trim();
+  return result.status === 0 && /^[0-9a-f]{40}$/.test(head) ? head : undefined;
 }
 
 function compactArtifactPaths(paths: readonly (string | undefined)[]): string[] {
