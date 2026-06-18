@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { createWriteStream, type WriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import {
   FRONTIER_SWARM_DEFAULT_MODEL,
   FRONTIER_SWARM_DEFAULT_REASONING_EFFORT,
@@ -169,6 +171,7 @@ const DEFAULT_SEMANTIC_IMPORT_MAX_BYTES = 512 * 1024;
 const SEMANTIC_IMPORT_MAX_STRING_CHARS = 2048;
 const SEMANTIC_IMPORT_MAX_OBJECT_KEYS = 24;
 const SEMANTIC_IMPORT_MAX_ARRAY_ITEMS = 50;
+const CODEX_EVENT_METRICS_MAX_LINE_CHARS = 1024 * 1024;
 const AUTONOMOUS_APPLY_REPO_LOCK_KEY = 'repo:*';
 const SUPPORTED_CODEX_MODEL_BY_NORMALIZED = new Map(
   FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.map((model) => [model.toLowerCase(), model])
@@ -3576,14 +3579,39 @@ export function renderCodexPrompt(
 }
 
 export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Promise<FrontierCodexExecutorResult> {
-  await fs.writeFile(input.paths.eventsPath, '');
-  await fs.writeFile(input.paths.stderrPath, '');
+  await fs.mkdir(path.dirname(input.paths.eventsPath), { recursive: true });
+  await fs.mkdir(path.dirname(input.paths.stderrPath), { recursive: true });
+  const eventMetrics = codexEventMetrics();
+  const eventsStream = createWriteStream(input.paths.eventsPath, { flags: 'w' });
+  const stderrStream = createWriteStream(input.paths.stderrPath, { flags: 'w' });
   return new Promise((resolve) => {
+    let settled = false;
+    let streamError: Error | undefined;
     const child = spawn(input.codexPath, input.args, {
       cwd: input.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...input.env }
     });
+    let timer: NodeJS.Timeout;
+    const settle = async (result: FrontierCodexExecutorResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      await Promise.all([finishWriteStream(eventsStream), finishWriteStream(stderrStream)]);
+      const metrics = eventMetrics.finish();
+      resolve({
+        ...result,
+        lastMessage: result.lastMessage ?? await readOptionalText(input.paths.lastMessagePath),
+        ...(streamError && !result.error ? { error: streamError } : {}),
+        ...(metrics ? { metrics } : {})
+      });
+    };
+    const onStreamError = (error: Error) => {
+      streamError = streamError ?? error;
+      child.kill('SIGTERM');
+    };
+    eventsStream.on('error', onStreamError);
+    stderrStream.on('error', onStreamError);
     if (child.pid) {
       appendCodexPidManifest(input.paths.pidManifestPath, {
         pid: child.pid,
@@ -3593,23 +3621,21 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
         command: [input.codexPath, ...input.args]
       }).catch(() => {});
     }
-    const timer = setTimeout(() => child.kill('SIGTERM'), input.timeoutMs);
-    child.stdout.on('data', (chunk: Buffer) => fs.appendFile(input.paths.eventsPath, chunk).catch(() => {}));
-    child.stderr.on('data', (chunk: Buffer) => fs.appendFile(input.paths.stderrPath, chunk).catch(() => {}));
+    timer = setTimeout(() => child.kill('SIGTERM'), input.timeoutMs);
+    child.stdout.on('data', (chunk: Buffer) => {
+      eventMetrics.push(chunk);
+      writeChildLogChunk(eventsStream, chunk, child.stdout);
+    });
+    child.stderr.on('data', (chunk: Buffer) => writeChildLogChunk(stderrStream, chunk, child.stderr));
     child.stdin.end(input.prompt);
-    child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
-      clearTimeout(timer);
-      const metrics = extractCodexRunMetricsFromEventText(await readOptionalText(input.paths.eventsPath) ?? '');
-      resolve({
-        exitCode: code ?? 1,
-        ...(signal ? { signal } : {}),
-        lastMessage: await readOptionalText(input.paths.lastMessagePath),
-        ...(metrics ? { metrics } : {})
-      });
+    child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+      settle({
+        exitCode: streamError ? 1 : code ?? 1,
+        ...(signal ? { signal } : {})
+      }).catch(() => {});
     });
     child.on('error', (error: Error) => {
-      clearTimeout(timer);
-      resolve({ exitCode: 1, error });
+      settle({ exitCode: 1, error }).catch(() => {});
     });
   });
 }
@@ -6888,33 +6914,105 @@ function readCodexCostEstimate(metadata: unknown): FrontierCodexRunCostEstimate 
 }
 
 function extractCodexRunMetricsFromEventText(text: string): FrontierCodexRunMetricsInput | undefined {
+  const metrics = codexEventMetrics();
+  metrics.push(text);
+  return metrics.finish();
+}
+
+interface CodexEventMetricsAccumulator {
+  push(chunk: Buffer | string): void;
+  finish(): FrontierCodexRunMetricsInput | undefined;
+}
+
+function codexEventMetrics(): CodexEventMetricsAccumulator {
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  let droppingLongLine = false;
   let latest: FrontierCodexRunMetrics | undefined;
-  for (const line of text.split(/\r?\n/)) {
+  const processLine = (line: string) => {
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed || !mightContainCodexMetric(trimmed)) return;
     let parsed: unknown;
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      continue;
+      return;
     }
     for (const candidate of collectCodexRunMetricCandidates(parsed)) {
       const metrics = normalizeCodexRunMetrics(candidate);
       if (metrics.hasTokenUsage) latest = metrics;
     }
-  }
-  return latest;
+  };
+  const appendText = (text: string) => {
+    let start = 0;
+    while (start < text.length) {
+      const newline = text.indexOf('\n', start);
+      const end = newline === -1 ? text.length : newline;
+      const segment = text.slice(start, end);
+      if (!droppingLongLine) {
+        if (pending.length + segment.length <= CODEX_EVENT_METRICS_MAX_LINE_CHARS) {
+          pending += segment;
+        } else {
+          pending = '';
+          droppingLongLine = true;
+        }
+      }
+      if (newline === -1) break;
+      if (!droppingLongLine) processLine(pending);
+      pending = '';
+      droppingLongLine = false;
+      start = newline + 1;
+    }
+  };
+  return {
+    push(chunk: Buffer | string) {
+      appendText(typeof chunk === 'string' ? chunk : decoder.write(chunk));
+    },
+    finish() {
+      const tail = decoder.end();
+      if (tail) appendText(tail);
+      if (pending && !droppingLongLine) processLine(pending);
+      pending = '';
+      droppingLongLine = false;
+      return latest;
+    }
+  };
+}
+
+function mightContainCodexMetric(line: string): boolean {
+  return /token|usage|metrics|run_metrics/i.test(line);
+}
+
+function writeChildLogChunk(stream: WriteStream, chunk: Buffer, source: NodeJS.ReadableStream): void {
+  if (stream.destroyed) return;
+  if (stream.write(chunk)) return;
+  source.pause();
+  stream.once('drain', () => source.resume());
+}
+
+async function finishWriteStream(stream: WriteStream): Promise<void> {
+  if (stream.destroyed) return;
+  await new Promise<void>((resolve) => stream.end(resolve));
 }
 
 function collectCodexRunMetricCandidates(value: unknown, depth = 0): FrontierCodexRunMetricsInput[] {
   if (!isObject(value) || depth > 5) return [];
   const candidates: FrontierCodexRunMetricsInput[] = [];
-  if (hasCodexTokenCounterField(value)) candidates.push(value as FrontierCodexRunMetricsInput);
+  if (hasCodexTokenCounterCandidate(value)) candidates.push(value as FrontierCodexRunMetricsInput);
   for (const key of ['usage', 'tokenUsage', 'token_usage', 'metrics', 'runMetrics', 'run_metrics', 'data', 'message', 'response', 'result']) {
     const child = value[key];
     if (isObject(child)) candidates.push(...collectCodexRunMetricCandidates(child, depth + 1));
   }
   return candidates;
+}
+
+function hasCodexTokenCounterCandidate(value: Record<string, unknown>): boolean {
+  if (hasCodexTokenCounterField(value)) return true;
+  for (const key of ['usage', 'tokenUsage', 'token_usage', 'metrics', 'runMetrics', 'run_metrics']) {
+    const child = value[key];
+    if (isObject(child) && hasCodexTokenCounterField(child)) return true;
+  }
+  return false;
 }
 
 function hasCodexTokenCounterField(value: Record<string, unknown>): boolean {

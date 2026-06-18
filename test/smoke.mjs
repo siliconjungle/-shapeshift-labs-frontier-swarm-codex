@@ -32,6 +32,7 @@ import {
   renderCodexPrompt,
   runCodexSwarm,
   scoreCodexSwarmPatches,
+  spawnCodexExecutor,
   stopCodexSwarmRun,
   writeSwarmCoordinatorSnapshot
 } from '../dist/index.js';
@@ -225,6 +226,56 @@ const copyArgs = buildCodexArgs(plan.jobs[0], {
   workspace: { mode: 'copy' }
 });
 assert.ok(copyArgs.includes('--skip-git-repo-check'));
+
+const compactLogCodexPath = path.join(tmp, 'fake-codex-compact-log.mjs');
+await fs.writeFile(compactLogCodexPath, `#!/usr/bin/env node
+import fs from 'node:fs';
+
+const lastMessageIndex = process.argv.indexOf('--output-last-message');
+const lastMessagePath = lastMessageIndex >= 0 ? process.argv[lastMessageIndex + 1] : '';
+process.stdin.resume();
+process.stdin.on('end', () => {
+  if (lastMessagePath) fs.writeFileSync(lastMessagePath, 'compact done\\n');
+  const filler = 'x'.repeat(4096);
+  for (let index = 0; index < 512; index += 1) {
+    process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'noise-' + index, text: filler } }) + '\\n');
+  }
+  process.stdout.write(JSON.stringify({
+    type: 'run.metrics',
+    usage: { input_tokens: 1200, cached_input_tokens: 200, output_tokens: 300 },
+    model: 'gpt-5.5'
+  }) + '\\n');
+  process.stderr.write('stderr log retained\\n');
+});
+`);
+await fs.chmod(compactLogCodexPath, 0o755);
+const compactLogPaths = {
+  ...paths,
+  eventsPath: path.join(tmp, 'compact-events.jsonl'),
+  stderrPath: path.join(tmp, 'compact-stderr.log'),
+  lastMessagePath: path.join(tmp, 'compact-last.md'),
+  pidManifestPath: path.join(tmp, 'compact-pids.json')
+};
+const compactLogRun = await spawnCodexExecutor({
+  job: plan.jobs[0],
+  prompt: 'compact log prompt',
+  args: buildCodexArgs(plan.jobs[0], { outDir: tmp, workspacePath: tmp, paths: compactLogPaths }),
+  cwd: tmp,
+  workspacePath: tmp,
+  codexPath: compactLogCodexPath,
+  paths: compactLogPaths,
+  resourceAllocation: createCodexResourceAllocation(plan.jobs[0], { cwd: tmp, outDir: tmp, workspacePath: tmp }),
+  env: {},
+  timeoutMs: 30000
+});
+assert.strictEqual(compactLogRun.exitCode, 0);
+assert.strictEqual(compactLogRun.metrics?.inputTokens, 1200);
+assert.strictEqual(compactLogRun.metrics?.cachedInputTokens, 200);
+assert.strictEqual(compactLogRun.metrics?.uncachedInputTokens, 1000);
+assert.strictEqual(compactLogRun.metrics?.outputTokens, 300);
+assert.strictEqual(compactLogRun.lastMessage, 'compact done\n');
+assert.ok((await fs.stat(compactLogPaths.eventsPath)).size > 1024 * 1024);
+assert.strictEqual(await fs.readFile(compactLogPaths.stderrPath, 'utf8'), 'stderr log retained\n');
 
 const prompt = renderCodexPrompt(plan.jobs[0], { workspacePath: tmp, paths });
 assert.ok(prompt.includes('Allowed write globs'));
