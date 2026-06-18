@@ -5,7 +5,7 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 ## Read Order
 
 1. Start with `swarm-results.json` for the top-level run result, worker run/proof payload, and embedded `autoDrain` and `autoDrainArtifacts` summaries.
-2. Read `coordinator-dashboard.json` when a UI needs the dashboard-shaped snapshot with lane counts, merge readiness counts, `queueMetadata`, `queueHealth`, `humanQuestions`, `operatorSummary`, proof, event stream, PID manifest path, and the same auto-drain summaries.
+2. Read `coordinator-dashboard.json` when a UI needs the dashboard-shaped snapshot with lane counts, merge readiness counts, `costSummary`, `queueMetadata`, `queueHealth`, `humanQuestions`, `operatorSummary`, proof, event stream, PID manifest path, and the same auto-drain summaries.
 3. Read `auto-drain/auto-drain.json` for the canonical auto-drain ledger, including every iteration, admission result, grouping result, apply result, lock summary, terminal jobs, blocked jobs, and aggregate counts.
 4. Use the `autoDrainArtifacts` object from either `swarm-results.json`, `coordinator-dashboard.json`, or `auto-drain/auto-drain.json` as the compact path index for per-iteration artifacts.
 5. Read `auto-drain/coordinator-agent-drain-work-NN.json` when a dashboard or coordinator agent needs the generic coordinator-agent work contract for one iteration: leases, queue assignments, terminal queue decisions, and promoted work.
@@ -17,7 +17,7 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 | Artifact | Scope | Primary consumers | Contents |
 | --- | --- | --- | --- |
 | `swarm-results.json` | Whole run | CI, coordinator handoff, dashboards that want one read | `{ ok, outDir, run, proof }` plus `autoDrain` and `autoDrainArtifacts` when auto-drain ran. |
-| `coordinator-dashboard.json` | Whole run | Dashboards and status views | Dashboard-normalized run summary, `byLane`, `mergeReadiness`, root `queueHealth`, `humanQuestions`, `operatorSummary`, proof, event stream metadata, PID manifest path, `autoDrain`, `queueMetadata`, and `autoDrainArtifacts`. |
+| `coordinator-dashboard.json` | Whole run | Dashboards and status views | Dashboard-normalized run summary, `byLane`, `mergeReadiness`, `costSummary`, root `queueHealth`, `humanQuestions`, `operatorSummary`, proof, event stream metadata, PID manifest path, `autoDrain`, `queueMetadata`, and `autoDrainArtifacts`. |
 | `auto-drain/auto-drain.json` | Whole auto-drain pass | Coordinators, auditors, resume/debug tooling | Canonical auto-drain result with `iterations`, `lockKeys`, `lockScopeCounts`, terminal and blocked job ids, `summary`, and `artifacts`. |
 | `auto-drain/merge-index.json` | Latest collection snapshot | Review dashboards | Convenience copy of the latest iteration's merge index. |
 | `auto-drain/merge-admission.json` | Latest collection snapshot | Merge admission views | Convenience copy of the latest iteration's admission decision set. |
@@ -27,6 +27,12 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 The top-level files under `auto-drain/` are summary or latest-snapshot reads. They are useful for dashboards that only need the current state after the run finishes. Use the numbered iteration directories when historical iteration state matters.
 
 When the coordinator checkout is dirty, auto-drain is collect-only. It still writes `swarm-results.json`, `coordinator-dashboard.json`, `auto-drain/auto-drain.json`, collection artifacts, merge admission, grouping, reviewer, patch-stack, queue metadata, and operator-summary artifacts. It intentionally skips `auto-drain/apply-NN/*` and reports `autoDrain.ok: false`, `autoDrain.skippedReason: "dirty-worktree"`, `autoDrain.dirtyPaths[]`, `autoDrain.summary.applyCount: 0`, and any remaining ready count. Dashboards should show this as queued coordinator work waiting for a clean apply window, not as missing data or a worker failure. Ready or promoted counts in this state are pending queue counts; they are not landed changes because there are no apply decisions.
+
+## Cost Summary
+
+`coordinator-dashboard.json.costSummary` has kind `frontier.swarm-codex.dashboard-cost-summary` and summarizes token/cost metadata recorded on worker results. It reports total input, cached input, uncached input, output, and total tokens; estimated USD cost; per-model totals in `byModel[]`; and `unknownPricing[]` rows for jobs that reported token usage but used a model outside the static exact-model pricing catalog. Unknown models are not treated as zero-cost work.
+
+The pricing catalog is intentionally separate from the Codex CLI supported-model catalog. Supported model IDs can be valid to forward to Codex while still producing `unknown-model-pricing` until their exact per-token price metadata is added to `FRONTIER_SWARM_CODEX_MODEL_PRICING`. Worker prompts include the known per-unit input, cached-input, output, and unit-token rates in their resource allocation section so humans and dashboard consumers can audit the estimate basis.
 
 ## Path Index
 

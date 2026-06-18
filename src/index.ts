@@ -6163,11 +6163,21 @@ function formatResourceAllocation(allocation: FrontierCodexResourceAllocation): 
     allocation.browser?.profileDir ? `browser.profileDir=${allocation.browser.profileDir}` : undefined,
     allocation.browser?.headless === undefined ? undefined : `browser.headless=${allocation.browser.headless}`,
     allocation.model ? `model=${allocation.model}` : undefined,
-    allocation.modelPricing ? `modelPricing=${allocation.modelPricing.model}` : undefined,
+    allocation.modelPricing ? formatModelPricingAllocation(allocation.modelPricing) : undefined,
     allocation.modelPricingUnknownReason ? `modelPricingUnknownReason=${allocation.modelPricingUnknownReason}` : undefined,
     Object.keys(allocation.env).length ? `env=${Object.keys(allocation.env).sort().join(',')}` : undefined
   ].filter((value): value is string => !!value);
   return entries.length ? entries : ['none'];
+}
+
+function formatModelPricingAllocation(pricing: FrontierCodexModelPricing): string {
+  return [
+    `modelPricing=${pricing.model}`,
+    `inputUsdPerUnit=${pricing.inputUsdPerUnit}`,
+    `cachedInputUsdPerUnit=${pricing.cachedInputUsdPerUnit}`,
+    `outputUsdPerUnit=${pricing.outputUsdPerUnit}`,
+    `unitTokens=${pricing.unitTokens}`
+  ].join(' ');
 }
 
 function resourceSlot(job: FrontierSwarmJob, lease: FrontierSwarmLease | undefined, count: number): number {

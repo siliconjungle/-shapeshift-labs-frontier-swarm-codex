@@ -12,6 +12,7 @@ import {
   coerceCodexSwarmTasksInput,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
+  FRONTIER_SWARM_CODEX_MODEL_PRICING,
   FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
   FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
   FRONTIER_SWARM_CODEX_SUPPORTED_MODELS,
@@ -21,6 +22,7 @@ import {
   estimateCodexRunCost,
   deriveCodexAutonomousApplyLockKeys,
   discoverCodexHandoffArtifacts,
+  getCodexModelPricing,
   normalizeCodexApprovalPolicy,
   normalizeCodexModelFlag,
   normalizeCodexRunMetrics,
@@ -204,6 +206,12 @@ assert.strictEqual(normalizedUncachedUsage.uncachedInputTokens, 700);
 const knownCost = estimateCodexRunCost(normalizedUsage);
 assert.strictEqual(knownCost.estimated, true);
 assert.strictEqual(knownCost.estimatedCostUsd, 0.0107);
+assert.strictEqual(FRONTIER_SWARM_CODEX_MODEL_PRICING['gpt-5.5'].inputUsdPerUnit, 5);
+assert.strictEqual(FRONTIER_SWARM_CODEX_MODEL_PRICING['gpt-5.5'].cachedInputUsdPerUnit, 0.5);
+assert.strictEqual(FRONTIER_SWARM_CODEX_MODEL_PRICING['gpt-5.5'].outputUsdPerUnit, 30);
+assert.strictEqual(FRONTIER_SWARM_CODEX_MODEL_PRICING['gpt-5.5'].unitTokens, 1000000);
+assert.strictEqual(getCodexModelPricing('GPT-5.5')?.model, 'gpt-5.5');
+assert.strictEqual(getCodexModelPricing('default'), undefined);
 const unknownCost = estimateCodexRunCost({ ...normalizedUsage, model: 'future-codex-model' });
 assert.strictEqual(unknownCost.estimated, false);
 assert.strictEqual(unknownCost.reason, 'unknown-model-pricing');
@@ -219,6 +227,7 @@ assert.ok(copyArgs.includes('--skip-git-repo-check'));
 const prompt = renderCodexPrompt(plan.jobs[0], { workspacePath: tmp, paths });
 assert.ok(prompt.includes('Allowed write globs'));
 assert.ok(prompt.includes('Resource allocation'));
+assert.ok(prompt.includes('modelPricing=gpt-5.5 inputUsdPerUnit=5 cachedInputUsdPerUnit=0.5 outputUsdPerUnit=30 unitTokens=1000000'));
 assert.ok(prompt.includes('src/runtime/action.ts'));
 assert.ok(prompt.includes('git status'));
 assert.ok(prompt.includes('runner snapshot'));
