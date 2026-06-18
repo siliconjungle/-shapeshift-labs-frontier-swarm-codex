@@ -333,6 +333,7 @@ assert.deepStrictEqual(
   [
     ['coordinator-queues', ['queueHealth.activeCoordinatorQueueCount', 'queueHealth.leaseCount', 'queueHealth.lockKeyCount']],
     ['applied-decisions', ['queueHealth.appliedDecisionCount', 'queueHealth.committedDecisionCount', 'queueHealth.recordOnlyCount']],
+    ['coordination-debt', ['queueHealth.currentHeadConflictCount', 'queueHealth.deferredCoordinatorCount', 'queueHealth.deferredPromoteCount']],
     ['stale-rerun', ['queueHealth.staleOrRerunCount', 'queueHealth.staleCount', 'queueHealth.rerunCount', 'queueHealth.conflictBlockedDecisionCount', 'queueHealth.conflictRetryWork']],
     ['true-blockers', ['queueHealth.trueBlockerCount', 'humanQuestions.count']],
     ['coordinator-review-artifacts', ['queueHealth.coordinatorReviewCount', 'queueHealth.coordinatorReviewAssignmentCount', 'queueHealth.coordinatorReviewTaskCount']]
@@ -800,6 +801,9 @@ assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.rejectCount, 0)
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.blockCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.conflictBlockedDecisionCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.currentHeadConflictCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.deferredCoordinatorCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.deferredPromoteCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.recordOnlyCount, 0);
 assert.deepStrictEqual(autoDrainDashboard.queueHealth, autoDrainDashboard.queueMetadata.queueHealth);
 assert.deepStrictEqual(autoDrainDashboard.humanQuestions, autoDrainDashboard.queueMetadata.humanQuestions);
@@ -821,6 +825,9 @@ assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.coordinatorDrain
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.currentHeadConflictCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.deferredCoordinatorCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.deferredPromoteCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.coordinatorReviewCount, autoDrainRun.autoDrainArtifacts.reviewer.taskCount);
 assert.ok(!Object.hasOwn(autoDrainDashboard.queueMetadata.queueHealth, 'humanReviewCount'));
 assert.ok(!Object.hasOwn(autoDrainDashboard.queueMetadata.queueHealth, 'humanPortCount'));
@@ -832,11 +839,16 @@ assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.available, t
 assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.status, 'ok');
 assert.match(autoDrainDashboard.queueMetadata.operatorSummary.headline, /1 autonomous decision applied/);
 assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 1);
+assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.counts.currentHeadConflicts, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.counts.deferredCoordinatorQueues, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.counts.deferredPromoteQueues, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
 const autoDrainOperatorCards = new Map(autoDrainDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
 assert.strictEqual(autoDrainOperatorCards.get('applied-decisions').value, 1);
 assert.strictEqual(autoDrainOperatorCards.get('applied-decisions').status, 'ok');
+assert.strictEqual(autoDrainOperatorCards.get('coordination-debt').value, 0);
+assert.strictEqual(autoDrainOperatorCards.get('coordination-debt').status, 'ok');
 assert.strictEqual(autoDrainOperatorCards.get('stale-rerun').value, 0);
 assert.strictEqual(autoDrainOperatorCards.get('true-blockers').value, 0);
 assert.strictEqual(autoDrainOperatorCards.get('true-blockers').status, 'ok');
@@ -1748,6 +1760,9 @@ const autoDrainConflictBlockedDashboard = JSON.parse(await fs.readFile(path.join
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.rerunCount, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.conflictBlockedDecisionCount, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.currentHeadConflictCount, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.deferredCoordinatorCount, 0);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.deferredPromoteCount, 0);
 assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueHealth, autoDrainConflictBlockedDashboard.queueMetadata.queueHealth);
 assert.deepStrictEqual(autoDrainConflictBlockedDashboard.humanQuestions, autoDrainConflictBlockedDashboard.queueMetadata.humanQuestions);
 assert.deepStrictEqual(autoDrainConflictBlockedDashboard.operatorSummary, autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary);
@@ -1756,6 +1771,9 @@ assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.r
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.staleOrRerunCount, 1);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.currentHeadConflictCount, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.deferredCoordinatorCount, 0);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.deferredPromoteCount, 0);
 assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork, autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.conflictRetryWork);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork.length, 1);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].jobId, autoDrainConflictBlockedDecision.jobId);
@@ -1766,10 +1784,16 @@ assert.ok(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].p
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.status, 'warning');
 assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /1 current-head conflict/);
 assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /coordinator retry work/);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.currentHeadConflicts, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.deferredCoordinatorQueues, 0);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.deferredPromoteQueues, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 1);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
 const autoDrainConflictBlockedCards = new Map(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
+assert.strictEqual(autoDrainConflictBlockedCards.get('coordination-debt').value, 1);
+assert.strictEqual(autoDrainConflictBlockedCards.get('coordination-debt').status, 'warning');
+assert.match(autoDrainConflictBlockedCards.get('coordination-debt').detail, /1 current-head conflict/);
 assert.strictEqual(autoDrainConflictBlockedCards.get('stale-rerun').value, 1);
 assert.strictEqual(autoDrainConflictBlockedCards.get('stale-rerun').status, 'warning');
 assert.match(autoDrainConflictBlockedCards.get('stale-rerun').detail, /retry queue conflict-blocked-task/);
@@ -1784,13 +1808,25 @@ Object.assign(collapsedDecisionArtifacts.grouping, { staleAgainstHeadCount: 1 })
 Object.assign(collapsedDecisionArtifacts.coordinatorAgentDrainWork, {
   count: 1,
   leaseCount: 1,
-  assignmentCount: 1,
+  assignmentCount: 2,
   terminalCount: 1,
+  nonTerminalCount: 1,
+  promotedWorkCount: 1,
+  escalatedCount: 1,
   rerunCount: 1
+});
+Object.assign(collapsedDecisionArtifacts.coordinatorAgent, {
+  count: 1,
+  assignmentCount: 2,
+  selectedCount: 1,
+  deferredCount: 1,
+  promoteCount: 1,
+  queueLocalCount: 0
 });
 Object.assign(collapsedDecisionArtifacts.mergeQueue, {
   count: 1,
   scopeCount: 1,
+  promoteCount: 1,
   rerunCount: 1
 });
 const collapsedDecisionAutoDrain = {
@@ -1828,17 +1864,31 @@ const collapsedDecisionAutoDrain = {
     coordinatorAgentDrainWork: {
       summary: {
         leaseCount: 1,
-        assignmentCount: 1,
+        assignmentCount: 2,
         terminalCount: 1,
-        nonTerminalCount: 0,
-        promotedWorkCount: 0,
+        nonTerminalCount: 1,
+        promotedWorkCount: 1,
         appliedCount: 0,
         queuedCount: 0,
-        escalatedCount: 0,
+        escalatedCount: 1,
         rerunCount: 1,
         rejectedCount: 0,
         recordedCount: 0,
         blockedCount: 0
+      }
+    },
+    coordinatorAgentDrain: {
+      summary: {
+        assignmentCount: 2,
+        selectedCount: 1,
+        deferredCount: 1,
+        applyLocalCount: 0,
+        queueLocalCount: 0,
+        promoteCount: 1,
+        selectedQueueLocalCount: 0,
+        selectedPromoteCount: 0,
+        deferredPromoteCount: 1,
+        scopeCount: 1
       }
     },
     apply: {
@@ -1923,18 +1973,35 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committe
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.rerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.currentHeadConflictCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.selectedCoordinatorCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.deferredCoordinatorCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.selectedPromoteCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.deferredPromoteCount, 1);
 assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictRetryWork, []);
 assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.conflictRetryWork, []);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.promoteCount, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.rerunCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.currentHeadConflictCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.deferredCoordinatorCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.deferredPromoteCount, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.humanQuestions.count, 0);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.status, 'ok');
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.status, 'warning');
+assert.match(collapsedDecisionDashboard.queueMetadata.operatorSummary.headline, /1 deferred coordinator assignment/);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.currentHeadConflicts, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.deferredCoordinatorQueues, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.deferredPromoteQueues, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
 const collapsedDecisionCards = new Map(collapsedDecisionDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
 assert.strictEqual(collapsedDecisionCards.get('applied-decisions').value, 2);
+assert.strictEqual(collapsedDecisionCards.get('coordination-debt').value, 1);
+assert.strictEqual(collapsedDecisionCards.get('coordination-debt').status, 'warning');
+assert.match(collapsedDecisionCards.get('coordination-debt').detail, /1 deferred promotion/);
 assert.strictEqual(collapsedDecisionCards.get('stale-rerun').value, 0);
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').value, 0);
 

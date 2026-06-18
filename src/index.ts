@@ -1147,6 +1147,9 @@ export interface FrontierCodexDashboardQueueMetadata {
     blockCount: number;
     trueBlockerCount: number;
     conflictBlockedDecisionCount: number;
+    currentHeadConflictCount: number;
+    deferredCoordinatorCount: number;
+    deferredPromoteCount: number;
     recordOnlyCount: number;
   };
   conflictRetryWork: FrontierCodexDashboardConflictRetryWork[];
@@ -1215,6 +1218,11 @@ export interface FrontierCodexDashboardQueueHealth {
   staleCount: number;
   rerunCount: number;
   conflictBlockedDecisionCount: number;
+  currentHeadConflictCount: number;
+  selectedCoordinatorCount: number;
+  deferredCoordinatorCount: number;
+  selectedPromoteCount: number;
+  deferredPromoteCount: number;
   conflictRetryWork: FrontierCodexDashboardConflictRetryWork[];
   trueBlockerCount: number;
   rejectedCount: number;
@@ -1314,6 +1322,9 @@ export interface FrontierCodexDashboardOperatorQueueSummary {
     coordinatorQueues: number;
     leases: number;
     appliedDecisions: number;
+    currentHeadConflicts: number;
+    deferredCoordinatorQueues: number;
+    deferredPromoteQueues: number;
     staleOrRerun: number;
     trueBlockers: number;
     humanQuestions: number;
@@ -3689,9 +3700,10 @@ function createDashboardQueueMetadata(
   const staleCount = unresolvedPressure.staleCount;
   const queueRerunCount = unresolvedPressure.queueRerunCount;
   const rerunCount = queueRerunCount + decisionSummary.rerunDecisionCount;
+  const currentHeadConflictCount = decisionSummary.conflictBlockedDecisionCount;
   const staleOrRerunCount = Math.max(staleCount, queueRerunCount)
     + decisionSummary.rerunDecisionCount
-    + decisionSummary.conflictBlockedDecisionCount;
+    + currentHeadConflictCount;
   const humanQuestions = createDashboardHumanQuestions(autoDrain, decisionSummary);
   const conflictRetryWork = decisionSummary.conflictRetryWork;
   const queueHealth: FrontierCodexDashboardQueueHealth = {
@@ -3710,7 +3722,12 @@ function createDashboardQueueMetadata(
     staleOrRerunCount,
     staleCount,
     rerunCount,
-    conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount,
+    conflictBlockedDecisionCount: currentHeadConflictCount,
+    currentHeadConflictCount,
+    selectedCoordinatorCount: activePressure.selectedCoordinatorCount,
+    deferredCoordinatorCount: activePressure.deferredCoordinatorCount,
+    selectedPromoteCount: activePressure.selectedPromoteCount,
+    deferredPromoteCount: activePressure.deferredPromoteCount,
     conflictRetryWork,
     trueBlockerCount: actionCounts.trueBlockerCount,
     rejectedCount: actionCounts.rejectCount,
@@ -3742,7 +3759,10 @@ function createDashboardQueueMetadata(
     coordinatorAgentDrainWork,
     actionCounts: {
       ...actionCounts,
-      conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount
+      conflictBlockedDecisionCount: currentHeadConflictCount,
+      currentHeadConflictCount,
+      deferredCoordinatorCount: activePressure.deferredCoordinatorCount,
+      deferredPromoteCount: activePressure.deferredPromoteCount
     },
     conflictRetryWork,
     bucketCounts: {
@@ -3784,7 +3804,7 @@ function createDashboardQueueActionCounts(
   artifacts: FrontierCodexAutoDrainArtifactMetadata | null,
   coordinatorAgentDrainWork: FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata,
   autoDrain: FrontierCodexSwarmAutoDrainResult | null
-): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> {
+): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount' | 'currentHeadConflictCount' | 'deferredCoordinatorCount' | 'deferredPromoteCount'> {
   const historicalActionCounts = createHistoricalDashboardQueueActionCounts(artifacts, coordinatorAgentDrainWork);
   const latestActionCounts = createLatestDashboardQueueActionCounts(autoDrain);
   if (latestActionCounts) {
@@ -3801,7 +3821,7 @@ function createDashboardQueueActionCounts(
 function createHistoricalDashboardQueueActionCounts(
   artifacts: FrontierCodexAutoDrainArtifactMetadata | null,
   coordinatorAgentDrainWork: FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata
-): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> {
+): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount' | 'currentHeadConflictCount' | 'deferredCoordinatorCount' | 'deferredPromoteCount'> {
   if (coordinatorAgentDrainWork.assignmentCount > 0) {
     return {
       applyLocalCount: coordinatorAgentDrainWork.appliedCount,
@@ -3828,7 +3848,7 @@ function createHistoricalDashboardQueueActionCounts(
 
 function createLatestDashboardQueueActionCounts(
   autoDrain: FrontierCodexSwarmAutoDrainResult | null
-): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> | undefined {
+): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount' | 'currentHeadConflictCount' | 'deferredCoordinatorCount' | 'deferredPromoteCount'> | undefined {
   const latestCollection = latestDashboardAutoDrainCollection(autoDrain);
   const assignments = latestCollection?.hierarchicalMergeQueue?.assignments;
   if (!assignments) return undefined;
@@ -3842,7 +3862,7 @@ function createLatestDashboardQueueActionCounts(
 
 function countDashboardQueueAssignments(
   assignments: readonly { action: FrontierSwarmMergeQueueAssignmentAction }[]
-): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> {
+): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount' | 'currentHeadConflictCount' | 'deferredCoordinatorCount' | 'deferredPromoteCount'> {
   const count = (action: FrontierSwarmMergeQueueAssignmentAction) =>
     assignments.filter((assignment) => assignment.action === action).length;
   const blockCount = count('block');
@@ -3867,14 +3887,23 @@ function summarizeDashboardActiveQueuePressure(
   leaseCount: number;
   localQueueCount: number;
   promotedCount: number;
+  selectedCoordinatorCount: number;
+  deferredCoordinatorCount: number;
+  selectedPromoteCount: number;
+  deferredPromoteCount: number;
 } {
   const fallback = {
     activeCoordinatorQueueCount: artifacts?.mergeQueue.count ?? 0,
     leaseCount: artifacts?.mergeQueue.scopeCount ?? 0,
     localQueueCount: artifacts?.mergeQueue.queueLocalCount ?? 0,
-    promotedCount: artifacts?.mergeQueue.promoteCount ?? 0
+    promotedCount: artifacts?.mergeQueue.promoteCount ?? 0,
+    selectedCoordinatorCount: artifacts?.coordinatorAgent.selectedCount ?? 0,
+    deferredCoordinatorCount: artifacts?.coordinatorAgent.deferredCount ?? 0,
+    selectedPromoteCount: 0,
+    deferredPromoteCount: 0
   };
   const latestDrainWork = autoDrain?.iterations.at(-1)?.coordinatorAgentDrainWork.summary;
+  const latestCodexDrain = autoDrain?.iterations.at(-1)?.coordinatorAgentDrain?.summary;
   if (latestDrainWork && latestDrainWork.assignmentCount > 0) {
     const activeCoordinatorQueueCount = collectOnly
       ? latestDrainWork.assignmentCount
@@ -3883,7 +3912,11 @@ function summarizeDashboardActiveQueuePressure(
       activeCoordinatorQueueCount,
       leaseCount: activeCoordinatorQueueCount > 0 ? latestDrainWork.leaseCount : 0,
       localQueueCount: latestDrainWork.queuedCount,
-      promotedCount: latestDrainWork.promotedWorkCount
+      promotedCount: latestDrainWork.promotedWorkCount,
+      selectedCoordinatorCount: latestCodexDrain?.selectedCount ?? 0,
+      deferredCoordinatorCount: latestCodexDrain?.deferredCount ?? 0,
+      selectedPromoteCount: latestCodexDrain?.selectedPromoteCount ?? 0,
+      deferredPromoteCount: latestCodexDrain?.deferredPromoteCount ?? 0
     };
   }
   if (!autoDrain) return fallback;
@@ -3900,7 +3933,11 @@ function summarizeDashboardActiveQueuePressure(
     activeCoordinatorQueueCount: pressureAssignments.length,
     leaseCount: uniqueStrings(pressureAssignments.map((assignment) => assignment.scopeId)).length,
     localQueueCount: activeAssignments.filter((assignment) => assignment.action === 'queue-local').length,
-    promotedCount: activeAssignments.filter((assignment) => assignment.action === 'promote').length
+    promotedCount: activeAssignments.filter((assignment) => assignment.action === 'promote').length,
+    selectedCoordinatorCount: latestCodexDrain?.selectedCount ?? 0,
+    deferredCoordinatorCount: latestCodexDrain?.deferredCount ?? 0,
+    selectedPromoteCount: latestCodexDrain?.selectedPromoteCount ?? 0,
+    deferredPromoteCount: latestCodexDrain?.deferredPromoteCount ?? 0
   };
 }
 
@@ -3996,11 +4033,12 @@ function createDashboardOperatorQueueSummary(
   const queueBlockActionCount = Math.max(0, queueHealth.trueBlockerCount);
   const explicitHumanQuestionCount = Math.max(0, humanQuestions.count);
   const trueBlockerCount = queueBlockActionCount + explicitHumanQuestionCount;
+  const coordinationDebtCount = queueHealth.currentHeadConflictCount + queueHealth.deferredCoordinatorCount;
   const status: FrontierCodexDashboardOperatorQueueStatus = !available
     ? 'unavailable'
     : trueBlockerCount > 0
       ? 'blocked'
-      : queueHealth.staleOrRerunCount > 0
+      : queueHealth.staleOrRerunCount > 0 || coordinationDebtCount > 0
         ? 'warning'
         : queueHealth.appliedDecisionCount > 0
           ? 'ok'
@@ -4043,6 +4081,15 @@ function createDashboardOperatorQueueSummary(
         sourceFields: ['queueHealth.appliedDecisionCount', 'queueHealth.committedDecisionCount', 'queueHealth.recordOnlyCount']
       },
       {
+        id: 'coordination-debt',
+        label: 'Coordination debt',
+        value: coordinationDebtCount,
+        detail: `${formatDashboardOperatorQueueCount(queueHealth.currentHeadConflictCount, 'current-head conflict')}, ${formatDashboardOperatorQueueCount(queueHealth.deferredCoordinatorCount, 'deferred coordinator assignment')}, ${formatDashboardOperatorQueueCount(queueHealth.deferredPromoteCount, 'deferred promotion')}`,
+        status: coordinationDebtCount > 0 ? 'warning' : 'ok',
+        action: 'Drain deferred coordinator work or rerun conflict-blocked patches against the current head.',
+        sourceFields: ['queueHealth.currentHeadConflictCount', 'queueHealth.deferredCoordinatorCount', 'queueHealth.deferredPromoteCount']
+      },
+      {
         id: 'stale-rerun',
         label: 'Stale or rerun work',
         value: queueHealth.staleOrRerunCount,
@@ -4074,6 +4121,9 @@ function createDashboardOperatorQueueSummary(
       coordinatorQueues: queueHealth.activeCoordinatorQueueCount,
       leases: queueHealth.leaseCount,
       appliedDecisions: queueHealth.appliedDecisionCount,
+      currentHeadConflicts: queueHealth.currentHeadConflictCount,
+      deferredCoordinatorQueues: queueHealth.deferredCoordinatorCount,
+      deferredPromoteQueues: queueHealth.deferredPromoteCount,
       staleOrRerun: queueHealth.staleOrRerunCount,
       trueBlockers: trueBlockerCount,
       humanQuestions: humanQuestions.count,
@@ -4099,10 +4149,7 @@ function createDashboardOperatorQueueHeadline(
     return `${formatDashboardOperatorQueueCount(queueHealth.activeCoordinatorQueueCount, 'coordinator queue item')} collected; apply is waiting for a clean worktree (${formatDashboardOperatorQueueCount(collectOnly.dirtyPathCount, 'dirty path')}).`;
   }
   if (status === 'warning') {
-    if (queueHealth.conflictBlockedDecisionCount > 0) {
-      return `${formatDashboardOperatorQueueCount(queueHealth.conflictBlockedDecisionCount, 'current-head conflict')} included in ${formatDashboardOperatorQueueCount(queueHealth.staleOrRerunCount, 'stale or rerun item')} should be rerun or rebased as coordinator retry work.`;
-    }
-    return `${queueHealth.staleOrRerunCount} stale or rerun item${queueHealth.staleOrRerunCount === 1 ? '' : 's'} should be collapsed or retried.`;
+    return `${formatDashboardOperatorQueueWarningSources(queueHealth)} should be collapsed, drained, or retried as coordinator retry work.`;
   }
   if (queueHealth.appliedDecisionCount > 0) {
     return `${queueHealth.appliedDecisionCount} autonomous decision${queueHealth.appliedDecisionCount === 1 ? '' : 's'} applied with no true blockers.`;
@@ -4119,6 +4166,22 @@ function formatDashboardOperatorQueueBlockerSources(queueBlockActionCount: numbe
   if (sources.length === 0) return formatDashboardOperatorQueueCount(0, 'true blocker');
   if (sources.length === 1) return sources[0];
   return `${sources[0]} and ${sources[1]}`;
+}
+
+function formatDashboardOperatorQueueWarningSources(queueHealth: FrontierCodexDashboardQueueHealth): string {
+  const staleOrRerunCount = Math.max(
+    0,
+    queueHealth.staleOrRerunCount - queueHealth.currentHeadConflictCount
+  );
+  const sources = [
+    queueHealth.currentHeadConflictCount > 0 ? formatDashboardOperatorQueueCount(queueHealth.currentHeadConflictCount, 'current-head conflict') : '',
+    queueHealth.deferredCoordinatorCount > 0 ? formatDashboardOperatorQueueCount(queueHealth.deferredCoordinatorCount, 'deferred coordinator assignment') : '',
+    staleOrRerunCount > 0 ? formatDashboardOperatorQueueCount(staleOrRerunCount, 'stale or rerun item') : ''
+  ].filter((entry) => entry.length > 0);
+  if (sources.length === 0) return formatDashboardOperatorQueueCount(queueHealth.staleOrRerunCount, 'stale or rerun item');
+  if (sources.length === 1) return sources[0];
+  if (sources.length === 2) return `${sources[0]} and ${sources[1]}`;
+  return `${sources.slice(0, -1).join(', ')}, and ${sources.at(-1)}`;
 }
 
 function formatDashboardOperatorQueueCount(count: number, singular: string): string {
