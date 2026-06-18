@@ -64,6 +64,33 @@ frontier-swarm-codex autonomous-apply \
 
 `autonomous-apply` is also available as `drain`. It takes a repository-local lock, reads the `ready-to-apply` bundles, re-checks patches against the current head, applies each admitted patch, runs focused and matching global gates, and writes `autonomous-apply.json` plus `autonomous-queue-overlay.json`. Use `--dry-run` to check patches without changing the checkout. Use `--allow-dirty` only when the current dirty state is intentional and already understood.
 
+## Commit Mode
+
+Use commit mode when the repository policy allows the coordinator to create one small
+commit per admitted bundle and the configured gates are sufficient proof for landing.
+For the default `run` auto-drain path, pass `--auto-drain-commit`. For a later explicit
+`frontier-swarm-codex autonomous-apply` or `frontier-swarm-codex drain`, pass
+`--commit`.
+
+Leave commit mode off for exploratory swarms, dirty coordinator windows, or repositories
+where a human must batch, squash, amend, or inspect the final diff before committing.
+Commit mode does not make a bundle more admissible: the bundle still needs clean
+ownership, current-head patch checks, successful apply, and required gates.
+
+The coordinator-created commit message must identify the source bundle and queue work.
+The built-in subject is `Autonomous apply: <taskId-or-jobId>` and the body records the
+decision kind, status, reason, job id, task id, queue item ids, lock scope, lock keys,
+and bundle path. Treat the commit as a Git audit link, not as the queue database; the
+`autonomous-merge-decisions.jsonl` line remains the source of truth for `queueItemIds`,
+the decision reason, command output, and the new head recorded in `headAfter` and
+`commit`.
+
+When commit mode succeeds, the terminal decision is `committed` and the queue items in
+that decision are satisfied. When `git add` or `git commit` fails, the terminal outcome
+is not satisfied: autonomous apply records `failed`, resets staged paths after a commit
+failure, attempts to reverse-apply the patch, and leaves the item for operator triage,
+rerun, or repair depending on the recorded command tails.
+
 ## Consume Coordinator-Agent Drain Work
 
 When auto-drain is enabled, workers hand off evidence and the coordinator consumes drain work from generated artifacts:
@@ -89,14 +116,14 @@ Auto-drain may defer a ready bundle because of limits such as changed paths, cha
 Autonomous apply decisions are the final source of truth for a bundle:
 
 - `applied`: the patch applied and required gates passed. Review the final diff and continue with normal repository gates.
-- `committed`: same as applied, but the drain also created a commit because `--commit` was requested.
+- `committed`: same as applied, but the drain also created a traceable commit because `--auto-drain-commit` or `--commit` was requested. The decision closes its queue items as satisfied.
 - `checked`: dry-run mode proved the patch would apply under the lock; run a non-dry drain or apply manually.
 - `rejected`: the patch was applied, a required gate failed, and the patch was rolled back. Inspect the decision commands and worker evidence before asking for a narrower fix.
 - `rerun`: the bundle was stale against the current head or the head changed during checking. Rerun that task against the updated base.
 - `conflict-blocked`: `git apply --check` failed. Port manually or rerun the worker with current source refs.
 - `human-blocked`: the bundle needs a human decision because the recorded reason names missing authority, parent assignment, ownership, or policy/risk approval. A human coordinator must decide whether to port, split, or reject it.
 - `skipped`: there was no source patch to apply, usually a discovery-only result.
-- `failed`: apply infrastructure failed, such as git, lock, branch, rollback, or commit operations. Inspect the recorded command output before retrying.
+- `failed`: apply infrastructure failed, such as git, lock, branch, rollback, or commit operations. Failed commit attempts attempt rollback and must not be counted as satisfied; leave them unresolved until a later `applied`, `committed`, `rejected`, `rerun`, `conflict-blocked`, or `human-blocked` decision replaces the failed state.
 
 ## Operator Checklist
 

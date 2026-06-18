@@ -27,6 +27,28 @@ Stale head checks happen before and during autonomous apply:
 
 These checks are separate from the lock file's own stale expiry. Lock expiry handles abandoned lock files; stale head checks handle patches that are no longer valid for the current repository state.
 
+## Commit Phase Under The Lock
+
+Commit mode keeps the same repo-local lock through patch application, required gates,
+`git add`, `git commit`, and rollback. Use `--auto-drain-commit` for the default
+`run` auto-drain path and `--commit` for an explicit `autonomous-apply` or `drain`
+pass. Both modes create one commit per admitted bundle only after the patch and gates
+have already succeeded.
+
+The commit message must keep the bundle and queue work traceable. The built-in subject
+is `Autonomous apply: <taskId-or-jobId>` and the body records the job id, queue item
+ids, lock scope, lock keys, and bundle path. The decision record remains the
+authoritative queue contract. A successful commit records `committed`, closes the
+decision's `queueItemIds`, and leaves the new commit head in `headAfter` and `commit`.
+
+If `git add` fails, autonomous apply attempts to reverse-apply the patch before
+returning `failed`. If `git commit` fails, it first resets the bundle's changed paths,
+then attempts to reverse-apply the patch. A successful rollback leaves no satisfied
+queue item; a rollback failure leaves a `failed` decision whose command tails are the
+operator repair evidence. Future finer-grained leases must preserve this commit and
+rollback serialization because Git index, worktree, and branch mutation are not safely
+parallel.
+
 ## Future Finer-Grained Leases
 
 A future finer-grained lease implementation can use the existing lock key metadata to allow compatible bundles to run concurrently, but it should preserve the current safety properties:

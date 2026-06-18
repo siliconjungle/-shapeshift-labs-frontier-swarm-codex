@@ -41,6 +41,7 @@ Required concurrency and timing fields:
 Diagnostic fields:
 
 - `headBefore` and `headAfter`: git heads observed around the apply attempt.
+  For `committed` decisions, `headAfter` is the newly created commit.
 - `lockPath` and `lockToken`: local lock evidence for the apply attempt.
 - `commands`: command arrays with exit status and stdout/stderr tails.
 - `error`: optional machine-readable failure detail.
@@ -86,6 +87,31 @@ If promoted work later needs a person, the parent queue should emit a true `bloc
 the apply attempt should emit `human-blocked` with the missing authority, owner,
 surface, or policy/risk decision. Stale work should become `rerun` and replace the old
 bundle with a current worker result instead of accumulating review debt.
+
+## Autonomous Commit Contract
+
+Commit mode is opt-in. Use `--auto-drain-commit` when launching `run` with default
+auto-drain and the coordinator is allowed to create one commit per admitted bundle.
+Use `--commit` when draining an existing run or collection with `autonomous-apply` or
+`drain`. In both cases, the commit happens only after the patch applies and required
+focused or matching global gates pass.
+
+The commit message must identify the source bundle and queue work. The built-in
+coordinator subject is `Autonomous apply: <taskId-or-jobId>`, and the body records
+the autonomous decision kind, status, reason, job id, task id, queue item ids, lock
+scope, lock keys, and bundle path. If a repository wraps the command or later adds a
+custom message policy, preserve the exact `jobId` and queue item ids somewhere in the
+message and keep queue state in this ledger instead of deriving it from Git history
+alone.
+
+A `committed` decision closes the same `queueItemIds` as `applied`: the coordinator can
+mark those items satisfied, record `headAfter` and `commit` as the created commit, and
+continue with post-commit repository checks. A commit attempt that fails is not equivalent to
+`committed`. The runner records `failed`, keeps the command tails in `commands`, and
+attempts rollback: failed `git add` reverses the patch; failed `git commit` first
+resets the bundle's `changedPaths`, then reverses the patch. If rollback succeeds the
+reason says the patch was rolled back; if rollback also fails, the failed decision is
+the evidence that the checkout needs operator repair before retrying.
 
 ## Decision Statuses
 

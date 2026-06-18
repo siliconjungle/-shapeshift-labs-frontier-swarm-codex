@@ -12,6 +12,7 @@ import {
   coerceCodexSwarmTasksInput,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
+  FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
   FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
@@ -455,6 +456,7 @@ const cliHelp = await execFileP(process.execPath, [
 ], { cwd: tmp });
 assert.ok(cliHelp.stdout.includes('Default run auto-drain is autonomous coordinator drain work.'));
 assert.ok(cliHelp.stdout.includes('frontier.swarm.coordinator-agent-drain-work contract'));
+assert.ok(cliHelp.stdout.includes('--auto-drain-commit (create audited coordinator commits tied to queue item ids and the decision ledger)'));
 assert.ok(cliHelp.stdout.includes('Terminal coordinator decisions such as applied, committed, checked,'));
 assert.ok(cliHelp.stdout.includes('queue outcomes, not\nhuman blockers.'));
 assert.ok(cliHelp.stdout.includes('--no-auto-drain (raw worker diagnostics only; skips coordinator drain-work)'));
@@ -759,6 +761,67 @@ assert.ok(autoDrainRun.autoDrainArtifacts.mergeQueue.paths.includes(autoDrainArt
 assert.strictEqual(autoDrainArtifactIteration.mergeQueueApplyLocalCount, autoDrainRun.autoDrainArtifacts.mergeQueue.applyLocalCount);
 assert.strictEqual(autoDrainArtifactIteration.mergeQueuePromoteCount, autoDrainRun.autoDrainArtifacts.mergeQueue.promoteCount);
 assert.ok(await exists(autoDrainArtifactIteration.hierarchicalMergeQueuePath));
+
+const autoDrainCommitRepo = await createApplyFixtureRepo(tmp, 'auto-drain-commit-run-repo');
+const autoDrainCommitOutDir = path.join(tmp, 'auto-drain-commit-run-out');
+const autoDrainCommitRun = await runCodexSwarm(autoDrainPlan, {
+  outDir: autoDrainCommitOutDir,
+  cwd: autoDrainCommitRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainCommitOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    commit: true,
+    maxIterations: 2,
+    focusedCommands: [{
+      name: 'coordinator-sees-new',
+      command: 'node',
+      args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"]
+    }]
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'commit auto drained\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'commit auto drained' };
+  }
+});
+assert.strictEqual(autoDrainCommitRun.ok, true);
+assert.strictEqual(autoDrainCommitRun.autoDrain.summary.applyCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.summary.terminalCount, 1);
+const autoDrainCommitDecision = autoDrainCommitRun.autoDrain.iterations[0].apply.decisions[0];
+assert.strictEqual(autoDrainCommitDecision.status, 'committed');
+assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.committed, 1);
+assert.match(autoDrainCommitDecision.headAfter, /^[0-9a-f]{40}$/);
+assert.strictEqual(autoDrainCommitDecision.commit, autoDrainCommitDecision.headAfter);
+assert.notStrictEqual(autoDrainCommitDecision.headAfter, autoDrainCommitDecision.headBefore);
+assert.strictEqual(autoDrainCommitDecision.jobId, autoDrainCommitRun.run.results[0].jobId);
+assert.deepStrictEqual(autoDrainCommitDecision.queueItemIds, ['apply-task']);
+assert.strictEqual(await fs.readFile(path.join(autoDrainCommitRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autoDrainCommitRepo })).stdout, '');
+assert.strictEqual((await execFileP('git', ['rev-parse', 'HEAD'], { cwd: autoDrainCommitRepo })).stdout.trim(), autoDrainCommitDecision.headAfter);
+const autoDrainCommitLog = (await execFileP('git', ['log', '-1', '--format=%H%n%B'], { cwd: autoDrainCommitRepo })).stdout;
+assert.ok(autoDrainCommitLog.includes(autoDrainCommitDecision.headAfter));
+assert.ok(autoDrainCommitLog.includes('Autonomous apply: apply-task'));
+assert.ok(autoDrainCommitLog.includes(`Decision: ${FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND}@1`));
+assert.ok(autoDrainCommitLog.includes('Status: committed'));
+assert.ok(autoDrainCommitLog.includes('Reason: patch committed and verification passed'));
+assert.ok(autoDrainCommitLog.includes(`Job: ${autoDrainCommitDecision.jobId}`));
+assert.ok(autoDrainCommitLog.includes('Task: apply-task'));
+assert.ok(autoDrainCommitLog.includes('Queue items:\n- apply-task'));
+assert.ok(autoDrainCommitLog.includes('Lock scope: semantic'));
+assert.ok(autoDrainCommitLog.includes('Lock keys:\n- region:src/apply.ts#apply'));
+assert.ok(!autoDrainCommitLog.includes('Apply swarm bundle'));
+const autoDrainCommitApplyArtifact = JSON.parse(await fs.readFile(path.join(autoDrainCommitOutDir, 'auto-drain', 'apply-01', 'autonomous-apply.json'), 'utf8'));
+assert.strictEqual(autoDrainCommitApplyArtifact.summary.committed, 1);
+assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].status, 'committed');
+assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].headAfter, autoDrainCommitDecision.headAfter);
+assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].commit, autoDrainCommitDecision.headAfter);
 
 const autoDrainCandidateRepo = await createApplyFixtureRepo(tmp, 'auto-drain-candidate-run-repo');
 const autoDrainCandidateOutDir = path.join(autoDrainCandidateRepo, 'agent-runs', 'auto-drain-candidate-run');
@@ -1540,6 +1603,8 @@ assert.ok(cliSource.includes('--auto-drain-out-dir <path>'));
 assert.ok(cliSource.includes('--auto-drain-allow-dirty'));
 assert.ok(cliSource.includes('--auto-drain-check-stale'));
 assert.ok(cliSource.includes('--auto-drain-branch-prefix <prefix>'));
+assert.ok(cliSource.includes('--auto-drain-dry-run'));
+assert.ok(cliSource.includes('--auto-drain-commit (create audited coordinator commits tied to queue item ids and the decision ledger)'));
 assert.ok(cliSource.includes('--auto-drain-limit <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-iterations <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-ready <n>'));

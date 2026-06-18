@@ -507,6 +507,7 @@ export interface FrontierCodexAutonomousMergeDecision {
   dryRun: boolean;
   headBefore?: string;
   headAfter?: string;
+  commit?: string;
   lockPath?: string;
   lockToken?: string;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
@@ -4193,6 +4194,7 @@ async function applyCodexMergeBundleAutonomously(input: {
     extra: {
       headBefore?: string;
       headAfter?: string;
+      commit?: string;
       error?: string;
     } = {}
   ): FrontierCodexAutonomousMergeDecision => ({
@@ -4217,6 +4219,7 @@ async function applyCodexMergeBundleAutonomously(input: {
     dryRun: input.dryRun,
     ...(extra.headBefore ? { headBefore: extra.headBefore } : {}),
     ...(extra.headAfter ? { headAfter: extra.headAfter } : {}),
+    ...(extra.commit ? { commit: extra.commit } : {}),
     lockPath: input.lock.lockPath,
     lockToken: input.lock.token,
     commands,
@@ -4303,7 +4306,17 @@ async function applyCodexMergeBundleAutonomously(input: {
       error: 'git add failed'
     });
   }
-  const commit = await runLoggedProcess('git', ['commit', '-m', `Apply swarm bundle ${input.bundle.jobId}`], input.cwd);
+  const committedReason = gates.length ? 'patch committed and verification passed' : 'patch committed after git apply check';
+  const commitMessage = formatAutonomousApplyCommitMessage({
+    bundle: input.bundle,
+    bundlePath: input.mergePath,
+    queueItemIds,
+    lockScope: lockKeys.scope,
+    lockKeys: lockKeys.keys,
+    status: 'committed',
+    reason: committedReason
+  });
+  const commit = await runLoggedProcess('git', ['commit', '-m', commitMessage], input.cwd);
   commands.push(commit);
   if (commit.status !== 0) {
     const reset = await runLoggedProcess('git', ['reset', '--', ...input.bundle.changedPaths], input.cwd);
@@ -4318,10 +4331,49 @@ async function applyCodexMergeBundleAutonomously(input: {
     });
   }
   const headAfter = await readGitHead(input.cwd, commands);
-  return finish('committed', gates.length ? 'patch committed and verification passed' : 'patch committed after git apply check', {
+  return finish('committed', committedReason, {
     headBefore,
-    headAfter
+    headAfter,
+    ...(headAfter ? { commit: headAfter } : {})
   });
+}
+
+function formatAutonomousApplyCommitMessage(input: {
+  bundle: FrontierSwarmMergeBundle;
+  bundlePath: string;
+  queueItemIds: readonly string[];
+  lockScope: FrontierCodexAutonomousLockScope;
+  lockKeys: readonly string[];
+  status: FrontierCodexAutonomousDecisionStatus;
+  reason: string;
+}): string {
+  const subjectId = formatCommitMessageValue(input.bundle.taskId ?? input.bundle.jobId);
+  return [
+    `Autonomous apply: ${subjectId}`,
+    '',
+    `Decision: ${FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND}@${FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_VERSION}`,
+    `Status: ${input.status}`,
+    `Reason: ${formatCommitMessageValue(input.reason)}`,
+    `Job: ${formatCommitMessageValue(input.bundle.jobId)}`,
+    `Task: ${formatCommitMessageValue(input.bundle.taskId)}`,
+    'Queue items:',
+    ...formatCommitMessageList(input.queueItemIds),
+    `Lock scope: ${input.lockScope}`,
+    'Lock keys:',
+    ...formatCommitMessageList(input.lockKeys),
+    `Bundle: ${formatCommitMessageValue(input.bundlePath)}`
+  ].join('\n');
+}
+
+function formatCommitMessageList(values: readonly string[]): string[] {
+  return values.length
+    ? values.map((value) => `- ${formatCommitMessageValue(value)}`)
+    : ['- (none)'];
+}
+
+function formatCommitMessageValue(value: string | undefined): string {
+  const normalized = value?.replace(/[\r\n\t]+/g, ' ').trim();
+  return normalized || '(none)';
 }
 
 function autonomousVerificationCommands(bundle: FrontierSwarmMergeBundle, input: FrontierCodexAutonomousApplyInput): FrontierSwarmCommand[] {
