@@ -2453,11 +2453,13 @@ export async function runCodexJob(
       env: resourceAllocation.env,
       timeoutMs: job.compute.timeoutMs ?? options.jobTimeoutMs ?? 7200000
     });
-  const collected = execution.changedPaths
-    ? filterWorkspaceChangedPaths(execution.changedPaths, workspacePlan)
-    : options.collectGitStatus === false
-      ? { changedPaths: [], ignoredChangedPaths: [] }
-      : await collectChangedPaths(workspace, fileSnapshot, workspacePlan);
+  const collected = await collectJobChangedPaths({
+    workspace,
+    fileSnapshot,
+    workspacePlan,
+    executionChangedPaths: execution.changedPaths,
+    collectGitStatus: options.collectGitStatus
+  });
   const rawChangedPaths = collected.changedPaths;
   const changedPaths = options.changedPathFilter ? [...options.changedPathFilter(rawChangedPaths, hookInput)] : rawChangedPaths;
   const workspaceProof = await createSwarmWorkspaceProof(workspacePlan, { ignoredChangedPaths: collected.ignoredChangedPaths });
@@ -5080,6 +5082,38 @@ async function collectChangedPaths(cwd: string, baseline: WorkspaceFileSnapshot 
   if (!baseline) return filterWorkspaceChangedPaths(await gitChangedPaths(cwd), plan);
   const after = await snapshotWorkspaceFiles(cwd);
   return filterWorkspaceChangedPaths(diffWorkspaceFiles(baseline, after), plan);
+}
+
+async function collectJobChangedPaths(input: {
+  workspace: string;
+  fileSnapshot: WorkspaceFileSnapshot | undefined;
+  workspacePlan: FrontierCodexWorkspacePlan;
+  executionChangedPaths?: readonly string[];
+  collectGitStatus?: boolean;
+}): Promise<ChangedPathCollection> {
+  const hasExecutionPaths = input.executionChangedPaths !== undefined;
+  const executionCollection = hasExecutionPaths
+    ? filterWorkspaceChangedPaths(input.executionChangedPaths ?? [], input.workspacePlan)
+    : undefined;
+  const useSnapshotProof = input.collectGitStatus !== false
+    && !!input.fileSnapshot
+    && (input.workspacePlan.mode === 'copy' || input.workspacePlan.mode === 'snapshot');
+  if (executionCollection && useSnapshotProof) {
+    return mergeChangedPathCollections(
+      executionCollection,
+      await collectChangedPaths(input.workspace, input.fileSnapshot, input.workspacePlan)
+    );
+  }
+  if (executionCollection) return executionCollection;
+  if (input.collectGitStatus === false) return { changedPaths: [], ignoredChangedPaths: [] };
+  return collectChangedPaths(input.workspace, input.fileSnapshot, input.workspacePlan);
+}
+
+function mergeChangedPathCollections(left: ChangedPathCollection, right: ChangedPathCollection): ChangedPathCollection {
+  return {
+    changedPaths: uniqueWorkspacePaths([...left.changedPaths, ...right.changedPaths]),
+    ignoredChangedPaths: uniqueWorkspacePaths([...left.ignoredChangedPaths, ...right.ignoredChangedPaths])
+  };
 }
 
 async function writeCodexPatchFile(input: {

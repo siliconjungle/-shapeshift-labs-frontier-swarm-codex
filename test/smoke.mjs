@@ -2118,6 +2118,41 @@ assert.deepStrictEqual(changedWorkspaceProof.ignoredChangedPaths, [
   'packages/frontier-swarm/node_modules/.cache/tsconfig.tsbuildinfo'
 ]);
 
+const ignoredCopyRepo = path.join(tmp, 'ignored-copy-repo');
+await fs.mkdir(path.join(ignoredCopyRepo, 'src/runtime'), { recursive: true });
+await fs.writeFile(path.join(ignoredCopyRepo, '.gitignore'), 'agent-runs/\n');
+await fs.writeFile(path.join(ignoredCopyRepo, 'src/runtime/action.ts'), 'export const ok = false;\n');
+const ignoredCopyResult = await runCodexSwarm(plan, {
+  outDir: path.join(ignoredCopyRepo, 'agent-runs/ignored-copy-run'),
+  cwd: ignoredCopyRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(ignoredCopyRepo, 'agent-runs/ignored-copy-workspaces'),
+    replace: true,
+    includes: ['src/runtime/action.ts'],
+    linkNodeModules: false
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src/runtime/action.ts'), 'export const ok = true;\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'ignored copy changed\n');
+    return { exitCode: 0, changedPaths: [], lastMessage: 'ignored copy changed' };
+  }
+});
+const ignoredCopyJobResult = ignoredCopyResult.run.results[0];
+assert.strictEqual(ignoredCopyResult.ok, true);
+assert.deepStrictEqual(ignoredCopyJobResult.changedPaths, ['src/runtime/action.ts']);
+assert.notStrictEqual(ignoredCopyJobResult.mergeReadiness, 'discovery-only');
+assert.ok(typeof ignoredCopyJobResult.patchPath === 'string');
+const ignoredCopyPatch = await fs.readFile(ignoredCopyJobResult.patchPath, 'utf8');
+assert.ok(ignoredCopyPatch.includes('diff --git a/src/runtime/action.ts b/src/runtime/action.ts'));
+assert.ok(ignoredCopyPatch.includes('-export const ok = false;'));
+assert.ok(ignoredCopyPatch.includes('+export const ok = true;'));
+const ignoredCopyMergePath = ignoredCopyJobResult.evidencePaths.find((entry) => entry.endsWith('merge.json'));
+const ignoredCopyMergeBundle = JSON.parse(await fs.readFile(ignoredCopyMergePath, 'utf8'));
+assert.deepStrictEqual(ignoredCopyMergeBundle.changedPaths, ['src/runtime/action.ts']);
+assert.ok(String(ignoredCopyMergeBundle.patchPath).endsWith('changes.patch'));
+assert.notStrictEqual(ignoredCopyMergeBundle.disposition, 'discovery-only');
+
 const writtenPlan = createCodexSwarmPlan({ manifest: manifestInput, tasks: tasksInput, plan: { limit: 1 } });
 await fs.writeFile(path.join(tmp, 'swarm-plan.json'), JSON.stringify(writtenPlan, null, 2) + '\n');
 assert.strictEqual(JSON.parse(await fs.readFile(path.join(tmp, 'swarm-plan.json'), 'utf8')).jobs.length, 1);
