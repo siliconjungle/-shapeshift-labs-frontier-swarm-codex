@@ -2320,6 +2320,7 @@ await writeSwarmCoordinatorSnapshot(collapsedDecisionDashboardPath, {
   autoDrainArtifacts: collapsedDecisionArtifacts
 });
 const collapsedDecisionDashboard = JSON.parse(await fs.readFile(collapsedDecisionDashboardPath, 'utf8'));
+assert.deepStrictEqual(collapsedDecisionDashboard.operatorSummary, collapsedDecisionDashboard.queueMetadata.operatorSummary);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.appliedDecisionCount, 2);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committedDecisionCount, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
@@ -2344,18 +2345,24 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.trueBlo
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.humanQuestions.count, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.status, 'warning');
 assert.match(collapsedDecisionDashboard.queueMetadata.operatorSummary.headline, /1 deferred coordinator assignment/);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 2);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.currentHeadConflicts, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.deferredCoordinatorQueues, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.deferredPromoteQueues, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
 const collapsedDecisionCards = new Map(collapsedDecisionDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
 assert.strictEqual(collapsedDecisionCards.get('applied-decisions').value, 2);
 assert.strictEqual(collapsedDecisionCards.get('coordination-debt').value, 1);
 assert.strictEqual(collapsedDecisionCards.get('coordination-debt').status, 'warning');
 assert.match(collapsedDecisionCards.get('coordination-debt').detail, /1 deferred promotion/);
 assert.strictEqual(collapsedDecisionCards.get('stale-rerun').value, 0);
+assert.strictEqual(collapsedDecisionCards.get('stale-rerun').detail, '0 stale, 0 rerun, 0 current-head conflicts');
+assert.match(collapsedDecisionCards.get('stale-rerun').action, /escalate only explicit human-blocked or true-blocker entries/);
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').value, 0);
+assert.strictEqual(collapsedDecisionCards.get('true-blockers').detail, '0 queue block actions, 0 explicit human questions');
+assert.strictEqual(collapsedDecisionCards.get('true-blockers').status, 'ok');
 
 const explicitHumanQuestionOutDir = path.join(tmp, 'explicit-human-question-dashboard');
 const explicitHumanQuestionArtifacts = createSyntheticAutoDrainArtifacts(explicitHumanQuestionOutDir);
