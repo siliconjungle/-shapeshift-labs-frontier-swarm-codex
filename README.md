@@ -211,6 +211,10 @@ Package source repositories:
 npm install @shapeshift-labs/frontier-swarm-codex
 ```
 
+## Local Development
+
+`@shapeshift-labs/frontier-swarm-codex` keeps `@shapeshift-labs/frontier-swarm` as an exact semver dependency so package metadata remains publishable. Local package tests run `npm run test:local-deps` before build and typecheck; that guard checks the declared version against the adjacent `packages/frontier-swarm` package and fails when a package-local install would resolve to a registry copy. The full smoke test repeats the guard after `build.mjs` has relinked local Frontier dependencies and requires resolution to land on the adjacent `packages/frontier-swarm` candidate. Do not replace the dependency with `workspace:`, `file:`, or `link:` unless the release tooling is updated to rewrite those specifiers before publish.
+
 ## CLI
 
 ```sh

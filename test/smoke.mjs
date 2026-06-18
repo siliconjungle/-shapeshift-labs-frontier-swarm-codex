@@ -4,7 +4,77 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import {
+
+const codexPackageRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const localSwarmPackageRoot = path.resolve(codexPackageRoot, '..', 'frontier-swarm');
+const localDependencyName = '@shapeshift-labs/frontier-swarm';
+
+async function readJson(pathname) {
+  return JSON.parse(await fs.readFile(pathname, 'utf8'));
+}
+
+function isPackageCandidateRoot(pathname, packageId) {
+  return path.basename(pathname) === packageId && path.basename(path.dirname(pathname)) === 'packages';
+}
+
+function isWithin(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function assertLocalFrontierSwarmDependency({ requireAdjacent = true } = {}) {
+  const codexPackageJsonPath = path.join(codexPackageRoot, 'package.json');
+  const localSwarmPackageJsonPath = path.join(localSwarmPackageRoot, 'package.json');
+  const codexPackageJson = await readJson(codexPackageJsonPath);
+  const localSwarmPackageJson = await readJson(localSwarmPackageJsonPath);
+  const declaredVersion = codexPackageJson.dependencies?.[localDependencyName];
+  assert.strictEqual(
+    declaredVersion,
+    localSwarmPackageJson.version,
+    `${localDependencyName} must stay pinned to the local frontier-swarm package version for publishable metadata`
+  );
+  assert.doesNotMatch(
+    declaredVersion,
+    /^(?:workspace|file|link):/,
+    `${localDependencyName} must use publishable semver metadata, not a workspace-only specifier`
+  );
+
+  let resolvedSwarmPackageJsonPath;
+  try {
+    resolvedSwarmPackageJsonPath = fileURLToPath(import.meta.resolve(`${localDependencyName}/package.json`));
+  } catch (error) {
+    if (!requireAdjacent && error?.code === 'ERR_MODULE_NOT_FOUND') return;
+    throw error;
+  }
+  const packageNodeModulesRoot = path.join(codexPackageRoot, 'node_modules');
+  const resolvedFromPackageNodeModules = isWithin(packageNodeModulesRoot, path.resolve(resolvedSwarmPackageJsonPath));
+  const resolvedSwarmRoot = path.dirname(await fs.realpath(resolvedSwarmPackageJsonPath));
+  const localSwarmRoot = await fs.realpath(localSwarmPackageRoot);
+  const resolvedFromAdjacentPackage = resolvedSwarmRoot === localSwarmRoot;
+  const resolvedFromLocalPackage = resolvedFromAdjacentPackage
+    || (!requireAdjacent && isPackageCandidateRoot(resolvedSwarmRoot, 'frontier-swarm'));
+  if (!requireAdjacent && !resolvedFromLocalPackage && !resolvedFromPackageNodeModules) return;
+  const resolvedSwarmPackageJson = await readJson(resolvedSwarmPackageJsonPath);
+  assert.strictEqual(resolvedSwarmPackageJson.name, localDependencyName);
+  assert.strictEqual(
+    resolvedSwarmPackageJson.version,
+    localSwarmPackageJson.version,
+    `${localDependencyName} resolved to version ${resolvedSwarmPackageJson.version}, expected local version ${localSwarmPackageJson.version}`
+  );
+  assert.ok(
+    resolvedFromLocalPackage,
+    `${localDependencyName} resolved to ${resolvedSwarmRoot}; package-local tests must link ${localSwarmRoot} instead of a registry install`
+  );
+}
+
+const localDepsOnly = process.argv.includes('--local-deps-only');
+await assertLocalFrontierSwarmDependency({ requireAdjacent: !localDepsOnly });
+if (localDepsOnly) {
+  console.log('frontier-swarm-codex local dependency hygiene ok');
+  process.exit(0);
+}
+
+const {
   appendCodexPidManifest,
   applyCodexSwarmCollection,
   autonomousApplyCodexSwarmRun,
@@ -36,7 +106,7 @@ import {
   spawnCodexExecutor,
   stopCodexSwarmRun,
   writeSwarmCoordinatorSnapshot
-} from '../dist/index.js';
+} = await import('../dist/index.js');
 
 const manifestInput = {
   id: 'inkwell',

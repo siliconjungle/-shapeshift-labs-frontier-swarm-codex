@@ -44,7 +44,8 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "npm run build && npm run typecheck && node test/smoke.mjs && node test/fuzz.mjs --cases 300",
+    "test": "npm run test:local-deps && npm run build && npm run typecheck && node test/smoke.mjs && node test/fuzz.mjs --cases 300",
+    "test:local-deps": "node test/smoke.mjs --local-deps-only",
     "prepack": "npm run readme:packages:check && npm run test",
     "typecheck": "node build.mjs --typecheck",
     "fuzz": "npm run build && node test/fuzz.mjs",
