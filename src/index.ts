@@ -75,6 +75,7 @@ export const FRONTIER_SWARM_CODEX_PID_MANIFEST_KIND = 'frontier.swarm-codex.pid-
 export const FRONTIER_SWARM_CODEX_PID_MANIFEST_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_COLLECTION_KIND = 'frontier.swarm-codex.collection';
 export const FRONTIER_SWARM_CODEX_COLLECTION_VERSION = 1;
+const FRONTIER_SWARM_CODEX_METADATA_KEY = 'frontierSwarmCodex';
 export const FRONTIER_SWARM_CODEX_APPLY_LEDGER_KIND = 'frontier.swarm-codex.apply-ledger';
 export const FRONTIER_SWARM_CODEX_APPLY_LEDGER_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND = 'frontier.swarm-codex.autonomous-apply';
@@ -5393,6 +5394,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const runDir = await resolveRunDirectory(input.run);
   const outDir = path.resolve(cwd, input.outDir ?? path.join(runDir, 'collected'));
+  const collectionHead = await readCurrentGitHead(cwd);
   const buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]> = {
     'ready-to-apply': [],
     'needs-human-port': [],
@@ -5440,13 +5442,18 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     if (collectBundle !== bundle) promotedPatchCandidateCount += 1;
     const bucket = classifyCodexCollectBucket(collectBundle, staleAgainstHead);
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(bundle.jobId)}` : bundle.branchName;
-    const nextBundle: FrontierSwarmMergeBundle = {
+    const nextBundle = withCodexCollectionHeadMetadata({
       ...collectBundle,
       ...(branchName ? { branchName } : {}),
       staleAgainstHead: collectBundle.staleAgainstHead || staleAgainstHead,
       disposition: staleAgainstHead ? 'stale-against-head' : collectBundle.disposition,
       autoMergeable: bucket === 'ready-to-apply' && collectBundle.autoMergeable
-    };
+    }, {
+      currentHead: collectionHead,
+      generatedAt,
+      staleChecked: input.checkStale !== false,
+      patchApplies: !staleAgainstHead && patchExists
+    });
     collectedBundles.push(nextBundle);
     patchStatuses[nextBundle.jobId] = staleAgainstHead ? 'stale' : patchExists ? input.checkStale === false ? 'unknown' : 'applies' : 'missing';
     const outputDir = path.join(outDir, bucket, slug(bundle.jobId));
@@ -6621,8 +6628,18 @@ async function applyCodexMergeBundleAutonomously(input: {
 
   const headBefore = await readGitHead(input.cwd, commands);
   if (!headBefore) return finish('failed', 'unable to read repository head before apply');
+  const collectionHead = readCodexCollectionHead(input.bundle);
   const check = await runLoggedProcess('git', ['apply', '--check', patchPath], input.cwd);
   commands.push(check);
+  if (collectionHead && collectionHead !== headBefore) {
+    return finish(
+      check.status === 0 ? 'rerun' : 'conflict-blocked',
+      check.status === 0
+        ? 'repository head changed since bundle collection; rerun against current head'
+        : 'repository head changed since bundle collection and git apply --check failed',
+      { headBefore: collectionHead, headAfter: headBefore }
+    );
+  }
   if (check.status !== 0) return finish('conflict-blocked', 'git apply --check failed', { headBefore });
   const checkedHead = await readGitHead(input.cwd, commands);
   if (checkedHead && checkedHead !== headBefore) {
@@ -8578,12 +8595,55 @@ function readPatchOnlyAllowedWriteOk(evidence: Record<string, unknown>, allowedW
   return undefined;
 }
 
+function withCodexCollectionHeadMetadata(
+  bundle: FrontierSwarmMergeBundle,
+  input: { currentHead?: string; generatedAt: number; staleChecked: boolean; patchApplies: boolean }
+): FrontierSwarmMergeBundle {
+  const metadata = isObject(bundle.metadata) ? bundle.metadata : {};
+  const codex = isObject(metadata[FRONTIER_SWARM_CODEX_METADATA_KEY]) ? metadata[FRONTIER_SWARM_CODEX_METADATA_KEY] : {};
+  const collection = isObject(codex.collection) ? codex.collection : {};
+  return {
+    ...bundle,
+    metadata: {
+      ...metadata,
+      [FRONTIER_SWARM_CODEX_METADATA_KEY]: {
+        ...codex,
+        collection: {
+          ...collection,
+          source: FRONTIER_SWARM_CODEX_COLLECTION_KIND,
+          generatedAt: input.generatedAt,
+          staleChecked: input.staleChecked,
+          patchApplies: input.patchApplies,
+          ...(input.currentHead ? { head: input.currentHead } : {})
+        }
+      }
+    } as FrontierSwarmMergeBundle['metadata']
+  };
+}
+
+function readCodexCollectionHead(bundle: FrontierSwarmMergeBundle): string | undefined {
+  const metadata = isObject(bundle.metadata) ? bundle.metadata : undefined;
+  const codex = metadata && isObject(metadata[FRONTIER_SWARM_CODEX_METADATA_KEY])
+    ? metadata[FRONTIER_SWARM_CODEX_METADATA_KEY]
+    : undefined;
+  const collection = codex && isObject(codex.collection) ? codex.collection : undefined;
+  return readGitSha(collection?.head)
+    ?? readGitSha(codex?.collectionHead)
+    ?? readGitSha(metadata?.collectionHead)
+    ?? readGitSha(metadata?.sourceHead);
+}
+
+function readGitSha(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/.test(value) ? value : undefined;
+}
+
 function normalizeCollectedMergeBundle(value: unknown, mergePath: string): FrontierSwarmMergeBundle {
   const input = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
   const jobId = typeof input.jobId === 'string' && input.jobId ? input.jobId : path.basename(path.dirname(mergePath));
   const changedPaths = stringArray(input.changedPaths);
   const status = typeof input.status === 'string' ? input.status as FrontierSwarmMergeBundle['status'] : 'completed';
   const autoMergeable = Boolean(input.autoMergeable);
+  const metadata = isObject(input.metadata) ? input.metadata as FrontierSwarmMergeBundle['metadata'] : undefined;
   const disposition = typeof input.disposition === 'string'
     ? input.disposition as FrontierSwarmMergeBundle['disposition']
     : autoMergeable ? 'auto-mergeable' : status === 'failed' ? 'rejected' : 'needs-port';
@@ -8619,7 +8679,8 @@ function normalizeCollectedMergeBundle(value: unknown, mergePath: string): Front
     ...(typeof input.branchName === 'string' ? { branchName: input.branchName } : {}),
     ...(typeof input.commit === 'string' ? { commit: input.commit } : {}),
     staleAgainstHead: Boolean(input.staleAgainstHead),
-    reasons: stringArray(input.reasons)
+    reasons: stringArray(input.reasons),
+    ...(metadata ? { metadata } : {})
   };
 }
 

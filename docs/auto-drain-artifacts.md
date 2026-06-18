@@ -196,6 +196,8 @@ When an iteration admits jobs, auto-drain writes an apply directory at `auto-dra
 
 Apply artifacts are per-iteration. Top-level summaries report aggregate decision and apply counts, but a UI should open `autonomous-apply.json` or the decision log to explain a specific job outcome.
 
+Collected bundles can include `metadata.frontierSwarmCodex.collection.head`, the Git head used for collection-time stale checking. Autonomous apply re-reads the current head after taking the repo-local lock and compares it with that collected head before mutation. A mismatch records `rerun` when the patch still checks cleanly or `conflict-blocked` when the patch no longer checks; both outcomes map to `stale-against-head` queue overlay entries and should feed rerun or conflict-resolution work, not human blocker badges.
+
 In dirty collect-only runs, no `apply-NN` directory is written. The matching `autoDrainArtifacts.iterations[]` row has no `applyPath`, `autonomousQueueOverlayPath`, or `decisionLogPath`, and `decisionCount` is `0`.
 
 ## Consumer Guide

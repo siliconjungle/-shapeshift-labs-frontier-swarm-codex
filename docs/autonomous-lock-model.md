@@ -44,8 +44,10 @@ The autonomous apply result summarizes the unique lock keys and counts decisions
 Stale head checks happen before and during autonomous apply:
 
 - Collection marks a bundle `stale-against-head` when its patch no longer passes `git apply --check` against the current repository head, unless stale checking is disabled.
+- Collection records the head it checked as `metadata.frontierSwarmCodex.collection.head` on each collected bundle when Git can provide one.
 - Autonomous apply refuses bundles already marked stale and returns a `rerun` decision with the reason that the bundle is stale against the current repository head.
-- Under the repo-local lock, autonomous apply records `HEAD` before `git apply --check`, checks the patch, then reads `HEAD` again. If the head changed while the patch was being checked, the decision becomes `rerun`.
+- Under the repo-local lock, autonomous apply records the current `HEAD` before `git apply --check`. If the collected head exists and differs from the locked current head, the decision becomes `rerun` when the patch still checks cleanly, or `conflict-blocked` when `git apply --check` fails. The decision records the collected head in `headBefore` and the locked current head in `headAfter`.
+- If the collected head matches, autonomous apply checks the patch, then reads `HEAD` again. If the head changed while the patch was being checked, the decision becomes `rerun`.
 - For non-dry-run applies, required verification gates run after patch application. Failed required gates roll the patch back, and commit failures also attempt reset and rollback.
 
 These checks are separate from the lock file's own stale expiry. Lock expiry handles abandoned lock files; stale head checks handle patches that are no longer valid for the current repository state.
@@ -79,7 +81,7 @@ A future finer-grained lease implementation can use the existing lock key metada
 - Keep the repo-local lock or an equivalent repository mutation guard for operations that are not safely parallel, especially Git index, branch, apply, rollback, and commit operations.
 - Treat semantic keys as stronger ownership signals than path keys when both are available, and keep the `repo:*` fallback for unscoped or evidence-only bundles.
 - Preserve decision records with `lockScope`, `lockKeys`, `lockPath` or lease location, and a per-owner token so merge admission and queue overlays remain auditable.
-- Keep stale head checks at collection time and immediately before mutation. A finer-grained lease must not apply a patch just because its semantic or path lease was available.
+- Keep stale head checks at collection time and immediately before mutation. A finer-grained lease must re-read the repository head after acquiring the relevant queue or repo lease and must not apply a patch just because its semantic or path lease was available.
 - Preserve timeout, stale lease expiry, and token-checked release behavior so abandoned workers do not permanently block the queue and old workers cannot release newer owners.
 - Continue to record conflict-blocked, human-blocked, rerun, checked, applied, committed, rejected, skipped, and failed decisions in the same decision log shape.
 

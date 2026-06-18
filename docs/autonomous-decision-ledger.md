@@ -41,7 +41,10 @@ Required concurrency and timing fields:
 Diagnostic fields:
 
 - `headBefore` and `headAfter`: git heads observed around the apply attempt.
-  For `committed` decisions, `headAfter` is the newly created commit.
+  For collected-head mismatches, `headBefore` is the head recorded on the collected
+  bundle and `headAfter` is the locked current head that caused `rerun` or
+  `conflict-blocked`. For `committed` decisions, `headAfter` is the newly created
+  commit.
 - `lockPath` and `lockToken`: local lock evidence for the apply attempt.
 - `commands`: command arrays with exit status and stdout/stderr tails.
 - `error`: optional machine-readable failure detail.

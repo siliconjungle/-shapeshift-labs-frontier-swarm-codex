@@ -1002,6 +1002,106 @@ assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].status, 'sta
 assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].mergeReadiness, 'stale-against-head');
 assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].disposition, 'stale-against-head');
 
+const staleBeforeApplyRepo = await createApplyFixtureRepo(tmp, 'autonomous-stale-before-apply-repo');
+const staleBeforeApplyRunDir = path.join(tmp, 'autonomous-stale-before-apply-run');
+await writeSyntheticMergeBundle(staleBeforeApplyRunDir, 'stale-before-apply', {
+  taskId: 'stale-before-apply-task',
+  mergeReadiness: 'verified-patch',
+  disposition: 'auto-mergeable',
+  autoMergeable: true,
+  changedPaths: ['src/apply.ts'],
+  ownedFilesTouched: ['src/apply.ts'],
+  allowedWrites: ['src/apply.ts'],
+  patchPath: 'changes.patch',
+  queueItemIds: ['stale-before-apply-task']
+});
+await fs.writeFile(path.join(staleBeforeApplyRunDir, 'stale-before-apply', 'changes.patch'), [
+  'diff --git a/src/apply.ts b/src/apply.ts',
+  '--- a/src/apply.ts',
+  '+++ b/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'));
+const staleBeforeApplyCollection = await collectCodexSwarmRun({
+  run: staleBeforeApplyRunDir,
+  cwd: staleBeforeApplyRepo,
+  outDir: path.join(tmp, 'autonomous-stale-before-apply-collection')
+});
+assert.strictEqual(staleBeforeApplyCollection.summary['ready-to-apply'], 1);
+const staleBeforeApplyCollectedBundle = JSON.parse(await fs.readFile(path.join(staleBeforeApplyCollection.outDir, 'ready-to-apply', 'stale-before-apply', 'merge.json'), 'utf8'));
+const staleBeforeApplyCollectedHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: staleBeforeApplyRepo })).stdout.trim();
+assert.strictEqual(staleBeforeApplyCollectedBundle.metadata.frontierSwarmCodex.collection.head, staleBeforeApplyCollectedHead);
+await fs.writeFile(path.join(staleBeforeApplyRepo, 'src', 'head.txt'), 'advanced\n');
+await execFileP('git', ['add', '--', 'src/head.txt'], { cwd: staleBeforeApplyRepo });
+await execFileP('git', ['commit', '-m', 'Advance unrelated head before autonomous apply'], { cwd: staleBeforeApplyRepo });
+const staleBeforeApplyAdvancedHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: staleBeforeApplyRepo })).stdout.trim();
+const staleBeforeApplyResult = await autonomousApplyCodexSwarmRun({
+  collection: staleBeforeApplyCollection.outDir,
+  cwd: staleBeforeApplyRepo,
+  outDir: path.join(tmp, 'autonomous-stale-before-apply-out')
+});
+const staleBeforeApplyDecision = staleBeforeApplyResult.decisions[0];
+assert.strictEqual(staleBeforeApplyResult.ok, false);
+assert.strictEqual(staleBeforeApplyResult.summary.rerun, 1);
+assert.strictEqual(staleBeforeApplyDecision.status, 'rerun');
+assert.strictEqual(staleBeforeApplyDecision.reason, 'repository head changed since bundle collection; rerun against current head');
+assert.strictEqual(staleBeforeApplyDecision.headBefore, staleBeforeApplyCollectedHead);
+assert.strictEqual(staleBeforeApplyDecision.headAfter, staleBeforeApplyAdvancedHead);
+assert.strictEqual(staleBeforeApplyResult.queueOverlay.entries[0].status, 'stale-against-head');
+assert.strictEqual(await fs.readFile(path.join(staleBeforeApplyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+assert.strictEqual(await fs.readFile(path.join(staleBeforeApplyRepo, 'src', 'head.txt'), 'utf8'), 'advanced\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: staleBeforeApplyRepo })).stdout, '');
+
+const staleConflictBeforeApplyRepo = await createApplyFixtureRepo(tmp, 'autonomous-stale-conflict-before-apply-repo');
+const staleConflictBeforeApplyRunDir = path.join(tmp, 'autonomous-stale-conflict-before-apply-run');
+await writeSyntheticMergeBundle(staleConflictBeforeApplyRunDir, 'stale-conflict-before-apply', {
+  taskId: 'stale-conflict-before-apply-task',
+  mergeReadiness: 'verified-patch',
+  disposition: 'auto-mergeable',
+  autoMergeable: true,
+  changedPaths: ['src/apply.ts'],
+  ownedFilesTouched: ['src/apply.ts'],
+  allowedWrites: ['src/apply.ts'],
+  patchPath: 'changes.patch',
+  queueItemIds: ['stale-conflict-before-apply-task']
+});
+await fs.writeFile(path.join(staleConflictBeforeApplyRunDir, 'stale-conflict-before-apply', 'changes.patch'), [
+  'diff --git a/src/apply.ts b/src/apply.ts',
+  '--- a/src/apply.ts',
+  '+++ b/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'));
+const staleConflictBeforeApplyCollection = await collectCodexSwarmRun({
+  run: staleConflictBeforeApplyRunDir,
+  cwd: staleConflictBeforeApplyRepo,
+  outDir: path.join(tmp, 'autonomous-stale-conflict-before-apply-collection')
+});
+const staleConflictBeforeApplyCollectedHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: staleConflictBeforeApplyRepo })).stdout.trim();
+await fs.writeFile(path.join(staleConflictBeforeApplyRepo, 'src', 'apply.ts'), 'other\n');
+await execFileP('git', ['add', '--', 'src/apply.ts'], { cwd: staleConflictBeforeApplyRepo });
+await execFileP('git', ['commit', '-m', 'Advance conflicting head before autonomous apply'], { cwd: staleConflictBeforeApplyRepo });
+const staleConflictBeforeApplyAdvancedHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: staleConflictBeforeApplyRepo })).stdout.trim();
+const staleConflictBeforeApplyResult = await autonomousApplyCodexSwarmRun({
+  collection: staleConflictBeforeApplyCollection.outDir,
+  cwd: staleConflictBeforeApplyRepo,
+  outDir: path.join(tmp, 'autonomous-stale-conflict-before-apply-out')
+});
+const staleConflictBeforeApplyDecision = staleConflictBeforeApplyResult.decisions[0];
+assert.strictEqual(staleConflictBeforeApplyResult.ok, false);
+assert.strictEqual(staleConflictBeforeApplyResult.summary['conflict-blocked'], 1);
+assert.strictEqual(staleConflictBeforeApplyDecision.status, 'conflict-blocked');
+assert.strictEqual(staleConflictBeforeApplyDecision.reason, 'repository head changed since bundle collection and git apply --check failed');
+assert.strictEqual(staleConflictBeforeApplyDecision.headBefore, staleConflictBeforeApplyCollectedHead);
+assert.strictEqual(staleConflictBeforeApplyDecision.headAfter, staleConflictBeforeApplyAdvancedHead);
+assert.strictEqual(staleConflictBeforeApplyResult.queueOverlay.entries[0].status, 'stale-against-head');
+assert.strictEqual(await fs.readFile(path.join(staleConflictBeforeApplyRepo, 'src', 'apply.ts'), 'utf8'), 'other\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: staleConflictBeforeApplyRepo })).stdout, '');
+
 const rollbackRepo = await createApplyFixtureRepo(tmp, 'autonomous-rollback-repo');
 const rollbackResult = await autonomousApplyCodexSwarmRun({
   collection: path.join(tmp, 'ready-collection'),
