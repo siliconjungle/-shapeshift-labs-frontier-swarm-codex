@@ -141,7 +141,9 @@ const CODEX_WORKER_HUMAN_QUESTION_CONTRACT = [
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 export type FrontierCodexCostEstimateReason =
+  | 'missing-input-tokens'
   | 'missing-model'
+  | 'missing-output-tokens'
   | 'missing-token-breakdown'
   | 'missing-token-usage'
   | 'unknown-model-pricing';
@@ -395,6 +397,13 @@ export interface FrontierCodexRunMetrics {
   outputTokens: number;
   totalTokens: number;
   hasTokenUsage: boolean;
+  inputTokensKnown: boolean;
+  cachedInputTokensKnown: boolean;
+  uncachedInputTokensKnown: boolean;
+  outputTokensKnown: boolean;
+  totalTokensKnown: boolean;
+  tokenBreakdownComplete: boolean;
+  missingTokenFields: string[];
 }
 
 export interface FrontierCodexRunCostEstimate {
@@ -2201,14 +2210,20 @@ export interface FrontierCodexDashboardCostModelSummary {
   jobCount: number;
   estimatedJobCount: number;
   unknownPricingJobCount: number;
+  unknownCostJobCount: number;
+  incompleteTokenUsageJobCount: number;
   unestimatedJobCount: number;
   costEstimateStatus: FrontierCodexDashboardCostEstimateStatus;
   unknownPricingReason?: FrontierCodexCostEstimateReason;
+  unknownCostReason?: FrontierCodexCostEstimateReason;
   inputTokens: number;
   cachedInputTokens: number;
   uncachedInputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  pricingSource?: string;
+  pricingSourceCheckedAt?: string;
+  pricing?: FrontierCodexModelPricing;
   estimatedCostUsd?: number;
 }
 
@@ -2216,6 +2231,14 @@ export interface FrontierCodexDashboardCostUnknownPricing {
   jobId: string;
   model?: string;
   reason: FrontierCodexCostEstimateReason;
+  missingTokenFields?: string[];
+}
+
+export interface FrontierCodexDashboardCostUnknownCost {
+  jobId: string;
+  model?: string;
+  reason: FrontierCodexCostEstimateReason;
+  missingTokenFields?: string[];
 }
 
 export interface FrontierCodexDashboardCostSummary {
@@ -2231,6 +2254,8 @@ export interface FrontierCodexDashboardCostSummary {
   jobsWithTokenUsage: number;
   estimatedJobCount: number;
   unknownPricingJobCount: number;
+  unknownCostJobCount: number;
+  incompleteTokenUsageJobCount: number;
   missingUsageJobCount: number;
   inputTokens: number;
   cachedInputTokens: number;
@@ -2245,6 +2270,7 @@ export interface FrontierCodexDashboardCostSummary {
   estimatedCostUsd?: number;
   byModel: FrontierCodexDashboardCostModelSummary[];
   unknownPricing: FrontierCodexDashboardCostUnknownPricing[];
+  unknownCosts: FrontierCodexDashboardCostUnknownCost[];
   missingUsageJobIds: string[];
 }
 
@@ -2320,6 +2346,37 @@ export interface FrontierCodexDashboardAutonomousQueueWorker {
   mergeReadiness?: string;
   changedPaths: string[];
   evidencePaths: string[];
+  costTelemetry?: FrontierCodexDashboardWorkerCostTelemetry;
+}
+
+export interface FrontierCodexDashboardWorkerCostTelemetry {
+  costEstimateStatus: FrontierCodexDashboardCostEstimateStatus;
+  estimated: boolean;
+  reason?: FrontierCodexCostEstimateReason;
+  model?: string;
+  pricingModel?: string;
+  currency: 'USD';
+  unitTokens: number;
+  pricingSource: string;
+  pricingSourceCheckedAt: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputTokensKnown: boolean;
+  cachedInputTokensKnown: boolean;
+  uncachedInputTokensKnown: boolean;
+  outputTokensKnown: boolean;
+  totalTokensKnown: boolean;
+  tokenBreakdownComplete: boolean;
+  missingTokenFields: string[];
+  inputCostUsd?: number;
+  cachedInputCostUsd?: number;
+  uncachedInputCostUsd?: number;
+  outputCostUsd?: number;
+  estimatedCostUsd?: number;
+  pricing?: FrontierCodexModelPricing;
 }
 
 export interface FrontierCodexDashboardAutonomousDecisionHistoryItem {
@@ -4664,25 +4721,46 @@ export function normalizeCodexRunMetrics(input: FrontierCodexRunMetricsInput = {
   const directUncachedInputTokens = tokenCount(input.uncachedInputTokens)
     ?? readNumberField(usage, ['uncachedInputTokens', 'uncached_input_tokens', 'inputUncachedTokens', 'input_uncached_tokens'])
     ?? readNumberField(metadata, ['uncachedInputTokens', 'uncached_input_tokens']);
-  const outputTokens = tokenCount(input.outputTokens)
+  const directOutputTokens = tokenCount(input.outputTokens)
     ?? readNumberField(usage, ['outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens'])
-    ?? readNumberField(metadata, ['outputTokens', 'output_tokens'])
-    ?? 0;
+    ?? readNumberField(metadata, ['outputTokens', 'output_tokens']);
   const explicitTotalTokens = tokenCount(input.totalTokens)
     ?? readNumberField(usage, ['totalTokens', 'total_tokens'])
     ?? readNumberField(metadata, ['totalTokens', 'total_tokens']);
+  const derivedOutputTokens = directOutputTokens === undefined && explicitTotalTokens !== undefined && directInputTokens !== undefined
+    ? Math.max(0, explicitTotalTokens - directInputTokens)
+    : undefined;
+  const outputTokens = directOutputTokens ?? derivedOutputTokens ?? 0;
+  const outputTokensKnown = directOutputTokens !== undefined || derivedOutputTokens !== undefined;
+  const derivedInputTokens = directInputTokens === undefined && explicitTotalTokens !== undefined && outputTokensKnown
+    ? Math.max(0, explicitTotalTokens - outputTokens)
+    : undefined;
+  const componentInputTokens = directInputTokens === undefined && derivedInputTokens === undefined && (directCachedInputTokens !== undefined || directUncachedInputTokens !== undefined)
+    ? (directCachedInputTokens ?? 0) + (directUncachedInputTokens ?? 0)
+    : undefined;
+  const inputTokens = directInputTokens ?? derivedInputTokens ?? componentInputTokens ?? 0;
+  const inputTokensKnown = directInputTokens !== undefined || derivedInputTokens !== undefined || componentInputTokens !== undefined;
   const cachedInputTokens = directCachedInputTokens ?? (
-    directInputTokens !== undefined && directUncachedInputTokens !== undefined
-      ? Math.max(0, directInputTokens - directUncachedInputTokens)
+    inputTokensKnown && directUncachedInputTokens !== undefined
+      ? Math.max(0, inputTokens - directUncachedInputTokens)
       : 0
   );
+  const cachedInputTokensKnown = directCachedInputTokens !== undefined || (inputTokensKnown && directUncachedInputTokens !== undefined);
   const uncachedInputTokens = directUncachedInputTokens ?? (
-    directInputTokens !== undefined
-      ? Math.max(0, directInputTokens - cachedInputTokens)
+    inputTokensKnown
+      ? Math.max(0, inputTokens - cachedInputTokens)
       : 0
   );
-  const inputTokens = directInputTokens ?? cachedInputTokens + uncachedInputTokens;
+  const uncachedInputTokensKnown = directUncachedInputTokens !== undefined || (inputTokensKnown && directCachedInputTokens !== undefined);
   const totalTokens = explicitTotalTokens ?? inputTokens + outputTokens;
+  const totalTokensKnown = explicitTotalTokens !== undefined || (inputTokensKnown && outputTokensKnown);
+  const hasTokenUsage = inputTokens > 0 || cachedInputTokens > 0 || uncachedInputTokens > 0 || outputTokens > 0 || totalTokens > 0;
+  const missingTokenFields = hasTokenUsage
+    ? [
+      !inputTokensKnown ? 'inputTokens' : undefined,
+      !outputTokensKnown ? 'outputTokens' : undefined
+    ].filter((value): value is string => !!value)
+    : [];
   return {
     ...(model ? { model } : {}),
     inputTokens,
@@ -4690,7 +4768,14 @@ export function normalizeCodexRunMetrics(input: FrontierCodexRunMetricsInput = {
     uncachedInputTokens,
     outputTokens,
     totalTokens,
-    hasTokenUsage: inputTokens > 0 || cachedInputTokens > 0 || uncachedInputTokens > 0 || outputTokens > 0 || totalTokens > 0
+    hasTokenUsage,
+    inputTokensKnown,
+    cachedInputTokensKnown,
+    uncachedInputTokensKnown,
+    outputTokensKnown,
+    totalTokensKnown,
+    tokenBreakdownComplete: hasTokenUsage && inputTokensKnown && outputTokensKnown,
+    missingTokenFields
   };
 }
 
@@ -4711,9 +4796,6 @@ export function estimateCodexRunCost(metrics: FrontierCodexRunMetricsInput | Fro
   if (!normalized.hasTokenUsage) {
     return { ...base, estimated: false, reason: 'missing-token-usage' };
   }
-  if (normalized.inputTokens === 0 && normalized.outputTokens === 0) {
-    return { ...base, estimated: false, reason: 'missing-token-breakdown' };
-  }
   if (!normalized.model) {
     return { ...base, estimated: false, reason: 'missing-model' };
   }
@@ -4721,19 +4803,31 @@ export function estimateCodexRunCost(metrics: FrontierCodexRunMetricsInput | Fro
   if (!pricing) {
     return { ...base, estimated: false, reason: 'unknown-model-pricing' };
   }
+  const missingInputTokens = normalized.inputTokensKnown === false || normalized.missingTokenFields?.includes('inputTokens');
+  const missingOutputTokens = normalized.outputTokensKnown === false || normalized.missingTokenFields?.includes('outputTokens');
   const uncachedInputCostUsd = roundUsd(normalized.uncachedInputTokens * pricing.inputUsdPerUnit / pricing.unitTokens);
   const cachedInputCostUsd = roundUsd(normalized.cachedInputTokens * pricing.cachedInputUsdPerUnit / pricing.unitTokens);
   const inputCostUsd = roundUsd(uncachedInputCostUsd + cachedInputCostUsd);
   const outputCostUsd = roundUsd(normalized.outputTokens * pricing.outputUsdPerUnit / pricing.unitTokens);
-  return {
+  const pricedBase = {
     ...base,
-    estimated: true,
     pricingModel: pricing.model,
     pricing,
-    uncachedInputCostUsd,
-    cachedInputCostUsd,
-    inputCostUsd,
-    outputCostUsd,
+    ...(!missingInputTokens ? { uncachedInputCostUsd, cachedInputCostUsd, inputCostUsd } : {}),
+    ...(!missingOutputTokens ? { outputCostUsd } : {})
+  };
+  if (missingInputTokens && missingOutputTokens) {
+    return { ...pricedBase, estimated: false, reason: 'missing-token-breakdown' };
+  }
+  if (missingInputTokens) {
+    return { ...pricedBase, estimated: false, reason: 'missing-input-tokens' };
+  }
+  if (missingOutputTokens) {
+    return { ...pricedBase, estimated: false, reason: 'missing-output-tokens' };
+  }
+  return {
+    ...pricedBase,
+    estimated: true,
     estimatedCostUsd: roundUsd(inputCostUsd + outputCostUsd)
   };
 }
@@ -5324,6 +5418,7 @@ function createDashboardAutonomousQueueWorkers(run: FrontierSwarmRun): FrontierC
   return run.jobs.map((job) => {
     const result = resultByJobId.get(job.id);
     const status = result?.status ?? job.status;
+    const costTelemetry = createDashboardWorkerCostTelemetry(result?.metadata ?? job.metadata);
     return {
       jobId: job.id,
       taskId: job.taskId,
@@ -5335,7 +5430,8 @@ function createDashboardAutonomousQueueWorkers(run: FrontierSwarmRun): FrontierC
       ...(result ? { resultStatus: result.status } : {}),
       ...(result?.mergeReadiness ? { mergeReadiness: result.mergeReadiness } : {}),
       changedPaths: result?.changedPaths ?? [],
-      evidencePaths: result?.evidencePaths ?? []
+      evidencePaths: result?.evidencePaths ?? [],
+      ...(costTelemetry ? { costTelemetry } : {})
     };
   }).sort((left, right) => left.jobId.localeCompare(right.jobId));
 }
@@ -5497,12 +5593,13 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
   const costItems = collectCodexDashboardCostItems(run);
   const byModel = new Map<string, FrontierCodexDashboardCostModelSummary>();
   const unknownPricing: FrontierCodexDashboardCostUnknownPricing[] = [];
+  const unknownCosts: FrontierCodexDashboardCostUnknownCost[] = [];
   const missingUsageJobIds: string[] = [];
   const summary: FrontierCodexDashboardCostSummary = {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_VERSION,
     source: 'run-results-and-jobs-metadata',
-    available: false,
+    available: costItems.length > 0,
     currency: 'USD',
     unitTokens: FRONTIER_SWARM_CODEX_MODEL_PRICING_UNIT_TOKENS,
     pricingSource: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE,
@@ -5511,6 +5608,8 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
     jobsWithTokenUsage: 0,
     estimatedJobCount: 0,
     unknownPricingJobCount: 0,
+    unknownCostJobCount: 0,
+    incompleteTokenUsageJobCount: 0,
     missingUsageJobCount: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
@@ -5520,17 +5619,30 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
     costEstimateStatus: 'unestimated',
     byModel: [],
     unknownPricing,
+    unknownCosts,
     missingUsageJobIds
   };
   for (const item of costItems) {
     const metrics = readCodexRunMetrics(item.metadata);
-    const estimate = metrics ? readCodexCostEstimate(item.metadata) ?? estimateCodexRunCost(metrics) : readCodexCostEstimate(item.metadata);
+    const resourceModel = readCodexResourceAllocationModel(item.metadata);
+    const estimate = metrics
+      ? readCodexCostEstimate(item.metadata) ?? estimateCodexRunCost(metrics)
+      : readCodexCostEstimate(item.metadata) ?? (resourceModel ? estimateCodexRunCost({ model: resourceModel }) : undefined);
     if (!metrics?.hasTokenUsage) {
       summary.missingUsageJobCount += 1;
       missingUsageJobIds.push(item.jobId);
+      if (estimate) {
+        summary.unknownCostJobCount += 1;
+        if (isIncompleteTokenUsageCostReason(estimate.reason ?? 'missing-token-usage')) summary.incompleteTokenUsageJobCount += 1;
+        unknownCosts.push({
+          jobId: item.jobId,
+          ...(estimate.model ? { model: estimate.model } : {}),
+          reason: estimate.reason ?? 'missing-token-usage',
+          missingTokenFields: ['inputTokens', 'outputTokens']
+        });
+      }
       continue;
     }
-    summary.available = true;
     summary.jobsWithTokenUsage += 1;
     summary.inputTokens += metrics.inputTokens;
     summary.cachedInputTokens += metrics.cachedInputTokens;
@@ -5543,6 +5655,8 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
       jobCount: 0,
       estimatedJobCount: 0,
       unknownPricingJobCount: 0,
+      unknownCostJobCount: 0,
+      incompleteTokenUsageJobCount: 0,
       unestimatedJobCount: 0,
       costEstimateStatus: 'unestimated' as const,
       inputTokens: 0,
@@ -5557,6 +5671,11 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
     modelSummary.uncachedInputTokens += metrics.uncachedInputTokens;
     modelSummary.outputTokens += metrics.outputTokens;
     modelSummary.totalTokens += metrics.totalTokens;
+    if (estimate?.pricing) {
+      modelSummary.pricing = estimate.pricing;
+      modelSummary.pricingSource = estimate.source;
+      modelSummary.pricingSourceCheckedAt = estimate.sourceCheckedAt;
+    }
     if (estimate?.estimated) {
       summary.estimatedJobCount += 1;
       modelSummary.estimatedJobCount += 1;
@@ -5568,16 +5687,31 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
       modelSummary.estimatedCostUsd = roundUsd((modelSummary.estimatedCostUsd ?? 0) + (estimate.estimatedCostUsd ?? 0));
     } else {
       const reason = estimate?.reason ?? 'unknown-model-pricing';
+      const missingTokenFields = metrics.missingTokenFields.length ? [...metrics.missingTokenFields] : undefined;
+      summary.unknownCostJobCount += 1;
+      modelSummary.unknownCostJobCount += 1;
+      modelSummary.unknownCostReason ??= reason;
       modelSummary.unestimatedJobCount += 1;
+      if (isIncompleteTokenUsageCostReason(reason)) {
+        summary.incompleteTokenUsageJobCount += 1;
+        modelSummary.incompleteTokenUsageJobCount += 1;
+      }
       if (reason === 'unknown-model-pricing' || reason === 'missing-model') {
         summary.unknownPricingJobCount += 1;
         modelSummary.unknownPricingJobCount += 1;
         modelSummary.unknownPricingReason ??= reason;
+        unknownPricing.push({
+          jobId: item.jobId,
+          ...(model !== 'unknown' ? { model } : {}),
+          reason,
+          ...(missingTokenFields ? { missingTokenFields } : {})
+        });
       }
-      unknownPricing.push({
+      unknownCosts.push({
         jobId: item.jobId,
         ...(model !== 'unknown' ? { model } : {}),
-        reason
+        reason,
+        ...(missingTokenFields ? { missingTokenFields } : {})
       });
     }
     byModel.set(model, modelSummary);
@@ -5586,6 +5720,8 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
     if (modelSummary.estimatedJobCount > 0 && modelSummary.unestimatedJobCount === 0) {
       modelSummary.costEstimateStatus = 'estimated';
     } else if (modelSummary.estimatedJobCount > 0) {
+      modelSummary.costEstimateStatus = 'partial';
+    } else if (modelSummary.incompleteTokenUsageJobCount > 0) {
       modelSummary.costEstimateStatus = 'partial';
     } else if (modelSummary.unknownPricingJobCount > 0) {
       modelSummary.costEstimateStatus = 'unknown-pricing';
@@ -5597,6 +5733,8 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
     summary.costEstimateStatus = 'estimated';
   } else if (summary.estimatedJobCount > 0) {
     summary.costEstimateStatus = 'partial';
+  } else if (summary.incompleteTokenUsageJobCount > 0) {
+    summary.costEstimateStatus = 'partial';
   } else if (summary.unknownPricingJobCount > 0) {
     summary.costEstimateStatus = 'unknown-pricing';
   } else {
@@ -5604,6 +5742,7 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
   }
   summary.byModel = Array.from(byModel.values()).sort((left, right) => left.model.localeCompare(right.model));
   summary.unknownPricing = unknownPricing.sort((left, right) => left.jobId.localeCompare(right.jobId));
+  summary.unknownCosts = unknownCosts.sort((left, right) => left.jobId.localeCompare(right.jobId));
   summary.missingUsageJobIds = missingUsageJobIds.sort();
   return summary;
 }
@@ -5620,7 +5759,7 @@ function collectCodexDashboardCostItems(run: FrontierSwarmRun): FrontierCodexDas
     if (resultJobIds.has(job.id)) continue;
     const metrics = readCodexRunMetrics(job.metadata);
     const estimate = readCodexCostEstimate(job.metadata);
-    if (!metrics?.hasTokenUsage && !estimate) continue;
+    if (!metrics?.hasTokenUsage && !estimate && !readCodexResourceAllocationModel(job.metadata)) continue;
     items.push({
       jobId: job.id,
       status: job.status,
@@ -5629,6 +5768,82 @@ function collectCodexDashboardCostItems(run: FrontierSwarmRun): FrontierCodexDas
     });
   }
   return items;
+}
+
+function isIncompleteTokenUsageCostReason(reason: FrontierCodexCostEstimateReason): boolean {
+  return reason === 'missing-input-tokens'
+    || reason === 'missing-output-tokens'
+    || reason === 'missing-token-breakdown'
+    || reason === 'missing-token-usage';
+}
+
+function createDashboardWorkerCostTelemetry(metadata: unknown): FrontierCodexDashboardWorkerCostTelemetry | undefined {
+  const metrics = readCodexRunMetrics(metadata);
+  const resourceModel = readCodexResourceAllocationModel(metadata);
+  const estimate = metrics
+    ? readCodexCostEstimate(metadata) ?? estimateCodexRunCost(metrics)
+    : readCodexCostEstimate(metadata) ?? (resourceModel ? estimateCodexRunCost({ model: resourceModel }) : undefined);
+  if (!metrics && !estimate) return undefined;
+  const inputTokens = metrics?.inputTokens ?? estimate?.inputTokens ?? 0;
+  const cachedInputTokens = metrics?.cachedInputTokens ?? estimate?.cachedInputTokens ?? 0;
+  const uncachedInputTokens = metrics?.uncachedInputTokens ?? estimate?.uncachedInputTokens ?? 0;
+  const outputTokens = metrics?.outputTokens ?? estimate?.outputTokens ?? 0;
+  const totalTokens = metrics?.totalTokens ?? estimate?.totalTokens ?? 0;
+  const inputTokensKnown = metrics?.inputTokensKnown ?? false;
+  const cachedInputTokensKnown = metrics?.cachedInputTokensKnown ?? false;
+  const uncachedInputTokensKnown = metrics?.uncachedInputTokensKnown ?? false;
+  const outputTokensKnown = metrics?.outputTokensKnown ?? false;
+  const totalTokensKnown = metrics?.totalTokensKnown ?? false;
+  const missingTokenFields = metrics?.missingTokenFields ?? (estimate?.reason === 'missing-token-usage' || estimate?.reason === 'missing-token-breakdown'
+    ? ['inputTokens', 'outputTokens']
+    : estimate?.reason === 'missing-input-tokens'
+      ? ['inputTokens']
+      : estimate?.reason === 'missing-output-tokens'
+        ? ['outputTokens']
+        : []);
+  return {
+    costEstimateStatus: costEstimateStatusFromEstimate(estimate),
+    estimated: estimate?.estimated ?? false,
+    ...(estimate?.reason ? { reason: estimate.reason } : {}),
+    ...(metrics?.model ?? estimate?.model ?? resourceModel ? { model: metrics?.model ?? estimate?.model ?? resourceModel } : {}),
+    ...(estimate?.pricingModel ? { pricingModel: estimate.pricingModel } : {}),
+    currency: estimate?.currency ?? 'USD',
+    unitTokens: estimate?.unitTokens ?? FRONTIER_SWARM_CODEX_MODEL_PRICING_UNIT_TOKENS,
+    pricingSource: estimate?.source ?? FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE,
+    pricingSourceCheckedAt: estimate?.sourceCheckedAt ?? FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE_CHECKED_AT,
+    inputTokens,
+    cachedInputTokens,
+    uncachedInputTokens,
+    outputTokens,
+    totalTokens,
+    inputTokensKnown,
+    cachedInputTokensKnown,
+    uncachedInputTokensKnown,
+    outputTokensKnown,
+    totalTokensKnown,
+    tokenBreakdownComplete: metrics?.tokenBreakdownComplete ?? false,
+    missingTokenFields,
+    ...(estimate?.inputCostUsd !== undefined ? { inputCostUsd: estimate.inputCostUsd } : {}),
+    ...(estimate?.cachedInputCostUsd !== undefined ? { cachedInputCostUsd: estimate.cachedInputCostUsd } : {}),
+    ...(estimate?.uncachedInputCostUsd !== undefined ? { uncachedInputCostUsd: estimate.uncachedInputCostUsd } : {}),
+    ...(estimate?.outputCostUsd !== undefined ? { outputCostUsd: estimate.outputCostUsd } : {}),
+    ...(estimate?.estimatedCostUsd !== undefined ? { estimatedCostUsd: estimate.estimatedCostUsd } : {}),
+    ...(estimate?.pricing ? { pricing: estimate.pricing } : {})
+  };
+}
+
+function readCodexResourceAllocationModel(metadata: unknown): string | undefined {
+  if (!isObject(metadata) || !isObject(metadata.resourceAllocation)) return undefined;
+  return normalizeCodexMetricsModel(readStringField(metadata.resourceAllocation, ['model']));
+}
+
+function costEstimateStatusFromEstimate(estimate: FrontierCodexRunCostEstimate | undefined): FrontierCodexDashboardCostEstimateStatus {
+  if (estimate?.estimated) return 'estimated';
+  if (estimate?.reason === 'unknown-model-pricing' || estimate?.reason === 'missing-model') return 'unknown-pricing';
+  if (estimate?.reason && isIncompleteTokenUsageCostReason(estimate.reason)) {
+    return estimate.inputCostUsd !== undefined || estimate.outputCostUsd !== undefined ? 'partial' : 'unestimated';
+  }
+  return 'unestimated';
 }
 
 function createDashboardQueueMetadata(
