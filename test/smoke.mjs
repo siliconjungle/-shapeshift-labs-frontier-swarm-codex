@@ -11,6 +11,7 @@ import {
   buildCodexArgs,
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
+  createCodexAutoDrainRerunManifest,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
   FRONTIER_SWARM_CODEX_MODEL_PRICING,
@@ -2554,6 +2555,8 @@ const collapsedDecisionAutoDrain = {
       }
     },
     apply: {
+      outDir: path.join(collapsedDecisionOutDir, 'apply-01'),
+      decisionLogPath: path.join(collapsedDecisionOutDir, 'apply-01', 'autonomous-merge-decisions.jsonl'),
       decisions: [
         createSyntheticAutonomousDecision('rerun', {
           id: 'collapsed-rerun-old',
@@ -2686,6 +2689,153 @@ assert.match(collapsedDecisionCards.get('stale-rerun').action, /escalate only ex
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').value, 0);
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').detail, '0 queue block actions, 0 explicit human questions');
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').status, 'ok');
+const collapsedManifestHead = 'f'.repeat(40);
+const closedStaleEntry = createSyntheticCollectedRerunEntry(collapsedDecisionOutDir, {
+  jobId: 'closed-stale-old-job',
+  taskId: 'closed-stale-task',
+  queueItemIds: ['closed-stale-task'],
+  changedPaths: ['src/closed-stale.ts']
+});
+const openRerunEntry = createSyntheticCollectedRerunEntry(collapsedDecisionOutDir, {
+  jobId: 'open-rerun-old-job',
+  taskId: 'open-rerun-task',
+  queueItemIds: ['open-rerun-task'],
+  changedPaths: ['src/open-rerun.ts']
+});
+const openDecisionPatchPath = path.join(collapsedDecisionOutDir, 'apply-01', 'open-rerun-job', 'changes.patch');
+const openDecisionBundlePath = path.join(collapsedDecisionOutDir, 'apply-01', 'open-rerun-job', 'merge.json');
+const collapsedDecisionManifest = createCodexAutoDrainRerunManifest({
+  outDir: collapsedDecisionOutDir,
+  autoDrainPath: path.join(collapsedDecisionOutDir, 'auto-drain.json'),
+  manifestPath: path.join(collapsedDecisionOutDir, 'rerun-manifest.json'),
+  generatedAt: collapsedDecisionArtifacts.generatedAt,
+  currentHead: collapsedManifestHead,
+  terminalJobIds: ['closed-stale-fresh-job', 'closed-conflict-fresh-job'],
+  blockedJobIds: [],
+  iterations: [{
+    index: 1,
+    collection: {
+      outDir: path.join(collapsedDecisionOutDir, 'collection-01'),
+      artifacts: {
+        collectionPath: path.join(collapsedDecisionOutDir, 'collection-01', 'collection.json'),
+        hierarchicalMergeQueuePath: path.join(collapsedDecisionOutDir, 'collection-01', 'hierarchical-merge-queue.json'),
+        queueOverlayPath: path.join(collapsedDecisionOutDir, 'collection-01', 'queue-overlay.json')
+      },
+      mergeIndex: { runId: 'collapsed-decision-run' },
+      buckets: {
+        'ready-to-apply': [],
+        'needs-human-port': [],
+        'failed-evidence': [],
+        'stale-against-head': [closedStaleEntry, openRerunEntry]
+      },
+      hierarchicalMergeQueue: {
+        assignments: [{
+          jobId: 'closed-stale-old-job',
+          taskId: 'closed-stale-task',
+          lane: 'rerun-lifecycle',
+          queueItemIds: ['closed-stale-task'],
+          action: 'rerun',
+          changedPaths: ['src/closed-stale.ts'],
+          changedRegions: [],
+          conflictingJobIds: [],
+          scopeId: 'path:src/closed-stale.ts',
+          leaseKey: 'path:src/closed-stale.ts',
+          reasons: ['stale-against-head']
+        }, {
+          jobId: 'open-rerun-old-job',
+          taskId: 'open-rerun-task',
+          lane: 'rerun-lifecycle',
+          queueItemIds: ['open-rerun-task'],
+          action: 'rerun',
+          changedPaths: ['src/open-rerun.ts'],
+          changedRegions: ['src/open-rerun.ts#open'],
+          conflictingJobIds: [],
+          scopeId: 'region:src/open-rerun.ts#open',
+          leaseKey: 'region:src/open-rerun.ts#open',
+          reasons: ['stale-against-head']
+        }]
+      }
+    },
+    apply: {
+      outDir: path.join(collapsedDecisionOutDir, 'manifest-apply-01'),
+      decisionLogPath: path.join(collapsedDecisionOutDir, 'manifest-apply-01', 'autonomous-merge-decisions.jsonl'),
+      decisions: [
+        createSyntheticAutonomousDecision('rerun', {
+          id: 'closed-stale-old-decision',
+          jobId: 'closed-stale-old-job',
+          taskId: 'closed-stale-task',
+          queueItemIds: ['closed-stale-task'],
+          patchPath: path.join(collapsedDecisionOutDir, 'apply-01', 'closed-stale-old-job', 'changes.patch'),
+          bundlePath: path.join(collapsedDecisionOutDir, 'apply-01', 'closed-stale-old-job', 'merge.json'),
+          changedPaths: ['src/closed-stale.ts'],
+          headAfter: 'a'.repeat(40),
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 1
+        }),
+        createSyntheticAutonomousDecision('conflict-blocked', {
+          id: 'closed-conflict-old-decision',
+          jobId: 'closed-conflict-old-job',
+          taskId: 'closed-conflict-task',
+          queueItemIds: ['closed-conflict-task'],
+          patchPath: path.join(collapsedDecisionOutDir, 'apply-01', 'closed-conflict-old-job', 'changes.patch'),
+          bundlePath: path.join(collapsedDecisionOutDir, 'apply-01', 'closed-conflict-old-job', 'merge.json'),
+          changedPaths: ['src/closed-conflict.ts'],
+          headBefore: 'b'.repeat(40),
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 2
+        }),
+        createSyntheticAutonomousDecision('applied', {
+          id: 'closed-stale-fresh-decision',
+          jobId: 'closed-stale-fresh-job',
+          taskId: 'closed-stale-task',
+          queueItemIds: ['closed-stale-task'],
+          changedPaths: ['src/closed-stale.ts'],
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 3
+        }),
+        createSyntheticAutonomousDecision('committed', {
+          id: 'closed-conflict-fresh-decision',
+          jobId: 'closed-conflict-fresh-job',
+          taskId: 'closed-conflict-task',
+          queueItemIds: ['closed-conflict-task'],
+          changedPaths: ['src/closed-conflict.ts'],
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 4
+        }),
+        createSyntheticAutonomousDecision('rerun', {
+          id: 'open-rerun-decision',
+          jobId: 'open-rerun-new-job',
+          taskId: 'open-rerun-task',
+          queueItemIds: ['open-rerun-task'],
+          patchPath: openDecisionPatchPath,
+          bundlePath: openDecisionBundlePath,
+          changedPaths: ['src/open-rerun.ts'],
+          changedRegions: ['src/open-rerun.ts#open'],
+          headAfter: 'c'.repeat(40),
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 5
+        })
+      ]
+    }
+  }]
+});
+assert.strictEqual(collapsedDecisionManifest.kind, FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND);
+assert.strictEqual(collapsedDecisionManifest.currentHead, collapsedManifestHead);
+assert.deepStrictEqual(collapsedDecisionManifest.taskIds, ['open-rerun-task']);
+assert.deepStrictEqual(collapsedDecisionManifest.jobIds, ['open-rerun-old-job']);
+assert.strictEqual(collapsedDecisionManifest.summary.taskCount, 1);
+assert.strictEqual(collapsedDecisionManifest.summary.staleAgainstHeadCount, 1);
+assert.strictEqual(collapsedDecisionManifest.summary.queueRerunCount, 1);
+assert.strictEqual(collapsedDecisionManifest.summary.decisionRerunCount, 1);
+assert.strictEqual(collapsedDecisionManifest.summary.conflictBlockedCount, 0);
+const collapsedDecisionManifestTask = collapsedDecisionManifest.items[0];
+assert.strictEqual(collapsedDecisionManifestTask.id, 'open-rerun-task-rerun-current-head');
+assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.sourceKinds, ['stale-against-head', 'queue-rerun', 'decision-rerun']);
+assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourcePatchPaths.includes(openRerunEntry.bundle.patchPath));
+assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourcePatchPaths.includes(path.join(openRerunEntry.outputDir, 'changes.patch')));
+assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourcePatchPaths.includes(openDecisionPatchPath));
+assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourceBundlePaths.includes(openRerunEntry.mergePath));
+assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourceBundlePaths.includes(path.join(openRerunEntry.outputDir, 'merge.json')));
+assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourceBundlePaths.includes(openDecisionBundlePath));
+assert.ok(collapsedDecisionManifestTask.sourceRefs.includes(openRerunEntry.bundle.patchPath));
+assert.ok(collapsedDecisionManifestTask.sourceRefs.includes(openDecisionBundlePath));
+assert.ok(!collapsedDecisionManifest.taskIds.includes('closed-stale-task'));
+assert.ok(!collapsedDecisionManifest.taskIds.includes('closed-conflict-task'));
 
 const explicitHumanQuestionOutDir = path.join(tmp, 'explicit-human-question-dashboard');
 const explicitHumanQuestionArtifacts = createSyntheticAutoDrainArtifacts(explicitHumanQuestionOutDir);
@@ -3556,10 +3706,42 @@ function createSyntheticAutonomousDecision(status, overrides = {}) {
     changedRegions: overrides.changedRegions ?? [],
     lockScope: overrides.lockScope ?? 'path',
     lockKeys: overrides.lockKeys ?? [`path:src/${jobId}.ts`],
+    ...(typeof overrides.patchPath === 'string' ? { patchPath: overrides.patchPath } : {}),
+    ...(typeof overrides.headBefore === 'string' ? { headBefore: overrides.headBefore } : {}),
+    ...(typeof overrides.headAfter === 'string' ? { headAfter: overrides.headAfter } : {}),
     startedAt: overrides.startedAt ?? now,
     finishedAt: overrides.finishedAt ?? now,
     dryRun: overrides.dryRun ?? false,
     commands: overrides.commands ?? []
+  };
+}
+
+function createSyntheticCollectedRerunEntry(root, overrides = {}) {
+  const jobId = overrides.jobId ?? 'synthetic-rerun-job';
+  const taskId = overrides.taskId ?? `${jobId}-task`;
+  const queueItemIds = Array.isArray(overrides.queueItemIds) ? overrides.queueItemIds : [taskId];
+  const changedPaths = Array.isArray(overrides.changedPaths) ? overrides.changedPaths : [`src/${taskId}.ts`];
+  const changedRegions = Array.isArray(overrides.changedRegions) ? overrides.changedRegions : [];
+  const outputDir = overrides.outputDir ?? path.join(root, 'collection-01', 'stale-against-head', jobId);
+  const sourcePatchPath = overrides.sourcePatchPath ?? path.join(root, 'workers', jobId, 'changes.patch');
+  const sourceBundlePath = overrides.sourceBundlePath ?? path.join(root, 'workers', jobId, 'merge.json');
+  return {
+    jobId,
+    bucket: 'stale-against-head',
+    outputDir,
+    mergePath: sourceBundlePath,
+    bundle: {
+      jobId,
+      taskId,
+      lane: overrides.lane ?? 'rerun-lifecycle',
+      queueItemIds,
+      patchPath: sourcePatchPath,
+      changedPaths,
+      changedRegions,
+      reasons: overrides.reasons ?? ['stale-against-head'],
+      evidencePaths: overrides.evidencePaths ?? [path.join(root, 'workers', jobId, 'evidence.json')],
+      allowedWrites: overrides.allowedWrites ?? changedPaths
+    }
   };
 }
 

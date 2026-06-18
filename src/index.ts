@@ -2079,12 +2079,16 @@ async function runCodexSwarmAutoDrain(input: {
       ...admission.deferred.map((entry) => entry.jobId),
       ...admittedCandidateJobIds.filter((jobId) => !admittedJobIds.includes(jobId))
     ]).sort();
-    const terminalQueueDebtJobIds = terminalAutoDrainQueueDebtJobIds(collection, terminalJobIds, blockedJobIds);
+    const resolvedQueueKeys = createResolvedAutonomousDecisionQueueKeySet(
+      iterations.flatMap((iteration) => iteration.apply?.decisions ?? [])
+    );
+    const terminalQueueDebtJobIds = terminalAutoDrainQueueDebtJobIds(collection, terminalJobIds, blockedJobIds, resolvedQueueKeys);
     const activePromotedQueueDebtJobIds = visibleAutoDrainQueueDebtJobIds(
       collection,
       [...promotedQueueDebtJobIds],
       terminalJobIds,
-      blockedJobIds
+      blockedJobIds,
+      resolvedQueueKeys
     );
     const drainWorkJobIds = uniqueStrings([
       ...allReadyJobIds,
@@ -2203,12 +2207,16 @@ async function runCodexSwarmAutoDrain(input: {
     remainingReadyCount = postApplyCollection.buckets['ready-to-apply']
       .map((entry) => entry.jobId)
       .filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId)).length;
-    const remainingTerminalQueueDebtCount = terminalAutoDrainQueueDebtJobIds(postApplyCollection, terminalJobIds, blockedJobIds).length;
+    const updatedResolvedQueueKeys = createResolvedAutonomousDecisionQueueKeySet(
+      iterations.flatMap((iteration) => iteration.apply?.decisions ?? [])
+    );
+    const remainingTerminalQueueDebtCount = terminalAutoDrainQueueDebtJobIds(postApplyCollection, terminalJobIds, blockedJobIds, updatedResolvedQueueKeys).length;
     const remainingPromotedQueueDebtCount = visibleAutoDrainQueueDebtJobIds(
       postApplyCollection,
       [...promotedQueueDebtJobIds],
       terminalJobIds,
-      blockedJobIds
+      blockedJobIds,
+      updatedResolvedQueueKeys
     ).length;
     if (!apply.decisions.length || (remainingReadyCount === 0 && remainingTerminalQueueDebtCount === 0 && remainingPromotedQueueDebtCount === 0)) break;
   }
@@ -2525,11 +2533,17 @@ function visibleAutoDrainQueueDebtJobIds(
   collection: FrontierCodexCollectResult,
   jobIds: readonly string[],
   terminalJobIds: ReadonlySet<string>,
-  blockedJobIds: ReadonlySet<string>
+  blockedJobIds: ReadonlySet<string>,
+  resolvedQueueKeys: ReadonlySet<string> = new Set()
 ): string[] {
   const entriesByJobId = collectionEntriesByJobId(collection);
   return uniqueStrings(jobIds)
-    .filter((jobId) => entriesByJobId.has(jobId) && !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId))
+    .filter((jobId) => {
+      const entry = entriesByJobId.get(jobId);
+      if (!entry) return false;
+      const record = autoDrainGroupingRecord(entry);
+      return dashboardQueueSubjectIsOpen(record, terminalJobIds, blockedJobIds, resolvedQueueKeys);
+    })
     .sort();
 }
 
@@ -2570,13 +2584,13 @@ function autoDrainQueueDebtRecords(input: {
 function terminalAutoDrainQueueDebtJobIds(
   collection: FrontierCodexCollectResult,
   terminalJobIds: ReadonlySet<string>,
-  blockedJobIds: ReadonlySet<string>
+  blockedJobIds: ReadonlySet<string>,
+  resolvedQueueKeys: ReadonlySet<string> = new Set()
 ): string[] {
   return uniqueStrings((collection.hierarchicalMergeQueue?.assignments ?? [])
     .filter((assignment) => (
       AUTO_DRAIN_TERMINAL_QUEUE_ACTIONS.has(assignment.action)
-      && !terminalJobIds.has(assignment.jobId)
-      && !blockedJobIds.has(assignment.jobId)
+      && dashboardQueueSubjectIsOpen(assignment, terminalJobIds, blockedJobIds, resolvedQueueKeys)
     ))
     .map((assignment) => assignment.jobId)).sort();
 }
@@ -5240,7 +5254,11 @@ function createDashboardAnsweredContinuationKeySet(
 }
 
 function createDashboardResolvedQueueKeySet(autoDrain: FrontierCodexSwarmAutoDrainResult | null): Set<string> {
-  const components = createDashboardAutonomousDecisionComponents((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
+  return createResolvedAutonomousDecisionQueueKeySet((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
+}
+
+function createResolvedAutonomousDecisionQueueKeySet(decisions: readonly FrontierCodexAutonomousMergeDecision[]): Set<string> {
+  const components = createDashboardAutonomousDecisionComponents(decisions);
   const resolved = new Set<string>();
   for (const component of components) {
     const decision = component.latest.decision;
@@ -6706,7 +6724,7 @@ async function writeAutoDrainRerunManifest(input: {
 }): Promise<FrontierCodexAutoDrainRerunManifest> {
   const manifestPath = path.join(input.outDir, 'rerun-manifest.json');
   const currentHead = await readCurrentGitHead(input.cwd);
-  const manifest = createAutoDrainRerunManifest({
+  const manifest = createCodexAutoDrainRerunManifest({
     ...input,
     manifestPath,
     currentHead
@@ -6715,7 +6733,7 @@ async function writeAutoDrainRerunManifest(input: {
   return manifest;
 }
 
-function createAutoDrainRerunManifest(input: {
+export interface FrontierCodexAutoDrainRerunManifestInput {
   outDir: string;
   autoDrainPath: string;
   manifestPath: string;
@@ -6724,7 +6742,9 @@ function createAutoDrainRerunManifest(input: {
   iterations: readonly FrontierCodexSwarmAutoDrainIteration[];
   terminalJobIds: readonly string[];
   blockedJobIds: readonly string[];
-}): FrontierCodexAutoDrainRerunManifest {
+}
+
+export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainRerunManifestInput): FrontierCodexAutoDrainRerunManifest {
   const candidates = new Map<string, AutoDrainRerunCandidate>();
   const latestIteration = input.iterations.at(-1);
   const latestCollection = latestIteration?.postApplyCollection ?? latestIteration?.collection;
@@ -6745,12 +6765,9 @@ function createAutoDrainRerunManifest(input: {
     .map((component) => component.latest)
     .sort((left, right) => left.index - right.index)
     .map((entry) => entry.decision);
-  const resolvedQueueKeys = new Set<string>();
-  for (const component of decisionComponents) {
-    const decision = component.latest.decision;
-    if (decision.status !== 'applied' && decision.status !== 'committed') continue;
-    for (const key of component.keys) resolvedQueueKeys.add(key);
-  }
+  const resolvedQueueKeys = createResolvedAutonomousDecisionQueueKeySet(
+    input.iterations.flatMap((iteration) => iteration.apply?.decisions ?? [])
+  );
   const decisionLogPathById = new Map<string, string>();
   const applyPathByDecisionId = new Map<string, string>();
   const autonomousQueueOverlayPathByDecisionId = new Map<string, string>();

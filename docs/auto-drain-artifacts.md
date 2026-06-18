@@ -28,6 +28,8 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 
 The top-level files under `auto-drain/` are summary or latest-snapshot reads. They are useful for dashboards that only need the current state after the run finishes. Use the numbered iteration directories when historical iteration state matters.
 
+Rerun manifests are lifecycle artifacts, not append-only review queues. The manifest builder collapses queue item, task, and job aliases through the latest autonomous decisions; an older stale, rerun, or conflict-blocked bundle is omitted once a newer `applied` or `committed` decision satisfies the same queue subject. Open items preserve both original worker patch/bundle links and copied collection or apply artifact links so the next focused swarm can rerun from current head without rediscovering the source bundle.
+
 When the coordinator checkout is dirty, auto-drain is collect-only. It still writes `swarm-results.json`, `coordinator-dashboard.json`, `auto-drain/auto-drain.json`, `auto-drain/rerun-manifest.json`, collection artifacts, merge admission, grouping, reviewer, patch-stack, queue metadata, and operator-summary artifacts. It intentionally skips `auto-drain/apply-NN/*` and reports `autoDrain.ok: false`, `autoDrain.skippedReason: "dirty-worktree"`, `autoDrain.dirtyPaths[]`, `autoDrain.summary.applyCount: 0`, and any remaining ready count. Dashboards should show this as queued coordinator work waiting for a clean apply window, not as missing data or a worker failure. Ready or promoted counts in this state are pending queue counts; they are not landed changes because there are no apply decisions.
 
 ## Cost Summary
