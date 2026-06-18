@@ -172,6 +172,7 @@ export interface FrontierCodexSwarmAutoDrainOptions {
   maxHighRisk?: number;
   allowRisks?: readonly FrontierSwarmRiskLevel[];
   admitConflictLeaders?: boolean;
+  promotePatchCandidates?: boolean;
   checkStale?: boolean;
   focusedCommands?: readonly (string | FrontierSwarmCommand)[];
   globalCommands?: readonly (string | FrontierSwarmCommand)[];
@@ -306,6 +307,10 @@ export interface FrontierCodexCollectInput {
   cwd?: string;
   checkStale?: boolean;
   branchPrefix?: string;
+  promotePatchCandidates?: boolean;
+  promotionFocusedCommands?: readonly (string | FrontierSwarmCommand)[];
+  promotionGlobalCommands?: readonly (string | FrontierSwarmCommand)[];
+  promotionGlobalGlobs?: readonly string[];
 }
 
 export interface FrontierCodexCollectedBundle {
@@ -346,6 +351,7 @@ export interface FrontierCodexCollectArtifacts {
     mergeQueueRejectCount: number;
     mergeQueueBlockCount: number;
     mergeQueueRecordOnlyCount: number;
+    promotedPatchCandidateCount: number;
     patchCount: number;
   };
 }
@@ -379,6 +385,7 @@ export interface FrontierCodexCollectResult {
     mergeQueueRejectCount?: number;
     mergeQueueBlockCount?: number;
     mergeQueueRecordOnlyCount?: number;
+    promotedPatchCandidateCount?: number;
   };
   artifacts?: FrontierCodexCollectArtifacts;
 }
@@ -893,6 +900,7 @@ export interface FrontierCodexAutoDrainArtifactIteration {
   mergeQueueRejectCount: number;
   mergeQueueBlockCount: number;
   mergeQueueRecordOnlyCount: number;
+  promotedPatchCandidateCount: number;
 }
 
 export interface FrontierCodexAutoDrainArtifactPathGroup {
@@ -945,6 +953,7 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     rejectCount: number;
     blockCount: number;
     recordOnlyCount: number;
+    promotedPatchCandidateCount: number;
   };
   iterations: FrontierCodexAutoDrainArtifactIteration[];
   summary: {
@@ -958,6 +967,7 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     reviewerPlanCount: number;
     patchStackPlanCount: number;
     decisionCount: number;
+    promotedPatchCandidateCount: number;
     patchCount: number;
   };
 }
@@ -990,6 +1000,7 @@ export interface FrontierCodexDashboardQueueMetadata {
     needsHumanPortCount: number;
     failedEvidenceCount: number;
     staleAgainstHeadCount: number;
+    promotedPatchCandidateCount: number;
   };
   queueHealth: FrontierCodexDashboardQueueHealth;
   humanQuestions: FrontierCodexDashboardHumanQuestions;
@@ -1308,7 +1319,11 @@ async function runCodexSwarmAutoDrain(input: {
       cwd: input.cwd,
       outDir: path.join(outDir, `collection-${String(index + 1).padStart(2, '0')}`),
       checkStale: normalized.checkStale ?? true,
-      branchPrefix: normalized.branchPrefix
+      branchPrefix: normalized.branchPrefix,
+      promotePatchCandidates: shouldAutoDrainPromotePatchCandidates(normalized),
+      promotionFocusedCommands: normalized.focusedCommands,
+      promotionGlobalCommands: normalized.globalCommands,
+      promotionGlobalGlobs: normalized.globalGlobs
     });
     latestCollection = collection;
     await writeAutoDrainReviewArtifacts(outDir, collection);
@@ -1402,7 +1417,11 @@ async function runCodexSwarmAutoDrain(input: {
       cwd: input.cwd,
       outDir: path.join(outDir, `collection-${String(index + 1).padStart(2, '0')}-post-apply`),
       checkStale: normalized.checkStale ?? true,
-      branchPrefix: normalized.branchPrefix
+      branchPrefix: normalized.branchPrefix,
+      promotePatchCandidates: shouldAutoDrainPromotePatchCandidates(normalized),
+      promotionFocusedCommands: normalized.focusedCommands,
+      promotionGlobalCommands: normalized.globalCommands,
+      promotionGlobalGlobs: normalized.globalGlobs
     });
     latestCollection = postApplyCollection;
     await writeAutoDrainReviewArtifacts(outDir, postApplyCollection);
@@ -2106,6 +2125,16 @@ function normalizeSwarmAutoDrainOptions(input: FrontierCodexSwarmRunOptions['aut
   if (input === false) return { enabled: false };
   if (input === true || input === undefined) return { enabled: true };
   return { ...input, enabled: input.enabled !== false };
+}
+
+function shouldAutoDrainPromotePatchCandidates(options: FrontierCodexSwarmAutoDrainOptions): boolean {
+  if (options.promotePatchCandidates === false) return false;
+  return hasAutoDrainCoordinatorVerification(options);
+}
+
+function hasAutoDrainCoordinatorVerification(options: FrontierCodexSwarmAutoDrainOptions): boolean {
+  if (hasAutoDrainVerificationCommands(options.focusedCommands)) return true;
+  return hasAutoDrainVerificationCommands(options.globalCommands) && (options.globalGlobs ?? []).length > 0;
 }
 
 export function deriveCodexAutonomousApplyLockKeys(input: {
@@ -2988,7 +3017,8 @@ function createDashboardQueueMetadata(
       readyToApplyCount: artifacts?.grouping.readyToApplyCount ?? 0,
       needsHumanPortCount: artifacts?.grouping.needsHumanPortCount ?? 0,
       failedEvidenceCount: artifacts?.grouping.failedEvidenceCount ?? 0,
-      staleAgainstHeadCount: artifacts?.grouping.staleAgainstHeadCount ?? 0
+      staleAgainstHeadCount: artifacts?.grouping.staleAgainstHeadCount ?? 0,
+      promotedPatchCandidateCount: artifacts?.mergeQueue.promotedPatchCandidateCount ?? 0
     },
     queueHealth,
     humanQuestions,
@@ -3242,18 +3272,23 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     if (!existing || mergeRecordScore(next) > mergeRecordScore(existing)) mergeRecordsByJob.set(bundle.jobId, next);
   }
   const mergeRecords = Array.from(mergeRecordsByJob.values()).sort((left, right) => left.bundle.jobId.localeCompare(right.bundle.jobId));
+  let promotedPatchCandidateCount = 0;
   for (const { mergePath, bundle } of mergeRecords) {
     const patchPath = resolveBundlePatchPath(bundle, mergePath);
     const patchExists = !!patchPath && await pathExists(patchPath);
     const staleAgainstHead = input.checkStale === false ? false : await bundlePatchIsStale(bundle, mergePath, cwd);
-    const bucket = classifyCodexCollectBucket(bundle, staleAgainstHead);
+    const collectBundle = input.promotePatchCandidates && hasCollectBundleCoordinatorVerification(bundle, input)
+      ? promoteCodexPatchCandidateBundle(bundle, { patchExists, staleAgainstHead })
+      : bundle;
+    if (collectBundle !== bundle) promotedPatchCandidateCount += 1;
+    const bucket = classifyCodexCollectBucket(collectBundle, staleAgainstHead);
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(bundle.jobId)}` : bundle.branchName;
     const nextBundle: FrontierSwarmMergeBundle = {
-      ...bundle,
+      ...collectBundle,
       ...(branchName ? { branchName } : {}),
-      staleAgainstHead: bundle.staleAgainstHead || staleAgainstHead,
-      disposition: staleAgainstHead ? 'stale-against-head' : bundle.disposition,
-      autoMergeable: bucket === 'ready-to-apply' && bundle.autoMergeable
+      staleAgainstHead: collectBundle.staleAgainstHead || staleAgainstHead,
+      disposition: staleAgainstHead ? 'stale-against-head' : collectBundle.disposition,
+      autoMergeable: bucket === 'ready-to-apply' && collectBundle.autoMergeable
     };
     collectedBundles.push(nextBundle);
     patchStatuses[nextBundle.jobId] = staleAgainstHead ? 'stale' : patchExists ? input.checkStale === false ? 'unknown' : 'applies' : 'missing';
@@ -3314,7 +3349,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     mergeQueueRerunCount: hierarchicalMergeQueue.summary.rerunCount,
     mergeQueueRejectCount: hierarchicalMergeQueue.summary.rejectCount,
     mergeQueueBlockCount: hierarchicalMergeQueue.summary.blockCount,
-    mergeQueueRecordOnlyCount: hierarchicalMergeQueue.summary.recordOnlyCount
+    mergeQueueRecordOnlyCount: hierarchicalMergeQueue.summary.recordOnlyCount,
+    promotedPatchCandidateCount
   };
   const artifacts = createCollectArtifacts({
     outDir,
@@ -3397,6 +3433,7 @@ function createCollectArtifacts(input: {
       mergeQueueRejectCount: input.hierarchicalMergeQueue.summary.rejectCount,
       mergeQueueBlockCount: input.hierarchicalMergeQueue.summary.blockCount,
       mergeQueueRecordOnlyCount: input.hierarchicalMergeQueue.summary.recordOnlyCount,
+      promotedPatchCandidateCount: input.summary.promotedPatchCandidateCount ?? 0,
       patchCount: Object.values(input.patchStatuses).filter((status) => status !== 'missing').length
     }
   };
@@ -3438,6 +3475,7 @@ function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): Fr
       mergeQueueRejectCount: collection.hierarchicalMergeQueue?.summary.rejectCount ?? collection.summary.mergeQueueRejectCount ?? 0,
       mergeQueueBlockCount: collection.hierarchicalMergeQueue?.summary.blockCount ?? collection.summary.mergeQueueBlockCount ?? 0,
       mergeQueueRecordOnlyCount: collection.hierarchicalMergeQueue?.summary.recordOnlyCount ?? collection.summary.mergeQueueRecordOnlyCount ?? 0,
+      promotedPatchCandidateCount: collection.summary.promotedPatchCandidateCount ?? 0,
       patchCount: 0
     }
   };
@@ -3493,7 +3531,8 @@ function createAutoDrainArtifactMetadata(input: {
       mergeQueueRerunCount: collectionArtifacts.counts.mergeQueueRerunCount,
       mergeQueueRejectCount: collectionArtifacts.counts.mergeQueueRejectCount,
       mergeQueueBlockCount: collectionArtifacts.counts.mergeQueueBlockCount,
-      mergeQueueRecordOnlyCount: collectionArtifacts.counts.mergeQueueRecordOnlyCount
+      mergeQueueRecordOnlyCount: collectionArtifacts.counts.mergeQueueRecordOnlyCount,
+      promotedPatchCandidateCount: collectionArtifacts.counts.promotedPatchCandidateCount
     };
   });
   const admissionPaths = compactArtifactPaths(iterations.map((iteration) => iteration.mergeAdmissionPath));
@@ -3575,7 +3614,8 @@ function createAutoDrainArtifactMetadata(input: {
       rerunCount: sum((iteration) => iteration.mergeQueueRerunCount),
       rejectCount: sum((iteration) => iteration.mergeQueueRejectCount),
       blockCount: sum((iteration) => iteration.mergeQueueBlockCount),
-      recordOnlyCount: sum((iteration) => iteration.mergeQueueRecordOnlyCount)
+      recordOnlyCount: sum((iteration) => iteration.mergeQueueRecordOnlyCount),
+      promotedPatchCandidateCount: sum((iteration) => iteration.promotedPatchCandidateCount)
     },
     iterations,
     summary: {
@@ -3597,6 +3637,7 @@ function createAutoDrainArtifactMetadata(input: {
       reviewerPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.reviewerLanePlanPath)).length,
       patchStackPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.patchStackPlanPath)).length,
       decisionCount: sum((iteration) => iteration.decisionCount),
+      promotedPatchCandidateCount: sum((iteration) => iteration.promotedPatchCandidateCount),
       patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length
     }
   };
@@ -5090,6 +5131,61 @@ function classifyCodexCollectBucket(bundle: FrontierSwarmMergeBundle, staleAgain
   }
   if (bundle.disposition === 'auto-mergeable' && bundle.autoMergeable) return 'ready-to-apply';
   return 'needs-human-port';
+}
+
+function promoteCodexPatchCandidateBundle(
+  bundle: FrontierSwarmMergeBundle,
+  input: { patchExists: boolean; staleAgainstHead: boolean }
+): FrontierSwarmMergeBundle {
+  if (!isPromotableCodexPatchCandidate(bundle, input)) return bundle;
+  return {
+    ...bundle,
+    mergeReadiness: 'verified-patch',
+    disposition: 'auto-mergeable',
+    riskLevel: bundle.riskLevel,
+    autoMergeable: true,
+    reasons: bundle.reasons.filter((reason) => reason !== 'needs-human-port'),
+    metadata: {
+      ...(bundle.metadata ?? {}),
+      coordinatorPatchCandidatePromotion: {
+        source: 'frontier-swarm-codex.auto-drain',
+        originalMergeReadiness: bundle.mergeReadiness,
+        originalDisposition: bundle.disposition,
+        originalRiskLevel: bundle.riskLevel,
+        reason: 'owned patch candidate will be verified by coordinator gates before landing'
+      }
+    }
+  };
+}
+
+function isPromotableCodexPatchCandidate(
+  bundle: FrontierSwarmMergeBundle,
+  input: { patchExists: boolean; staleAgainstHead: boolean }
+): boolean {
+  if (!input.patchExists || input.staleAgainstHead || bundle.staleAgainstHead) return false;
+  if (bundle.status !== 'completed' && bundle.status !== 'verified') return false;
+  if (bundle.disposition !== 'needs-port' || bundle.mergeReadiness !== 'patch-candidate') return false;
+  if (!bundle.changedPaths.length || bundle.changedPaths.length > 8) return false;
+  if (bundle.ownershipViolations.length || bundle.commandsFailed.length) return false;
+  if (!bundle.allowedWrites.length) return false;
+  if (!bundle.changedPaths.every((file) => bundle.allowedWrites.some((glob) => matchesGlob(file, glob)))) return false;
+  const owned = new Set(bundle.ownedFilesTouched);
+  if (!bundle.changedPaths.every((file) => owned.has(file))) return false;
+  if (bundle.reasons.some((reason) => reason !== 'needs-human-port')) return false;
+  return true;
+}
+
+function hasCollectBundleCoordinatorVerification(
+  bundle: FrontierSwarmMergeBundle,
+  input: FrontierCodexCollectInput
+): boolean {
+  if (hasAutoDrainVerificationCommands(input.promotionFocusedCommands)) return true;
+  if (!hasAutoDrainVerificationCommands(input.promotionGlobalCommands)) return false;
+  return bundle.changedPaths.some((file) => (input.promotionGlobalGlobs ?? []).some((glob) => matchesGlob(file, glob)));
+}
+
+function hasAutoDrainVerificationCommands(commands: readonly (string | FrontierSwarmCommand)[] | undefined): boolean {
+  return normalizeScoreCommands(commands ?? []).length > 0;
 }
 
 async function readOptionalText(file: string): Promise<string | undefined> {

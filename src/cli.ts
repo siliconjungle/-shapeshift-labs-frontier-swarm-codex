@@ -60,6 +60,7 @@ try {
         maxChangedRegions: numberArg(args.autoDrainMaxChangedRegions ?? args['auto-drain-max-changed-regions'], undefined),
         maxHighRisk: numberArg(args.autoDrainMaxHighRisk ?? args['auto-drain-max-high-risk'], undefined),
         allowRisks: listArg(args.autoDrainAllowRisk ?? args['auto-drain-allow-risk']),
+        promotePatchCandidates: optionalBoolArg(args.autoDrainPromotePatchCandidates ?? args['auto-drain-promote-patch-candidates']),
         checkStale: boolArg(args.autoDrainCheckStale ?? args['auto-drain-check-stale'], true),
         focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
         globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
@@ -202,6 +203,7 @@ function printHelp() {
     '  --auto-drain-max-ready <n> --auto-drain-max-changed-paths <n>',
     '  --auto-drain-max-changed-regions <n> --auto-drain-max-high-risk <n>',
     '  --auto-drain-allow-risk <risk>',
+    '  --auto-drain-promote-patch-candidates',
     '  --auto-drain-decision-log <path> --auto-drain-lock-path <path>',
     '  --auto-drain-lock-timeout-ms <n> --auto-drain-lock-stale-ms <n>',
     '  --focused-command <cmd> --global-command <cmd>',
@@ -314,6 +316,11 @@ function boolArg(value: CliValue | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
   if (value === true) return true;
   return /^(1|true|yes|on)$/i.test(String(value));
+}
+
+function optionalBoolArg(value: CliValue | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  return boolArg(value, true);
 }
 
 function stamp() {

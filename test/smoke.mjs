@@ -277,6 +277,7 @@ assert.strictEqual(collection.summary.mergeQueueRerunCount, 0);
 assert.strictEqual(collection.summary.mergeQueueRejectCount, 0);
 assert.strictEqual(collection.summary.mergeQueueBlockCount, 0);
 assert.strictEqual(collection.summary.mergeQueueRecordOnlyCount, 0);
+assert.strictEqual(collection.summary.promotedPatchCandidateCount, 0);
 assert.strictEqual(collection.reviewerLanePlan.summary.taskCount, 1);
 assert.strictEqual(collection.patchStackPlan.summary.jobCount, 1);
 assert.strictEqual(collection.queueOverlay.summary.entryCount, 1);
@@ -291,6 +292,7 @@ assert.ok(collection.artifacts);
 assert.strictEqual(collection.artifacts.hierarchicalMergeQueuePath, path.join(collection.outDir, 'hierarchical-merge-queue.json'));
 assert.strictEqual(collection.artifacts.counts.mergeQueuePromoteCount, collection.hierarchicalMergeQueue.summary.promoteCount);
 assert.strictEqual(collection.artifacts.counts.mergeQueueApplyLocalCount, collection.hierarchicalMergeQueue.summary.applyLocalCount);
+assert.strictEqual(collection.artifacts.counts.promotedPatchCandidateCount, 0);
 assert.ok(await exists(collection.artifacts.hierarchicalMergeQueuePath));
 const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
 assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
@@ -655,6 +657,104 @@ assert.ok(autoDrainRun.autoDrainArtifacts.mergeQueue.paths.includes(autoDrainArt
 assert.strictEqual(autoDrainArtifactIteration.mergeQueueApplyLocalCount, autoDrainRun.autoDrainArtifacts.mergeQueue.applyLocalCount);
 assert.strictEqual(autoDrainArtifactIteration.mergeQueuePromoteCount, autoDrainRun.autoDrainArtifacts.mergeQueue.promoteCount);
 assert.ok(await exists(autoDrainArtifactIteration.hierarchicalMergeQueuePath));
+
+const autoDrainCandidateRepo = await createApplyFixtureRepo(tmp, 'auto-drain-candidate-run-repo');
+const autoDrainCandidateOutDir = path.join(autoDrainCandidateRepo, 'agent-runs', 'auto-drain-candidate-run');
+const autoDrainCandidatePlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-candidate',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'apply-candidate-task',
+      lane: 'apply',
+      ownedFiles: ['src/apply.ts'],
+      changedRegions: ['src/apply.ts#apply']
+    }]
+  }
+});
+
+const autoDrainUngatedCandidateRepo = await createApplyFixtureRepo(tmp, 'auto-drain-ungated-candidate-run-repo');
+const autoDrainUngatedCandidateOutDir = path.join(autoDrainUngatedCandidateRepo, 'agent-runs', 'auto-drain-ungated-candidate-run');
+const autoDrainUngatedCandidateRun = await runCodexSwarm(autoDrainCandidatePlan, {
+  outDir: autoDrainUngatedCandidateOutDir,
+  cwd: autoDrainUngatedCandidateRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainUngatedCandidateOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: false,
+  autoDrain: {
+    maxIterations: 1
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'ungated candidate held for coordinator review\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'ungated candidate held for coordinator review' };
+  }
+});
+assert.strictEqual(autoDrainUngatedCandidateRun.ok, true);
+assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.summary.applyCount, 0);
+assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.summary.terminalCount, 0);
+assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.iterations[0].collection.buckets['ready-to-apply'].length, 0);
+assert.strictEqual(autoDrainUngatedCandidateRun.autoDrain.iterations[0].collection.buckets['needs-human-port'].length, 1);
+const autoDrainUngatedCandidateCollected = autoDrainUngatedCandidateRun.autoDrain.iterations[0].collection.buckets['needs-human-port'][0].bundle;
+assert.strictEqual(autoDrainUngatedCandidateCollected.mergeReadiness, 'patch-candidate');
+assert.strictEqual(autoDrainUngatedCandidateCollected.disposition, 'needs-port');
+assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.mergeQueue.promotedPatchCandidateCount, 0);
+assert.strictEqual(autoDrainUngatedCandidateRun.autoDrainArtifacts.summary.promotedPatchCandidateCount, 0);
+assert.strictEqual(await fs.readFile(path.join(autoDrainUngatedCandidateRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+const autoDrainUngatedCandidateDashboard = JSON.parse(await fs.readFile(path.join(autoDrainUngatedCandidateOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.bucketCounts.promotedPatchCandidateCount, 0);
+assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.queueHealth.appliedDecisionCount, 0);
+
+const autoDrainCandidateRun = await runCodexSwarm(autoDrainCandidatePlan, {
+  outDir: autoDrainCandidateOutDir,
+  cwd: autoDrainCandidateRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainCandidateOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: false,
+  autoDrain: {
+    maxIterations: 2,
+    focusedCommands: [{ name: 'coordinator-sees-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'candidate auto drained\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'candidate auto drained' };
+  }
+});
+assert.strictEqual(autoDrainCandidateRun.ok, true);
+const autoDrainCandidateMergePath = autoDrainCandidateRun.run.results[0].evidencePaths.find((entry) => entry.endsWith('merge.json'));
+const autoDrainCandidateWorkerBundle = JSON.parse(await fs.readFile(autoDrainCandidateMergePath, 'utf8'));
+assert.strictEqual(autoDrainCandidateWorkerBundle.mergeReadiness, 'patch-candidate');
+assert.strictEqual(autoDrainCandidateWorkerBundle.disposition, 'needs-port');
+assert.strictEqual(autoDrainCandidateRun.autoDrain.summary.applyCount, 1);
+assert.strictEqual(autoDrainCandidateRun.autoDrain.summary.terminalCount, 1);
+assert.strictEqual(autoDrainCandidateRun.autoDrain.summary.blockedCount, 0);
+const autoDrainCandidateCollected = autoDrainCandidateRun.autoDrain.iterations[0].collection.buckets['ready-to-apply'][0].bundle;
+assert.strictEqual(autoDrainCandidateCollected.mergeReadiness, 'verified-patch');
+assert.strictEqual(autoDrainCandidateCollected.disposition, 'auto-mergeable');
+assert.strictEqual(autoDrainCandidateCollected.autoMergeable, true);
+assert.strictEqual(autoDrainCandidateCollected.metadata.coordinatorPatchCandidatePromotion.originalDisposition, 'needs-port');
+assert.strictEqual(autoDrainCandidateRun.autoDrain.iterations[0].apply.decisions[0].status, 'applied');
+assert.strictEqual(autoDrainCandidateRun.autoDrainArtifacts.mergeQueue.promotedPatchCandidateCount, 1);
+assert.strictEqual(autoDrainCandidateRun.autoDrainArtifacts.summary.promotedPatchCandidateCount, 1);
+assert.strictEqual(await fs.readFile(path.join(autoDrainCandidateRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+const autoDrainCandidateDashboard = JSON.parse(await fs.readFile(path.join(autoDrainCandidateOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainCandidateDashboard.queueMetadata.bucketCounts.promotedPatchCandidateCount, 1);
+assert.strictEqual(autoDrainCandidateDashboard.queueMetadata.queueHealth.appliedDecisionCount, 1);
 
 const autoDrainDirtyRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dirty-run-repo');
 await fs.writeFile(path.join(autoDrainDirtyRepo, 'src', 'dirty.ts'), 'dirty\n');
@@ -1305,12 +1405,14 @@ assert.ok(cliSource.includes('--auto-drain-max-iterations <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-ready <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-changed-paths <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-changed-regions <n>'));
+assert.ok(cliSource.includes('--auto-drain-promote-patch-candidates'));
 assert.ok(cliSource.includes('--auto-drain-decision-log <path>'));
 assert.ok(cliSource.includes('--auto-drain-lock-path <path>'));
 assert.ok(cliSource.includes('--auto-drain-lock-timeout-ms <n>'));
 assert.ok(cliSource.includes('--auto-drain-lock-stale-ms <n>'));
 assert.ok(cliSource.includes("args['auto-drain-limit']"));
 assert.ok(cliSource.includes("args['auto-drain-max-iterations']"));
+assert.ok(cliSource.includes("promotePatchCandidates: optionalBoolArg(args.autoDrainPromotePatchCandidates ?? args['auto-drain-promote-patch-candidates'])"));
 assert.ok(cliSource.includes("args['auto-drain-decision-log']"));
 assert.ok(cliSource.includes("args['auto-drain-lock-path']"));
 assert.ok(cliSource.includes('conflict/stale patch failures as rerun or stale debt'));

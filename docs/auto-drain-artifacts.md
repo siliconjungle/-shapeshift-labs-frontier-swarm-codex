@@ -47,6 +47,8 @@ It is the preferred machine-readable index for dashboards because it groups arti
 | `iterations[]` | One compact row per auto-drain iteration | Render timelines without opening every detailed artifact first. |
 | `summary` | Aggregate counts | Render top-line totals such as iteration count, apply count, admission count, reviewer plan count, patch stack plan count, decision count, and patch count. |
 
+`autoDrainArtifacts.mergeQueue.promotedPatchCandidateCount`, `autoDrainArtifacts.summary.promotedPatchCandidateCount`, and `coordinator-dashboard.json.queueMetadata.bucketCounts.promotedPatchCandidateCount` count patch candidates that were promoted by auto-drain because coordinator gates were configured. These are not worker-verified bundles and should not be shown as landed work; inspect `metadata.coordinatorPatchCandidatePromotion` on the collected `merge.json` to see the original `needs-port` classification. Treat the count as coordinator-gated queue pressure until the matching apply decision is `applied` or `committed`; a required coordinator gate failure records `rejected` and rolls the patch back.
+
 ## Outcome Semantics For Dashboards
 
 Auto-drain emits workflow states, queue actions, and apply decisions. Dashboards should keep these separate so merge conflicts and stale work do not look like true human blockers.
