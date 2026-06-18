@@ -77,6 +77,8 @@ export const FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND = 'frontier.swarm-codex.patch
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND = 'frontier.swarm-codex.semantic-imports';
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND = 'frontier.swarm-codex.dashboard-queue-metadata';
+export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION = 1;
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 
@@ -363,6 +365,10 @@ export interface FrontierCodexCollectResult {
     mergeQueueApplyLocalCount?: number;
     mergeQueueQueueLocalCount?: number;
     mergeQueuePromoteCount?: number;
+    mergeQueueRerunCount?: number;
+    mergeQueueRejectCount?: number;
+    mergeQueueBlockCount?: number;
+    mergeQueueRecordOnlyCount?: number;
   };
   artifacts?: FrontierCodexCollectArtifacts;
 }
@@ -878,6 +884,35 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     patchStackPlanCount: number;
     decisionCount: number;
     patchCount: number;
+  };
+}
+
+export interface FrontierCodexDashboardQueueMetadata {
+  kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION;
+  source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND | 'not-collected';
+  available: boolean;
+  paths: {
+    autoDrain: string[];
+    collections: string[];
+    mergeQueues: string[];
+    queueOverlays: string[];
+  };
+  actionCounts: {
+    applyLocalCount: number;
+    queueLocalCount: number;
+    promoteCount: number;
+    rerunCount: number;
+    rejectCount: number;
+    blockCount: number;
+    trueBlockerCount: number;
+    recordOnlyCount: number;
+  };
+  bucketCounts: {
+    readyToApplyCount: number;
+    needsHumanPortCount: number;
+    failedEvidenceCount: number;
+    staleAgainstHeadCount: number;
   };
 }
 
@@ -2361,6 +2396,7 @@ export async function writeSwarmCoordinatorSnapshot(
     acc[result.mergeReadiness] = (acc[result.mergeReadiness] ?? 0) + 1;
     return acc;
   }, {});
+  const queueMetadata = createDashboardQueueMetadata(input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null);
   const dashboard = {
     kind: 'frontier.swarm-codex.coordinator-dashboard',
     version: 1,
@@ -2372,6 +2408,7 @@ export async function writeSwarmCoordinatorSnapshot(
     summary: input.run.summary,
     byLane,
     mergeReadiness,
+    queueMetadata,
     autoDrain: input.autoDrain ?? null,
     autoDrainArtifacts: input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null,
     eventStream: input.eventStream ?? null,
@@ -2380,6 +2417,38 @@ export async function writeSwarmCoordinatorSnapshot(
   };
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(dashboard, null, 2) + '\n');
+}
+
+function createDashboardQueueMetadata(artifacts: FrontierCodexAutoDrainArtifactMetadata | null): FrontierCodexDashboardQueueMetadata {
+  const iterations = artifacts?.iterations ?? [];
+  return {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION,
+    source: artifacts ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND : 'not-collected',
+    available: !!artifacts,
+    paths: {
+      autoDrain: artifacts ? [artifacts.autoDrainPath] : [],
+      collections: compactArtifactPaths(iterations.map((iteration) => iteration.collectionPath)),
+      mergeQueues: artifacts?.mergeQueue.paths ?? [],
+      queueOverlays: compactArtifactPaths(iterations.map((iteration) => iteration.queueOverlayPath))
+    },
+    actionCounts: {
+      applyLocalCount: artifacts?.mergeQueue.applyLocalCount ?? 0,
+      queueLocalCount: artifacts?.mergeQueue.queueLocalCount ?? 0,
+      promoteCount: artifacts?.mergeQueue.promoteCount ?? 0,
+      rerunCount: artifacts?.mergeQueue.rerunCount ?? 0,
+      rejectCount: artifacts?.mergeQueue.rejectCount ?? 0,
+      blockCount: artifacts?.mergeQueue.blockCount ?? 0,
+      trueBlockerCount: artifacts?.mergeQueue.blockCount ?? 0,
+      recordOnlyCount: artifacts?.mergeQueue.recordOnlyCount ?? 0
+    },
+    bucketCounts: {
+      readyToApplyCount: artifacts?.grouping.readyToApplyCount ?? 0,
+      needsHumanPortCount: artifacts?.grouping.needsHumanPortCount ?? 0,
+      failedEvidenceCount: artifacts?.grouping.failedEvidenceCount ?? 0,
+      staleAgainstHeadCount: artifacts?.grouping.staleAgainstHeadCount ?? 0
+    }
+  };
 }
 
 export async function appendCodexPidManifest(file: string, entry: FrontierCodexPidEntry, runId?: string): Promise<void> {
@@ -2531,7 +2600,11 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     mergeQueueScopeCount: hierarchicalMergeQueue.summary.scopeCount,
     mergeQueueApplyLocalCount: hierarchicalMergeQueue.summary.applyLocalCount,
     mergeQueueQueueLocalCount: hierarchicalMergeQueue.summary.queueLocalCount,
-    mergeQueuePromoteCount: hierarchicalMergeQueue.summary.promoteCount
+    mergeQueuePromoteCount: hierarchicalMergeQueue.summary.promoteCount,
+    mergeQueueRerunCount: hierarchicalMergeQueue.summary.rerunCount,
+    mergeQueueRejectCount: hierarchicalMergeQueue.summary.rejectCount,
+    mergeQueueBlockCount: hierarchicalMergeQueue.summary.blockCount,
+    mergeQueueRecordOnlyCount: hierarchicalMergeQueue.summary.recordOnlyCount
   };
   const artifacts = createCollectArtifacts({
     outDir,
@@ -2651,10 +2724,10 @@ function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): Fr
       mergeQueueApplyLocalCount: collection.hierarchicalMergeQueue?.summary.applyLocalCount ?? collection.summary.mergeQueueApplyLocalCount ?? 0,
       mergeQueueQueueLocalCount: collection.hierarchicalMergeQueue?.summary.queueLocalCount ?? collection.summary.mergeQueueQueueLocalCount ?? 0,
       mergeQueuePromoteCount: collection.hierarchicalMergeQueue?.summary.promoteCount ?? collection.summary.mergeQueuePromoteCount ?? 0,
-      mergeQueueRerunCount: collection.hierarchicalMergeQueue?.summary.rerunCount ?? 0,
-      mergeQueueRejectCount: collection.hierarchicalMergeQueue?.summary.rejectCount ?? 0,
-      mergeQueueBlockCount: collection.hierarchicalMergeQueue?.summary.blockCount ?? 0,
-      mergeQueueRecordOnlyCount: collection.hierarchicalMergeQueue?.summary.recordOnlyCount ?? 0,
+      mergeQueueRerunCount: collection.hierarchicalMergeQueue?.summary.rerunCount ?? collection.summary.mergeQueueRerunCount ?? 0,
+      mergeQueueRejectCount: collection.hierarchicalMergeQueue?.summary.rejectCount ?? collection.summary.mergeQueueRejectCount ?? 0,
+      mergeQueueBlockCount: collection.hierarchicalMergeQueue?.summary.blockCount ?? collection.summary.mergeQueueBlockCount ?? 0,
+      mergeQueueRecordOnlyCount: collection.hierarchicalMergeQueue?.summary.recordOnlyCount ?? collection.summary.mergeQueueRecordOnlyCount ?? 0,
       patchCount: 0
     }
   };

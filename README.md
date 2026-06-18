@@ -6,6 +6,13 @@ Node Codex CLI runner adapter for Frontier swarm plans.
 
 The default swarm compute profile records `gpt-5.5` with `model_reasoning_effort="xhigh"` for planning. The Codex CLI invocation defaults to the local Codex config instead of forwarding planned model flags, because model availability and accepted flag values vary by Codex binary and account. Pass `--model ...`, `--model-policy plan`, or `modelPolicy: 'plan'` when a runner should force the planned profile. The pure `frontier-swarm` package stays runtime-neutral.
 
+## Operator Docs
+
+- [Hierarchical merge queues](docs/hierarchical-merge-queues.md): local scoped apply, queue-local overflow, upward promotion, stale reruns, invalid evidence rejection, discovery recording, Loom semantic scopes, and true blocker states.
+- [Autonomous operator workflow](docs/autonomous-operator-workflow.md): run, watch, collect, drain, and interpret autonomous apply outcomes.
+- [Review debt drain policy](docs/review-debt-drain.md): convert coordinator-review items into terminal decisions instead of open-ended review buckets.
+- [Auto-drain artifact map](docs/auto-drain-artifacts.md): find the machine-readable files that explain each collection, queue, admission, grouping, apply, and decision step.
+
 
 ## Related Packages
 
@@ -277,7 +284,7 @@ For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
 
-Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. By default `runCodexSwarm` then auto-drains the run: it collects worker bundles, applies ready auto-mergeable slices through the autonomous apply loop, writes `auto-drain/auto-drain.json`, and includes the drain summary in `swarm-results.json` and `coordinator-dashboard.json`. Use `--no-auto-drain` only for raw diagnostic runs that should not attempt coordinator apply. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
+Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. By default `runCodexSwarm` then auto-drains the run: it collects worker bundles, applies ready auto-mergeable slices through the autonomous apply loop, writes `auto-drain/auto-drain.json`, and includes the drain summary in `swarm-results.json` and `coordinator-dashboard.json`. The dashboard also includes `queueMetadata`, a stable summary of hierarchical queue semantics with counts for local apply, local queue, promotions, reruns, rejects, true blockers, and record-only work, plus links to collection, merge-queue, and queue-overlay artifacts. Use `--no-auto-drain` only for raw diagnostic runs that should not attempt coordinator apply; in that mode `queueMetadata.available` is false instead of asking dashboards to infer queue semantics from flat review buckets. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
 
 `frontier-swarm collect --run <run-dir>` derives status from immutable worker overlays instead of asking workers to edit a central queue. It scans `merge.json` files and writes:
 
@@ -286,7 +293,7 @@ Each run writes event streams under `streams/`, a `coordinator-dashboard.json` s
 - `failed-evidence/` for failed workers, blockers, ownership violations, or failed required commands,
 - `stale-against-head/` for patch bundles that no longer apply.
 
-It also writes `merge-index.json` and `queue-overlay.json` so coordinator dashboards can show stale patches, conflicts, derived queue status, and ready merge pressure without scraping every worker directory. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
+It also writes `merge-index.json`, `hierarchical-merge-queue.json`, and `queue-overlay.json` so coordinator dashboards can show stale patches, conflicts, derived queue status, local-apply pressure, local queue capacity, promotions, reruns, rejects, true blockers, and record-only work without scraping every worker directory. `collection.json.summary` and `collection.json.artifacts.counts` carry the same merge-queue action counts for consumers that read only the collection artifact. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
 
 `frontier-swarm apply --collection <collection-dir>` reviews the `ready-to-apply/` bucket and writes `apply-ledger.json`. It defaults to `--dry-run`, which runs `git apply --check` without mutating the checkout. Non-dry-run apply refuses a dirty worktree unless `--allow-dirty` is passed, and can optionally create small branches with `--branch-prefix` and commits with `--commit`.
 

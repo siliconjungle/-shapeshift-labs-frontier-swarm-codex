@@ -252,6 +252,11 @@ assert.strictEqual(collection.mergeIndex.summary.entryCount, 1);
 assert.strictEqual(collection.mergeAdmission.summary.deferredCount, 1);
 assert.strictEqual(collection.hierarchicalMergeQueue.summary.promoteCount, 1);
 assert.strictEqual(collection.hierarchicalMergeQueue.summary.applyLocalCount, 0);
+assert.strictEqual(collection.summary.mergeQueuePromoteCount, 1);
+assert.strictEqual(collection.summary.mergeQueueRerunCount, 0);
+assert.strictEqual(collection.summary.mergeQueueRejectCount, 0);
+assert.strictEqual(collection.summary.mergeQueueBlockCount, 0);
+assert.strictEqual(collection.summary.mergeQueueRecordOnlyCount, 0);
 assert.strictEqual(collection.reviewerLanePlan.summary.taskCount, 1);
 assert.strictEqual(collection.patchStackPlan.summary.jobCount, 1);
 assert.strictEqual(collection.queueOverlay.summary.entryCount, 1);
@@ -262,8 +267,88 @@ assert.ok(await exists(path.join(collection.outDir, 'merge-admission.json')));
 assert.ok(await exists(path.join(collection.outDir, 'reviewer-lane-plan.json')));
 assert.ok(await exists(path.join(collection.outDir, 'patch-stack-plan.json')));
 assert.ok(await exists(path.join(collection.outDir, 'queue-overlay.json')));
+assert.ok(collection.artifacts);
+assert.strictEqual(collection.artifacts.hierarchicalMergeQueuePath, path.join(collection.outDir, 'hierarchical-merge-queue.json'));
+assert.strictEqual(collection.artifacts.counts.mergeQueuePromoteCount, collection.hierarchicalMergeQueue.summary.promoteCount);
+assert.strictEqual(collection.artifacts.counts.mergeQueueApplyLocalCount, collection.hierarchicalMergeQueue.summary.applyLocalCount);
+assert.ok(await exists(collection.artifacts.hierarchicalMergeQueuePath));
 const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
 assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
+
+const queueMetadataRunDir = path.join(tmp, 'queue-metadata-run');
+await writeSyntheticMergeBundle(queueMetadataRunDir, 'apply-local', {
+  disposition: 'auto-mergeable',
+  autoMergeable: true
+});
+await writeSyntheticMergeBundle(queueMetadataRunDir, 'queue-local', {
+  disposition: 'auto-mergeable',
+  autoMergeable: true,
+  riskLevel: 'high'
+});
+await writeSyntheticMergeBundle(queueMetadataRunDir, 'promote');
+await writeSyntheticMergeBundle(queueMetadataRunDir, 'rerun', {
+  disposition: 'auto-mergeable',
+  autoMergeable: true,
+  staleAgainstHead: true
+});
+await writeSyntheticMergeBundle(queueMetadataRunDir, 'reject', {
+  status: 'failed',
+  mergeReadiness: 'rejected',
+  disposition: 'rejected'
+});
+await writeSyntheticMergeBundle(queueMetadataRunDir, 'block', {
+  status: 'blocked',
+  mergeReadiness: 'blocked',
+  disposition: 'blocked'
+});
+await writeSyntheticMergeBundle(queueMetadataRunDir, 'record-only', {
+  changedPaths: [],
+  mergeReadiness: 'discovery-only',
+  disposition: 'discovery-only'
+});
+const queueMetadataCollection = await collectCodexSwarmRun({
+  run: queueMetadataRunDir,
+  cwd: tmp,
+  outDir: path.join(tmp, 'queue-metadata-collection'),
+  checkStale: false
+});
+assert.deepStrictEqual({
+  applyLocalCount: queueMetadataCollection.summary.mergeQueueApplyLocalCount,
+  queueLocalCount: queueMetadataCollection.summary.mergeQueueQueueLocalCount,
+  promoteCount: queueMetadataCollection.summary.mergeQueuePromoteCount,
+  rerunCount: queueMetadataCollection.summary.mergeQueueRerunCount,
+  rejectCount: queueMetadataCollection.summary.mergeQueueRejectCount,
+  blockCount: queueMetadataCollection.summary.mergeQueueBlockCount,
+  recordOnlyCount: queueMetadataCollection.summary.mergeQueueRecordOnlyCount
+}, {
+  applyLocalCount: 1,
+  queueLocalCount: 1,
+  promoteCount: 1,
+  rerunCount: 1,
+  rejectCount: 1,
+  blockCount: 1,
+  recordOnlyCount: 1
+});
+assert.deepStrictEqual({
+  applyLocalCount: queueMetadataCollection.artifacts.counts.mergeQueueApplyLocalCount,
+  queueLocalCount: queueMetadataCollection.artifacts.counts.mergeQueueQueueLocalCount,
+  promoteCount: queueMetadataCollection.artifacts.counts.mergeQueuePromoteCount,
+  rerunCount: queueMetadataCollection.artifacts.counts.mergeQueueRerunCount,
+  rejectCount: queueMetadataCollection.artifacts.counts.mergeQueueRejectCount,
+  blockCount: queueMetadataCollection.artifacts.counts.mergeQueueBlockCount,
+  recordOnlyCount: queueMetadataCollection.artifacts.counts.mergeQueueRecordOnlyCount
+}, {
+  applyLocalCount: 1,
+  queueLocalCount: 1,
+  promoteCount: 1,
+  rerunCount: 1,
+  rejectCount: 1,
+  blockCount: 1,
+  recordOnlyCount: 1
+});
+const queueMetadataCollectionJson = JSON.parse(await fs.readFile(path.join(queueMetadataCollection.outDir, 'collection.json'), 'utf8'));
+assert.strictEqual(queueMetadataCollectionJson.summary.mergeQueueBlockCount, 1);
+assert.strictEqual(queueMetadataCollectionJson.summary.mergeQueueRecordOnlyCount, 1);
 
 const browserRun = await runCodexSwarm(browserPlan, {
   outDir: path.join(tmp, 'browser-run'),
@@ -464,6 +549,16 @@ assert.ok(await exists(path.join(autoDrainOutDir, 'auto-drain', 'patch-stack-pla
 const autoDrainResults = JSON.parse(await fs.readFile(path.join(autoDrainOutDir, 'swarm-results.json'), 'utf8'));
 const autoDrainDashboard = JSON.parse(await fs.readFile(path.join(autoDrainOutDir, 'coordinator-dashboard.json'), 'utf8'));
 assert.strictEqual(autoDrainDashboard.autoDrain.summary.terminalCount, 1);
+assert.strictEqual(autoDrainDashboard.queueMetadata.kind, 'frontier.swarm-codex.dashboard-queue-metadata');
+assert.strictEqual(autoDrainDashboard.queueMetadata.available, true);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.applyLocalCount, 1);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.queueLocalCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.promoteCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.rerunCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.rejectCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.blockCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.recordOnlyCount, 0);
 const autoDrainArtifact = JSON.parse(await fs.readFile(path.join(autoDrainOutDir, 'auto-drain', 'auto-drain.json'), 'utf8'));
 assert.deepStrictEqual(autoDrainArtifact.lockKeys, ['region:src/apply.ts#apply']);
 assert.strictEqual(autoDrainArtifact.iterations[0].lockScopeCounts.semantic, 1);
@@ -475,11 +570,18 @@ assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.admissionCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.mergeQueuePlanCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.mergeQueue.applyLocalCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.mergeQueue.promoteCount, 0);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.paths.mergeQueues, autoDrainRun.autoDrainArtifacts.mergeQueue.paths);
 assert.ok(await exists(autoDrainRun.autoDrainArtifacts.mergeQueue.paths[0]));
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.reviewerPlanCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.patchStackPlanCount, 1);
 assert.strictEqual(autoDrainRun.autoDrain.iterations[0].grouping.summary.readyCount, 1);
 assert.strictEqual(typeof autoDrainRun.autoDrainArtifacts.generatedAt, 'number');
+const autoDrainArtifactIteration = autoDrainRun.autoDrainArtifacts.iterations[0];
+assert.strictEqual(autoDrainArtifactIteration.hierarchicalMergeQueuePath, path.join(autoDrainOutDir, 'auto-drain', 'collection-01', 'hierarchical-merge-queue.json'));
+assert.ok(autoDrainRun.autoDrainArtifacts.mergeQueue.paths.includes(autoDrainArtifactIteration.hierarchicalMergeQueuePath));
+assert.strictEqual(autoDrainArtifactIteration.mergeQueueApplyLocalCount, autoDrainRun.autoDrainArtifacts.mergeQueue.applyLocalCount);
+assert.strictEqual(autoDrainArtifactIteration.mergeQueuePromoteCount, autoDrainRun.autoDrainArtifacts.mergeQueue.promoteCount);
+assert.ok(await exists(autoDrainArtifactIteration.hierarchicalMergeQueuePath));
 
 const autoDrainBudgetRepo = path.join(tmp, 'auto-drain-budget-repo');
 await fs.mkdir(path.join(autoDrainBudgetRepo, 'src'), { recursive: true });
@@ -820,6 +922,37 @@ async function createApplyFixtureRepo(root, name) {
   await execFileP('git', ['add', '--', 'src/apply.ts'], { cwd: repo });
   await execFileP('git', ['commit', '-m', 'Initial apply fixture'], { cwd: repo });
   return repo;
+}
+
+async function writeSyntheticMergeBundle(runDir, jobId, overrides = {}) {
+  const changedPaths = Array.isArray(overrides.changedPaths) ? overrides.changedPaths : [`src/${jobId}.ts`];
+  const queueItemIds = Array.isArray(overrides.queueItemIds) ? overrides.queueItemIds : [`${jobId}-task`];
+  const jobDir = path.join(runDir, jobId);
+  await fs.mkdir(jobDir, { recursive: true });
+  await fs.writeFile(path.join(jobDir, 'merge.json'), JSON.stringify({
+    jobId,
+    taskId: `${jobId}-task`,
+    lane: 'queue-metadata',
+    title: jobId,
+    generatedAt: Date.now(),
+    status: 'verified',
+    mergeReadiness: changedPaths.length ? 'verified-patch' : 'discovery-only',
+    disposition: 'needs-port',
+    riskLevel: 'low',
+    autoMergeable: false,
+    changedPaths,
+    changedRegions: [],
+    ownedFilesTouched: changedPaths,
+    allowedWrites: changedPaths,
+    ownershipViolations: [],
+    evidencePaths: [],
+    commandsPassed: [],
+    commandsFailed: [],
+    queueItemIds,
+    staleAgainstHead: false,
+    reasons: [],
+    ...overrides
+  }, null, 2) + '\n');
 }
 
 async function exists(file) {

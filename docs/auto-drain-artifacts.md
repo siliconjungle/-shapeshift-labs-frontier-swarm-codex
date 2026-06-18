@@ -39,6 +39,7 @@ It is the preferred machine-readable index for dashboards because it groups arti
 | `autoDrainPath` | `auto-drain/auto-drain.json` | Link back to the canonical ledger. |
 | `admission.paths` | Per-iteration `merge-admission.json` files | Show which jobs were admitted or deferred by each iteration. |
 | `grouping.paths` | Per-iteration `collection.json`, `merge-index.json`, `queue-overlay.json`, and `auto-drain-groups-NN.json` files | Show the candidate pool, buckets, queue status, and compatible apply groups. |
+| `mergeQueue.paths` | Per-iteration `hierarchical-merge-queue.json` files | Show scoped queue assignments, local apply pressure, queued overflow, promotions, stale reruns, invalid evidence rejections, discovery records, and true blockers. |
 | `reviewer.paths` | Per-iteration `reviewer-lane-plan.json` files and decision logs | Show human-review queues and apply decisions. |
 | `patchStack.paths` | Per-iteration `patch-stack-plan.json`, `autonomous-apply.json`, `autonomous-queue-overlay.json`, and patch files | Show patch stack ordering, conflicts, applied patches, and remaining work. |
 | `iterations[]` | One compact row per auto-drain iteration | Render timelines without opening every detailed artifact first. |
@@ -53,6 +54,7 @@ Each auto-drain iteration collects worker merge bundles into `auto-drain/collect
 | `auto-drain/collection-NN/collection.json` | One iteration | Detailed dashboards, review tools | Full collection result with buckets, merge index, admission, reviewer lane plan, patch stack plan, queue overlay, summary, and artifact paths. |
 | `auto-drain/collection-NN/merge-index.json` | One iteration | Conflict and readiness views | Normalized merge bundle index with dispositions, changed paths, changed regions, conflicts, and summary counts. |
 | `auto-drain/collection-NN/queue-overlay.json` | One iteration | Queue dashboards | Queue item status derived from collected merge bundles before autonomous apply. |
+| `auto-drain/collection-NN/hierarchical-merge-queue.json` | One iteration | Operators and queue dashboards | Scoped root, lane, semantic-region, path, or custom queue assignments with `apply-local`, `queue-local`, `promote`, `rerun`, `reject`, `record-only`, and `block` counts. |
 | `auto-drain/collection-NN/merge-admission.json` | One iteration | Admission views | Jobs admitted or deferred for that collection based on readiness, risk, path/region budgets, and conflict data. |
 | `auto-drain/collection-NN/reviewer-lane-plan.json` | One iteration | Review assignment dashboards | Reviewer lanes/tasks for work that needs human inspection or porting. |
 | `auto-drain/collection-NN/patch-stack-plan.json` | One iteration | Patch-stack views | Patch stack grouping, patch job counts, and conflict summaries. |
