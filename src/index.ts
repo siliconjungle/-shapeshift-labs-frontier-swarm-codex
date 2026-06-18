@@ -3378,6 +3378,106 @@ function summarizeAutonomousDecisionLockScopes(decisions: readonly FrontierCodex
   };
 }
 
+function revalidateAutonomousHeadMoveCandidate(input: {
+  collectionHead: string;
+  currentHead: string;
+  candidate: {
+    jobId: string;
+    lockScope: FrontierCodexAutonomousLockScope;
+    lockKeys: readonly string[];
+    changedPaths: readonly string[];
+  };
+  priorDecisions: readonly FrontierCodexAutonomousMergeDecision[];
+}): { ok: true } | { ok: false; reason: string } {
+  const headMoveChain = autonomousCommittedHeadMoveChain(input.priorDecisions, input.collectionHead, input.currentHead);
+  if (!headMoveChain) {
+    return {
+      ok: false,
+      reason: 'repository head changed since bundle collection; rerun against current head'
+    };
+  }
+  const conflicts = headMoveChain.filter((decision) => autonomousLockSurfacesConflict(input.candidate, decision));
+  if (conflicts.length) {
+    const jobs = uniqueStrings(conflicts.map((decision) => decision.jobId)).slice(0, 8);
+    const keys = uniqueStrings(conflicts.flatMap((decision) => conflictingAutonomousLockKeys(input.candidate, decision))).slice(0, 8);
+    const jobText = jobs.length ? ` with ${jobs.join(', ')}` : '';
+    const keyText = keys.length ? ` (${keys.join(', ')})` : '';
+    return {
+      ok: false,
+      reason: `repository head changed since bundle collection and semantic lease keys conflict${jobText}${keyText}; rerun against current head`
+    };
+  }
+  return { ok: true };
+}
+
+function autonomousCommittedHeadMoveChain(
+  decisions: readonly FrontierCodexAutonomousMergeDecision[],
+  collectionHead: string,
+  currentHead: string
+): FrontierCodexAutonomousMergeDecision[] | undefined {
+  const chain: FrontierCodexAutonomousMergeDecision[] = [];
+  let head = collectionHead;
+  for (const decision of decisions) {
+    if (decision.status !== 'committed' || !decision.headBefore || !decision.headAfter || decision.headBefore === decision.headAfter) continue;
+    if (decision.headBefore !== head) continue;
+    chain.push(decision);
+    head = decision.headAfter;
+    if (head === currentHead) return chain;
+  }
+  return undefined;
+}
+
+function autonomousLockSurfacesConflict(
+  left: {
+    lockScope: FrontierCodexAutonomousLockScope;
+    lockKeys: readonly string[];
+    changedPaths: readonly string[];
+  },
+  right: {
+    lockScope: FrontierCodexAutonomousLockScope;
+    lockKeys: readonly string[];
+    changedPaths: readonly string[];
+  }
+): boolean {
+  if (left.lockScope === 'repo' || right.lockScope === 'repo') return true;
+  const leftKeys = new Set(left.lockKeys);
+  for (const key of right.lockKeys) {
+    if (key === AUTONOMOUS_APPLY_REPO_LOCK_KEY || leftKeys.has(key)) return true;
+  }
+  if (left.lockKeys.includes(AUTONOMOUS_APPLY_REPO_LOCK_KEY)) return true;
+  if (left.lockScope === 'path' || right.lockScope === 'path') {
+    const rightPaths = new Set(uniqueWorkspacePaths(right.changedPaths));
+    return uniqueWorkspacePaths(left.changedPaths).some((file) => rightPaths.has(file));
+  }
+  return false;
+}
+
+function conflictingAutonomousLockKeys(
+  left: {
+    lockScope: FrontierCodexAutonomousLockScope;
+    lockKeys: readonly string[];
+    changedPaths: readonly string[];
+  },
+  right: {
+    lockScope: FrontierCodexAutonomousLockScope;
+    lockKeys: readonly string[];
+    changedPaths: readonly string[];
+  }
+): string[] {
+  const rightKeys = new Set(right.lockKeys);
+  const direct = left.lockKeys.filter((key) => key === AUTONOMOUS_APPLY_REPO_LOCK_KEY || rightKeys.has(key));
+  if (direct.length) return uniqueStrings(direct).sort();
+  if (left.lockScope === 'repo' || right.lockScope === 'repo') return [AUTONOMOUS_APPLY_REPO_LOCK_KEY];
+  if (left.lockScope === 'path' || right.lockScope === 'path') {
+    const rightPaths = new Set(uniqueWorkspacePaths(right.changedPaths));
+    return uniqueWorkspacePaths(left.changedPaths)
+      .filter((file) => rightPaths.has(file))
+      .map((file) => `path:${file}`)
+      .sort();
+  }
+  return [];
+}
+
 function summarizeAutonomousDecisionProof(decisions: readonly FrontierCodexAutonomousMergeDecision[]): {
   committedDecisionCount: number;
   gatedDecisionCount: number;
@@ -7469,7 +7569,8 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
         branchPrefix: input.branchPrefix,
         input,
         lock,
-        packageGateOrder
+        packageGateOrder,
+        priorDecisions: decisions
       });
       decisions.push(decision);
       await appendAutonomousDecision(decisionLogPath, decision);
@@ -7643,6 +7744,7 @@ async function applyCodexMergeBundleAutonomously(input: {
   input: FrontierCodexAutonomousApplyInput;
   lock: FrontierCodexAutonomousApplyLock;
   packageGateOrder: FrontierPackageGateOrder;
+  priorDecisions: readonly FrontierCodexAutonomousMergeDecision[];
 }): Promise<FrontierCodexAutonomousMergeDecision> {
   const startedAt = Date.now();
   const commands: FrontierCodexAutonomousMergeDecision['commands'] = [];
@@ -7717,18 +7819,36 @@ async function applyCodexMergeBundleAutonomously(input: {
   const check = await runLoggedProcess('git', ['apply', '--check', patchPath], input.cwd);
   commands.push(check);
   if (collectionHead && collectionHead !== headBefore) {
-    return finish(
-      check.status === 0 ? 'rerun' : 'conflict-blocked',
-      check.status === 0
-        ? 'repository head changed since bundle collection; rerun against current head'
-        : 'repository head changed since bundle collection and git apply --check failed',
-      { headBefore: collectionHead, headAfter: headBefore }
-    );
+    if (check.status !== 0) {
+      return finish(
+        'conflict-blocked',
+        'repository head changed since bundle collection and git apply --check failed',
+        { headBefore: collectionHead, headAfter: headBefore }
+      );
+    }
+    const revalidation = revalidateAutonomousHeadMoveCandidate({
+      collectionHead,
+      currentHead: headBefore,
+      candidate: {
+        jobId: input.bundle.jobId,
+        lockScope: lockKeys.scope,
+        lockKeys: lockKeys.keys,
+        changedPaths: input.bundle.changedPaths
+      },
+      priorDecisions: input.priorDecisions
+    });
+    if (!revalidation.ok) {
+      return finish('rerun', revalidation.reason, { headBefore: collectionHead, headAfter: headBefore });
+    }
   }
   if (check.status !== 0) return finish('conflict-blocked', 'git apply --check failed', { headBefore });
   const checkedHead = await readGitHead(input.cwd, commands);
   if (checkedHead && checkedHead !== headBefore) {
-    return finish('rerun', 'repository head changed while checking patch', { headBefore, headAfter: checkedHead });
+    return finish(
+      'rerun',
+      'repository head changed while checking patch',
+      { headBefore, headAfter: checkedHead }
+    );
   }
   if (input.dryRun) return finish('checked', 'patch checked under autonomous apply lock', { headBefore, headAfter: checkedHead ?? headBefore });
 
