@@ -715,6 +715,7 @@ export interface FrontierCodexSwarmAutoDrainGroupingJob {
   taskId?: string;
   lane?: string;
   queueItemIds: string[];
+  bucket?: FrontierCodexCollectBucket;
   bundlePath?: string;
   patchPath?: string;
   changedPaths: string[];
@@ -752,6 +753,8 @@ export interface FrontierCodexSwarmAutoDrainGroupingArtifact {
   readyJobIds: string[];
   admittedJobIds: string[];
   deferredJobIds: string[];
+  drainWorkJobIds: string[];
+  queueDebtJobIds: string[];
   groups: FrontierCodexSwarmAutoDrainGroup[];
   jobs: FrontierCodexSwarmAutoDrainGroupingJob[];
   conflicts: FrontierCodexSwarmAutoDrainGroupingConflict[];
@@ -759,6 +762,7 @@ export interface FrontierCodexSwarmAutoDrainGroupingArtifact {
     readyCount: number;
     admittedCount: number;
     deferredCount: number;
+    queueDebtCount: number;
     groupCount: number;
     compatibleGroupCount: number;
     serializedJobCount: number;
@@ -1548,6 +1552,7 @@ async function runCodexSwarmAutoDrain(input: {
   const iterations: FrontierCodexSwarmAutoDrainIteration[] = [];
   const terminalJobIds = new Set<string>();
   const blockedJobIds = new Set<string>();
+  const promotedQueueDebtJobIds = new Set<string>();
   const maxIterations = Math.max(1, Math.floor(normalized.maxIterations ?? Math.max(1, input.run.jobs.length + 1)));
   let remainingReadyCount = 0;
   let latestCollection: FrontierCodexCollectResult | undefined;
@@ -1584,7 +1589,17 @@ async function runCodexSwarmAutoDrain(input: {
       ...admittedCandidateJobIds.filter((jobId) => !admittedJobIds.includes(jobId))
     ]).sort();
     const terminalQueueDebtJobIds = terminalAutoDrainQueueDebtJobIds(collection, terminalJobIds, blockedJobIds);
-    const drainWorkJobIds = uniqueStrings([...allReadyJobIds, ...terminalQueueDebtJobIds]).sort();
+    const activePromotedQueueDebtJobIds = visibleAutoDrainQueueDebtJobIds(
+      collection,
+      [...promotedQueueDebtJobIds],
+      terminalJobIds,
+      blockedJobIds
+    );
+    const drainWorkJobIds = uniqueStrings([
+      ...allReadyJobIds,
+      ...terminalQueueDebtJobIds,
+      ...activePromotedQueueDebtJobIds
+    ]).sort();
     const coordinatorAgentDrain = await writeAutoDrainCoordinatorAgentDrainArtifact({
       collection,
       outDir,
@@ -1592,9 +1607,11 @@ async function runCodexSwarmAutoDrain(input: {
       admission,
       readyJobIds: allReadyJobIds,
       drainWorkJobIds,
+      promotedQueueDebtJobIds: activePromotedQueueDebtJobIds,
       admittedJobIds,
       deferredJobIds
     });
+    for (const promotedWork of coordinatorAgentDrain.workArtifact.promotedWork) promotedQueueDebtJobIds.add(promotedWork.jobId);
     const drainAdmittedJobIds = coordinatorAgentDrain.artifact.assignments
       .filter((assignment) => assignment.selected)
       .map((assignment) => assignment.jobId);
@@ -1609,6 +1626,7 @@ async function runCodexSwarmAutoDrain(input: {
       readyJobIds: allReadyJobIds,
       admittedJobIds: drainAdmittedJobIds,
       deferredJobIds: drainDeferredJobIds,
+      drainWorkJobIds,
       coordinatorAgentDrain: coordinatorAgentDrain.artifact
     });
     remainingReadyCount = allReadyJobIds.length;
@@ -1695,7 +1713,13 @@ async function runCodexSwarmAutoDrain(input: {
       .map((entry) => entry.jobId)
       .filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId)).length;
     const remainingTerminalQueueDebtCount = terminalAutoDrainQueueDebtJobIds(postApplyCollection, terminalJobIds, blockedJobIds).length;
-    if (!apply.decisions.length || (remainingReadyCount === 0 && remainingTerminalQueueDebtCount === 0)) break;
+    const remainingPromotedQueueDebtCount = visibleAutoDrainQueueDebtJobIds(
+      postApplyCollection,
+      [...promotedQueueDebtJobIds],
+      terminalJobIds,
+      blockedJobIds
+    ).length;
+    if (!apply.decisions.length || (remainingReadyCount === 0 && remainingTerminalQueueDebtCount === 0 && remainingPromotedQueueDebtCount === 0)) break;
   }
   const lockSummary = summarizeAutonomousDecisionLockScopes(iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
   const artifacts = createAutoDrainArtifactMetadata({ outDir, autoDrainPath, generatedAt, iterations });
@@ -1761,6 +1785,7 @@ async function writeAutoDrainCoordinatorAgentDrainArtifact(input: {
   admission: FrontierSwarmMergeAdmission;
   readyJobIds: readonly string[];
   drainWorkJobIds?: readonly string[];
+  promotedQueueDebtJobIds?: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
 }): Promise<{
@@ -1893,11 +1918,18 @@ function createAutoDrainCoordinatorAgentDrainWorkArtifact(input: {
   admission: FrontierSwarmMergeAdmission;
   readyJobIds: readonly string[];
   drainWorkJobIds?: readonly string[];
+  promotedQueueDebtJobIds?: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
 }): FrontierSwarmCoordinatorAgentDrainWork {
   const generatedAt = Date.now();
   const drainWorkJobIds = uniqueStrings(input.drainWorkJobIds ?? input.readyJobIds).sort();
+  const promotedQueueDebtJobIds = visibleAutoDrainQueueDebtJobIds(
+    input.collection,
+    input.promotedQueueDebtJobIds ?? [],
+    new Set<string>(),
+    new Set<string>()
+  );
   const readyIndex = filterMergeIndexForJobIds(input.collection.mergeIndex, drainWorkJobIds);
   const scopedAdmission = scopeAutoDrainCoordinatorAdmission({
     index: readyIndex,
@@ -1926,6 +1958,18 @@ function createAutoDrainCoordinatorAgentDrainWorkArtifact(input: {
       selectedDeferredArtifactPath: input.artifactPath,
       readyJobIds: [...input.readyJobIds],
       drainWorkJobIds,
+      promotedQueueDebtJobIds,
+      deferredPromotedWork: autoDrainQueueDebtRecords({
+        collection: input.collection,
+        queue,
+        jobIds: input.deferredJobIds,
+        actions: ['promote']
+      }),
+      carriedPromotedQueueDebt: autoDrainQueueDebtRecords({
+        collection: input.collection,
+        queue,
+        jobIds: promotedQueueDebtJobIds
+      }),
       admittedJobIds: [...input.admittedJobIds],
       deferredJobIds: [...input.deferredJobIds]
     }
@@ -1938,6 +1982,60 @@ const AUTO_DRAIN_TERMINAL_QUEUE_ACTIONS: ReadonlySet<FrontierSwarmMergeQueueAssi
   'record-only',
   'block'
 ]);
+
+function collectionEntriesByJobId(collection: FrontierCodexCollectResult): Map<string, FrontierCodexCollectedBundle> {
+  const entries = new Map<string, FrontierCodexCollectedBundle>();
+  for (const bucketEntries of Object.values(collection.buckets)) {
+    for (const entry of bucketEntries) entries.set(entry.jobId, entry);
+  }
+  return entries;
+}
+
+function visibleAutoDrainQueueDebtJobIds(
+  collection: FrontierCodexCollectResult,
+  jobIds: readonly string[],
+  terminalJobIds: ReadonlySet<string>,
+  blockedJobIds: ReadonlySet<string>
+): string[] {
+  const entriesByJobId = collectionEntriesByJobId(collection);
+  return uniqueStrings(jobIds)
+    .filter((jobId) => entriesByJobId.has(jobId) && !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId))
+    .sort();
+}
+
+function autoDrainQueueDebtRecords(input: {
+  collection: FrontierCodexCollectResult;
+  queue: FrontierSwarmHierarchicalMergeQueue;
+  jobIds: readonly string[];
+  actions?: readonly FrontierSwarmMergeQueueAssignmentAction[];
+}): AutoDrainQueueDebtRecord[] {
+  const entriesByJobId = collectionEntriesByJobId(input.collection);
+  const assignmentsByJobId = new Map(input.queue.assignments.map((assignment) => [assignment.jobId, assignment]));
+  const actions = input.actions ? new Set(input.actions) : undefined;
+  return uniqueStrings(input.jobIds)
+    .sort()
+    .map((jobId): AutoDrainQueueDebtRecord | undefined => {
+      const assignment = assignmentsByJobId.get(jobId);
+      if (actions && (!assignment || !actions.has(assignment.action))) return undefined;
+      const entry = entriesByJobId.get(jobId);
+      const record = entry ? autoDrainGroupingRecord(entry) : undefined;
+      return {
+        jobId,
+        ...(assignment?.taskId || record?.taskId ? { taskId: assignment?.taskId ?? record?.taskId } : {}),
+        ...(assignment?.lane || record?.lane ? { lane: assignment?.lane ?? record?.lane } : {}),
+        queueItemIds: assignment?.queueItemIds.length ? [...assignment.queueItemIds] : record ? [...record.queueItemIds] : [jobId],
+        ...(entry ? { bucket: entry.bucket } : {}),
+        ...(record ? { bundlePath: record.mergePath } : {}),
+        ...(record?.patchPath ? { patchPath: record.patchPath } : {}),
+        ...(assignment ? { queueAction: assignment.action } : {}),
+        changedPaths: assignment ? [...assignment.changedPaths] : record ? [...record.changedPaths] : [],
+        changedRegions: assignment ? [...assignment.changedRegions] : record ? [...record.changedRegions] : [],
+        scopeKeys: record ? [...record.scopeKeys] : [],
+        reasons: assignment ? [...assignment.reasons] : []
+      };
+    })
+    .filter((entry): entry is AutoDrainQueueDebtRecord => entry !== undefined);
+}
 
 function terminalAutoDrainQueueDebtJobIds(
   collection: FrontierCodexCollectResult,
@@ -2248,6 +2346,21 @@ interface AutoDrainGroupingInternalGroup {
   records: AutoDrainGroupingRecord[];
 }
 
+interface AutoDrainQueueDebtRecord {
+  jobId: string;
+  taskId?: string;
+  lane?: string;
+  queueItemIds: string[];
+  bucket?: FrontierCodexCollectBucket;
+  bundlePath?: string;
+  patchPath?: string;
+  queueAction?: FrontierSwarmMergeQueueAssignmentAction;
+  changedPaths: string[];
+  changedRegions: string[];
+  scopeKeys: string[];
+  reasons: string[];
+}
+
 async function writeAutoDrainGroupingArtifact(input: {
   collection: FrontierCodexCollectResult;
   outDir: string;
@@ -2255,6 +2368,7 @@ async function writeAutoDrainGroupingArtifact(input: {
   readyJobIds: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
+  drainWorkJobIds?: readonly string[];
   coordinatorAgentDrain?: FrontierCodexCoordinatorAgentDrainArtifact;
 }): Promise<{ path: string; artifact: FrontierCodexSwarmAutoDrainGroupingArtifact }> {
   const artifact = createAutoDrainGroupingArtifact(input);
@@ -2269,14 +2383,15 @@ function createAutoDrainGroupingArtifact(input: {
   readyJobIds: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
+  drainWorkJobIds?: readonly string[];
   coordinatorAgentDrain?: FrontierCodexCoordinatorAgentDrainArtifact;
 }): FrontierCodexSwarmAutoDrainGroupingArtifact {
   const generatedAt = Date.now();
-  const readyEntries = new Map(input.collection.buckets['ready-to-apply'].map((entry) => [entry.jobId, entry]));
+  const entriesByJobId = collectionEntriesByJobId(input.collection);
   const coordinatorAgentAssignments = new Map((input.coordinatorAgentDrain?.assignments ?? []).map((assignment) => [assignment.jobId, assignment]));
   const admittedRecords = input.admittedJobIds
     .map((jobId) => {
-      const entry = readyEntries.get(jobId);
+      const entry = entriesByJobId.get(jobId);
       return entry ? autoDrainGroupingRecord(entry) : undefined;
     })
     .filter((entry): entry is AutoDrainGroupingRecord => entry !== undefined);
@@ -2322,6 +2437,7 @@ function createAutoDrainGroupingArtifact(input: {
   });
   const groupIds = new Map(groupArtifacts.flatMap((group) => group.jobIds.map((jobId) => [jobId, group.id] as const)));
   const admittedJobs = admittedRecords.map((record): FrontierCodexSwarmAutoDrainGroupingJob => {
+    const entry = entriesByJobId.get(record.jobId);
     const placement = placements.get(record.jobId);
     const recordConflicts = placement?.conflicts ?? [];
     const serializesAfterJobIds = uniqueStrings(recordConflicts.flatMap((conflict) => conflict.jobIds.filter((jobId) => jobId !== record.jobId))).sort();
@@ -2331,6 +2447,7 @@ function createAutoDrainGroupingArtifact(input: {
       ...(record.taskId ? { taskId: record.taskId } : {}),
       ...(record.lane ? { lane: record.lane } : {}),
       queueItemIds: [...record.queueItemIds],
+      ...(entry ? { bucket: entry.bucket } : {}),
       bundlePath: record.mergePath,
       ...(record.patchPath ? { patchPath: record.patchPath } : {}),
       changedPaths: [...record.changedPaths],
@@ -2344,7 +2461,7 @@ function createAutoDrainGroupingArtifact(input: {
     };
   });
   const deferredJobs = input.deferredJobIds.map((jobId): FrontierCodexSwarmAutoDrainGroupingJob => {
-    const entry = readyEntries.get(jobId);
+    const entry = entriesByJobId.get(jobId);
     const record = entry ? autoDrainGroupingRecord(entry) : undefined;
     const coordinatorAgent = coordinatorAgentAssignments.get(jobId);
     return {
@@ -2352,6 +2469,7 @@ function createAutoDrainGroupingArtifact(input: {
       ...(record?.taskId ? { taskId: record.taskId } : {}),
       ...(record?.lane ? { lane: record.lane } : {}),
       queueItemIds: record ? [...record.queueItemIds] : [jobId],
+      ...(entry ? { bucket: entry.bucket } : {}),
       ...(record ? { bundlePath: record.mergePath } : {}),
       ...(record?.patchPath ? { patchPath: record.patchPath } : {}),
       changedPaths: record ? [...record.changedPaths] : [],
@@ -2362,6 +2480,32 @@ function createAutoDrainGroupingArtifact(input: {
       conflicts: [],
       ...(coordinatorAgent ? { coordinatorAgent } : {}),
       reason: coordinatorAgent?.selectionReason ?? 'auto-drain-admission'
+    };
+  });
+  const placedJobIds = new Set([...input.admittedJobIds, ...input.deferredJobIds]);
+  const queueDebtJobIds = uniqueStrings(input.drainWorkJobIds ?? [])
+    .filter((jobId) => !placedJobIds.has(jobId))
+    .sort();
+  const queueDebtJobs = queueDebtJobIds.map((jobId): FrontierCodexSwarmAutoDrainGroupingJob => {
+    const entry = entriesByJobId.get(jobId);
+    const record = entry ? autoDrainGroupingRecord(entry) : undefined;
+    const coordinatorAgent = coordinatorAgentAssignments.get(jobId);
+    return {
+      jobId,
+      ...(record?.taskId ? { taskId: record.taskId } : {}),
+      ...(record?.lane ? { lane: record.lane } : {}),
+      queueItemIds: record ? [...record.queueItemIds] : [jobId],
+      ...(entry ? { bucket: entry.bucket } : {}),
+      ...(record ? { bundlePath: record.mergePath } : {}),
+      ...(record?.patchPath ? { patchPath: record.patchPath } : {}),
+      changedPaths: record ? [...record.changedPaths] : [],
+      changedRegions: record ? [...record.changedRegions] : [],
+      scopeKeys: record ? [...record.scopeKeys] : [],
+      placement: 'deferred',
+      serializesAfterJobIds: coordinatorAgent?.serializesAfterJobIds ?? [],
+      conflicts: [],
+      ...(coordinatorAgent ? { coordinatorAgent } : {}),
+      reason: coordinatorAgent?.selectionReason ?? 'auto-drain-queue-debt'
     };
   });
   const dedupedConflicts = dedupeAutoDrainGroupingConflicts(conflicts);
@@ -2377,13 +2521,16 @@ function createAutoDrainGroupingArtifact(input: {
     readyJobIds: [...input.readyJobIds],
     admittedJobIds: [...input.admittedJobIds],
     deferredJobIds: [...input.deferredJobIds],
+    drainWorkJobIds: uniqueStrings(input.drainWorkJobIds ?? input.readyJobIds).sort(),
+    queueDebtJobIds,
     groups: groupArtifacts,
-    jobs: [...admittedJobs, ...deferredJobs],
+    jobs: [...admittedJobs, ...deferredJobs, ...queueDebtJobs],
     conflicts: dedupedConflicts,
     summary: {
       readyCount: input.readyJobIds.length,
       admittedCount: input.admittedJobIds.length,
       deferredCount: input.deferredJobIds.length,
+      queueDebtCount: queueDebtJobIds.length,
       groupCount: groupArtifacts.length,
       compatibleGroupCount: groupArtifacts.filter((group) => !group.requiresSerialization).length,
       serializedJobCount,

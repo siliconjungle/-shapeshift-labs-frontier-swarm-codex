@@ -1118,6 +1118,119 @@ assert.strictEqual(autoDrainCommitRerunRun.autoDrainArtifacts.coordinatorAgentDr
 assert.strictEqual(await fs.readFile(path.join(autoDrainCommitRerunRepo, 'src', 'apply.ts'), 'utf8'), 'first-commit\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autoDrainCommitRerunRepo })).stdout, '');
 
+const autoDrainPromotedDebtRepo = path.join(tmp, 'auto-drain-promoted-debt-repo');
+await fs.mkdir(path.join(autoDrainPromotedDebtRepo, 'src'), { recursive: true });
+await execFileP('git', ['init'], { cwd: autoDrainPromotedDebtRepo });
+await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: autoDrainPromotedDebtRepo });
+await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: autoDrainPromotedDebtRepo });
+await fs.writeFile(path.join(autoDrainPromotedDebtRepo, 'src', 'shared.ts'), 'old\n');
+await fs.writeFile(path.join(autoDrainPromotedDebtRepo, 'src', 'one.ts'), 'old-one\n');
+await fs.writeFile(path.join(autoDrainPromotedDebtRepo, 'src', 'two.ts'), 'old-two\n');
+await execFileP('git', ['add', '--', 'src/shared.ts', 'src/one.ts', 'src/two.ts'], { cwd: autoDrainPromotedDebtRepo });
+await execFileP('git', ['commit', '-m', 'Initial promoted debt fixture'], { cwd: autoDrainPromotedDebtRepo });
+const autoDrainPromotedDebtPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-promoted-debt',
+    lanes: [{ id: 'promote', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'promote-first-task',
+      lane: 'promote',
+      ownedFiles: ['src/shared.ts', 'src/one.ts'],
+      verification: [{
+        name: 'worker-sees-first-promote',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/shared.ts','utf8')!=='first\\n') process.exit(1); if(fs.readFileSync('src/one.ts','utf8')!=='first-one\\n') process.exit(1);"]
+      }]
+    }, {
+      id: 'promote-second-task',
+      lane: 'promote',
+      ownedFiles: ['src/shared.ts', 'src/two.ts'],
+      verification: [{
+        name: 'worker-sees-second-promote',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/shared.ts','utf8')!=='second\\n') process.exit(1); if(fs.readFileSync('src/two.ts','utf8')!=='second-two\\n') process.exit(1);"]
+      }]
+    }]
+  }
+});
+const autoDrainPromotedDebtOutDir = path.join(tmp, 'auto-drain-promoted-debt-run');
+const autoDrainPromotedDebtRun = await runCodexSwarm(autoDrainPromotedDebtPlan, {
+  outDir: autoDrainPromotedDebtOutDir,
+  cwd: autoDrainPromotedDebtRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainPromotedDebtOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    commit: true,
+    maxReady: 1,
+    maxIterations: 3
+  },
+  executor: async (input) => {
+    const first = input.job.taskId === 'promote-first-task';
+    const file = first ? 'src/one.ts' : 'src/two.ts';
+    const sharedValue = first ? 'first\n' : 'second\n';
+    const fileValue = first ? 'first-one\n' : 'second-two\n';
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'shared.ts'), sharedValue);
+    await fs.writeFile(path.join(input.workspacePath, file), fileValue);
+    await fs.writeFile(input.paths.lastMessagePath, `${input.job.taskId} changed promoted debt fixture\n`);
+    return {
+      exitCode: 0,
+      changedPaths: ['src/shared.ts', file],
+      lastMessage: `${input.job.taskId} changed promoted debt fixture`
+    };
+  }
+});
+assert.strictEqual(autoDrainPromotedDebtRun.ok, true);
+assert.strictEqual(autoDrainPromotedDebtRun.autoDrain.iterations.length, 2);
+const autoDrainPromotedDebtFirstIteration = autoDrainPromotedDebtRun.autoDrain.iterations[0];
+const autoDrainPromotedDebtSecondIteration = autoDrainPromotedDebtRun.autoDrain.iterations[1];
+assert.strictEqual(autoDrainPromotedDebtFirstIteration.coordinatorAgentDrain.summary.promoteCount, 2);
+assert.strictEqual(autoDrainPromotedDebtFirstIteration.coordinatorAgentDrain.summary.selectedPromoteCount, 1);
+assert.strictEqual(autoDrainPromotedDebtFirstIteration.coordinatorAgentDrain.summary.deferredPromoteCount, 1);
+assert.strictEqual(autoDrainPromotedDebtFirstIteration.deferredJobIds.length, 1);
+const autoDrainPromotedDeferredJobId = autoDrainPromotedDebtFirstIteration.deferredJobIds[0];
+const autoDrainPromotedDeferredGrouping = autoDrainPromotedDebtFirstIteration.grouping.jobs.find((job) => job.jobId === autoDrainPromotedDeferredJobId);
+assert.ok(autoDrainPromotedDeferredGrouping);
+assert.strictEqual(autoDrainPromotedDeferredGrouping.placement, 'deferred');
+assert.strictEqual(autoDrainPromotedDeferredGrouping.bucket, 'ready-to-apply');
+assert.ok(autoDrainPromotedDeferredGrouping.bundlePath.endsWith('merge.json'));
+assert.deepStrictEqual(autoDrainPromotedDeferredGrouping.queueItemIds, ['promote-second-task']);
+const autoDrainPromotedDeferredWork = autoDrainPromotedDebtFirstIteration.coordinatorAgentDrainWork.metadata.deferredPromotedWork.find((entry) => entry.jobId === autoDrainPromotedDeferredJobId);
+assert.ok(autoDrainPromotedDeferredWork);
+assert.strictEqual(autoDrainPromotedDeferredWork.bundlePath, autoDrainPromotedDeferredGrouping.bundlePath);
+assert.deepStrictEqual(autoDrainPromotedDeferredWork.queueItemIds, autoDrainPromotedDeferredGrouping.queueItemIds);
+assert.deepStrictEqual(autoDrainPromotedDebtSecondIteration.readyJobIds, []);
+assert.strictEqual(autoDrainPromotedDebtSecondIteration.apply, undefined);
+assert.deepStrictEqual(autoDrainPromotedDebtSecondIteration.grouping.queueDebtJobIds, [autoDrainPromotedDeferredJobId]);
+assert.strictEqual(autoDrainPromotedDebtSecondIteration.grouping.summary.queueDebtCount, 1);
+const autoDrainPromotedDebtJob = autoDrainPromotedDebtSecondIteration.grouping.jobs.find((job) => job.jobId === autoDrainPromotedDeferredJobId);
+assert.ok(autoDrainPromotedDebtJob);
+assert.strictEqual(autoDrainPromotedDebtJob.reason, 'auto-drain-queue-debt');
+assert.strictEqual(autoDrainPromotedDebtJob.bucket, 'stale-against-head');
+assert.ok(autoDrainPromotedDebtJob.bundlePath.endsWith('merge.json'));
+assert.deepStrictEqual(autoDrainPromotedDebtJob.queueItemIds, ['promote-second-task']);
+assert.strictEqual(autoDrainPromotedDebtSecondIteration.coordinatorAgentDrainWork.summary.assignmentCount, 1);
+assert.strictEqual(autoDrainPromotedDebtSecondIteration.coordinatorAgentDrainWork.summary.terminalCount, 1);
+assert.strictEqual(autoDrainPromotedDebtSecondIteration.coordinatorAgentDrainWork.summary.rerunCount, 1);
+assert.deepStrictEqual(autoDrainPromotedDebtSecondIteration.coordinatorAgentDrainWork.terminalDecisions.map((decision) => decision.jobId), [autoDrainPromotedDeferredJobId]);
+assert.deepStrictEqual(autoDrainPromotedDebtSecondIteration.coordinatorAgentDrainWork.metadata.promotedQueueDebtJobIds, [autoDrainPromotedDeferredJobId]);
+const autoDrainPromotedCarriedDebt = autoDrainPromotedDebtSecondIteration.coordinatorAgentDrainWork.metadata.carriedPromotedQueueDebt.find((entry) => entry.jobId === autoDrainPromotedDeferredJobId);
+assert.ok(autoDrainPromotedCarriedDebt);
+assert.strictEqual(autoDrainPromotedCarriedDebt.queueAction, 'rerun');
+assert.strictEqual(autoDrainPromotedCarriedDebt.bundlePath, autoDrainPromotedDebtJob.bundlePath);
+assert.deepStrictEqual(autoDrainPromotedCarriedDebt.queueItemIds, autoDrainPromotedDebtJob.queueItemIds);
+assert.strictEqual(autoDrainPromotedDebtRun.autoDrainArtifacts.coordinatorAgentDrainWork.rerunCount, 1);
+assert.strictEqual(await fs.readFile(path.join(autoDrainPromotedDebtRepo, 'src', 'shared.ts'), 'utf8'), 'first\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autoDrainPromotedDebtRepo })).stdout, '');
+
 const cliAutoDrainCommitRepo = await createApplyFixtureRepo(tmp, 'cli-auto-drain-commit-run-repo');
 const cliAutoDrainCommitOutDir = path.join(tmp, 'cli-auto-drain-commit-run-out');
 const cliAutoDrainCommitPlanPath = path.join(tmp, 'cli-auto-drain-commit-plan.json');
