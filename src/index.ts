@@ -5557,6 +5557,7 @@ interface AutoDrainRerunCandidate {
   reasons: string[];
   sourceHead?: string;
   sourceHeads: string[];
+  sourceArtifactPaths: string[];
   sourcePatchPaths: string[];
   sourceBundlePaths: string[];
   sourceCollectionPaths: string[];
@@ -5615,6 +5616,9 @@ function createAutoDrainRerunManifest(input: {
   const latestMergeQueuePath = latestCollection
     ? latestCollection.artifacts?.hierarchicalMergeQueuePath ?? path.join(latestCollection.outDir, 'hierarchical-merge-queue.json')
     : undefined;
+  const latestQueueOverlayPath = latestCollection
+    ? latestCollection.artifacts?.queueOverlayPath ?? path.join(latestCollection.outDir, 'queue-overlay.json')
+    : undefined;
   const latestSourceHeads = compactArtifactPaths([input.currentHead]);
   const terminalJobIds = new Set(input.terminalJobIds);
   const blockedJobIds = new Set(input.blockedJobIds);
@@ -5623,9 +5627,15 @@ function createAutoDrainRerunManifest(input: {
     .filter((decision) => decision.status === 'applied' || decision.status === 'committed')
     .flatMap(dashboardAutonomousDecisionQueueKeys));
   const decisionLogPathById = new Map<string, string>();
+  const applyPathByDecisionId = new Map<string, string>();
+  const autonomousQueueOverlayPathByDecisionId = new Map<string, string>();
   for (const iteration of input.iterations) {
+    const applyPath = iteration.apply ? path.join(iteration.apply.outDir, 'autonomous-apply.json') : undefined;
+    const autonomousQueueOverlayPath = iteration.apply ? path.join(iteration.apply.outDir, 'autonomous-queue-overlay.json') : undefined;
     for (const decision of iteration.apply?.decisions ?? []) {
       if (iteration.apply?.decisionLogPath) decisionLogPathById.set(decision.id, iteration.apply.decisionLogPath);
+      if (applyPath) applyPathByDecisionId.set(decision.id, applyPath);
+      if (autonomousQueueOverlayPath) autonomousQueueOverlayPathByDecisionId.set(decision.id, autonomousQueueOverlayPath);
     }
   }
 
@@ -5647,6 +5657,7 @@ function createAutoDrainRerunManifest(input: {
         sourceKinds: assignment?.action === 'rerun' ? ['stale-against-head', 'queue-rerun'] : ['stale-against-head'],
         reasons: uniqueStrings(['stale-against-head', ...entry.bundle.reasons, ...(assignment?.reasons ?? [])]),
         sourceHeads: latestSourceHeads,
+        sourceArtifactPaths: compactArtifactPaths([latestQueueOverlayPath]),
         sourcePatchPaths: autoDrainRerunPatchPathsForEntry(entry, record),
         sourceBundlePaths: autoDrainRerunBundlePathsForEntry(entry),
         sourceCollectionPaths: latestCollectionPath ? [latestCollectionPath] : [],
@@ -5676,6 +5687,7 @@ function createAutoDrainRerunManifest(input: {
         sourceKinds: ['queue-rerun'],
         reasons: uniqueStrings(['queue-rerun', ...assignment.reasons]),
         sourceHeads: latestSourceHeads,
+        sourceArtifactPaths: compactArtifactPaths([latestQueueOverlayPath]),
         sourcePatchPaths: autoDrainRerunPatchPathsForEntry(entry, record),
         sourceBundlePaths: autoDrainRerunBundlePathsForEntry(entry),
         sourceCollectionPaths: latestCollectionPath ? [latestCollectionPath] : [],
@@ -5702,6 +5714,10 @@ function createAutoDrainRerunManifest(input: {
       sourceKinds: [sourceKind],
       reasons: uniqueStrings([decision.status, decision.reason]),
       sourceHeads: compactArtifactPaths([sourceHeadForAutonomousDecision(decision)]),
+      sourceArtifactPaths: compactArtifactPaths([
+        applyPathByDecisionId.get(decision.id),
+        autonomousQueueOverlayPathByDecisionId.get(decision.id)
+      ]),
       sourcePatchPaths: [decision.patchPath],
       sourceBundlePaths: [decision.bundlePath],
       sourceDecisionLogPaths: compactArtifactPaths([decisionLogPathById.get(decision.id)]),
@@ -5769,6 +5785,7 @@ function mergeAutoDrainRerunCandidate(
     sourceKinds: [],
     reasons: [],
     sourceHeads: [],
+    sourceArtifactPaths: [],
     sourcePatchPaths: [],
     sourceBundlePaths: [],
     sourceCollectionPaths: [],
@@ -5798,6 +5815,7 @@ function mergeAutoDrainRerunCandidate(
     reasons: uniqueStrings([...base.reasons, ...(input.reasons ?? [])]).sort(),
     sourceHead: sourceHeads.length === 1 ? sourceHeads[0] : undefined,
     sourceHeads,
+    sourceArtifactPaths: compactArtifactPaths([...base.sourceArtifactPaths, ...(input.sourceArtifactPaths ?? [])]).sort(),
     sourcePatchPaths: compactArtifactPaths([...base.sourcePatchPaths, ...(input.sourcePatchPaths ?? [])]).sort(),
     sourceBundlePaths: compactArtifactPaths([...base.sourceBundlePaths, ...(input.sourceBundlePaths ?? [])]).sort(),
     sourceCollectionPaths: compactArtifactPaths([...base.sourceCollectionPaths, ...(input.sourceCollectionPaths ?? [])]).sort(),
@@ -5839,6 +5857,7 @@ function createAutoDrainRerunTask(
     ...candidate.sourcePatchPaths,
     ...candidate.sourceBundlePaths,
     ...candidate.sourceDecisionLogPaths,
+    ...candidate.sourceArtifactPaths,
     ...candidate.sourceCollectionPaths,
     ...candidate.sourceMergeQueuePaths
   ]);

@@ -1439,6 +1439,8 @@ assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceHead, autoDrain
 assert.deepStrictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceHeads, [autoDrainCommitRerunHead]);
 assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourcePatchPaths.some((entry) => entry.endsWith('changes.patch')));
 assert.ok(autoDrainCommitRerunTask.sourceRefs.some((entry) => entry.endsWith('changes.patch')));
+assert.ok(autoDrainCommitRerunTask.sourceRefs.includes(autoDrainCommitRerunSecondIteration.collection.artifacts.queueOverlayPath));
+assert.ok(autoDrainCommitRerunTask.sourceRefs.includes(autoDrainCommitRerunSecondIteration.collection.artifacts.hierarchicalMergeQueuePath));
 assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainCommitRerunManifest).map((task) => task.id), ['apply-second-commit-task-rerun-current-head']);
 
 const autoDrainPromotedDebtRepo = path.join(tmp, 'auto-drain-promoted-debt-repo');
@@ -2213,6 +2215,8 @@ assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourceHe
 assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourcePatchPaths, [autoDrainConflictBlockedDecision.patchPath]);
 assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(autoDrainConflictBlockedDecision.patchPath));
 assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(autoDrainConflictBlockedDecision.bundlePath));
+assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(path.join(autoDrainConflictBlockedRun.autoDrain.iterations[0].apply.outDir, 'autonomous-apply.json')));
+assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(path.join(autoDrainConflictBlockedRun.autoDrain.iterations[0].apply.outDir, 'autonomous-queue-overlay.json')));
 assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainConflictBlockedManifest).map((task) => task.targetRefs), [['src/apply.ts']]);
 
 const collapsedDecisionOutDir = path.join(tmp, 'collapsed-decision-dashboard');
