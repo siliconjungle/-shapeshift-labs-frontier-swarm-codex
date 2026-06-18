@@ -849,6 +849,94 @@ assert.ok(patchOnlyNormalizedBundle.metadata.patchOnlyCollection.normalizedPatch
 const patchOnlyNormalizedPatch = await fs.readFile(path.join(patchOnlyNormalizedCollection.outDir, 'ready-to-apply', 'patch-only-normalized', 'changes.patch'), 'utf8');
 assert.match(patchOnlyNormalizedPatch, /diff --git a\/src\/apply\.ts b\/src\/apply\.ts/);
 
+const failedOrigRepo = await createApplyFixtureRepo(tmp, 'failed-orig-repo');
+const failedOrigPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'failed-orig',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/apply.ts'] }]
+  },
+  tasks: {
+    items: [
+      { id: 'failed-orig-only', lane: 'apply', ownedFiles: ['src/apply.ts'], allowedWrites: ['src/apply.ts'] },
+      { id: 'failed-orig-source-escape', lane: 'apply', ownedFiles: ['src/apply.ts'], allowedWrites: ['src/apply.ts'] }
+    ]
+  }
+});
+const failedOrigOutDir = path.join(tmp, 'failed-orig-run');
+const failedOrigRun = await runCodexSwarm(failedOrigPlan, {
+  outDir: failedOrigOutDir,
+  cwd: failedOrigRepo,
+  dryRun: false,
+  workspace: {
+    mode: 'copy',
+    root: path.join(failedOrigRepo, 'agent-runs', 'failed-orig', 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts.orig'), 'patch reject backup\n');
+    if (input.job.taskId === 'failed-orig-source-escape') {
+      await fs.writeFile(path.join(input.workspacePath, 'src', 'escape.ts'), 'real source escape\n');
+    } else {
+      await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts.rej'), 'failed hunk\n');
+    }
+    await fs.writeFile(input.paths.lastMessagePath, `${input.job.taskId} failed\n`);
+    return {
+      exitCode: 1,
+      changedPaths: input.job.taskId === 'failed-orig-source-escape'
+        ? ['src/apply.ts.orig', 'src/escape.ts']
+        : ['src/apply.ts.orig', 'src/apply.ts.rej'],
+      lastMessage: `${input.job.taskId} failed`
+    };
+  }
+});
+assert.strictEqual(failedOrigRun.run.summary.failedCount, 2);
+const failedOrigResults = new Map(failedOrigRun.run.results.map((entry) => [entry.jobId, entry]));
+const failedOrigOnlyJob = failedOrigPlan.jobs.find((job) => job.taskId === 'failed-orig-only');
+const failedOrigEscapeJob = failedOrigPlan.jobs.find((job) => job.taskId === 'failed-orig-source-escape');
+assert.ok(failedOrigOnlyJob);
+assert.ok(failedOrigEscapeJob);
+const failedOrigOnlyResult = failedOrigResults.get(failedOrigOnlyJob.id);
+const failedOrigEscapeResult = failedOrigResults.get(failedOrigEscapeJob.id);
+assert.ok(failedOrigOnlyResult);
+assert.ok(failedOrigEscapeResult);
+assert.deepStrictEqual(failedOrigOnlyResult.changedPaths, []);
+assert.deepStrictEqual(failedOrigOnlyResult.ownershipViolations, []);
+assert.deepStrictEqual(failedOrigOnlyResult.metadata.generatedFailedEvidence.paths, ['src/apply.ts.orig', 'src/apply.ts.rej']);
+assert.deepStrictEqual(failedOrigEscapeResult.changedPaths, ['src/escape.ts']);
+assert.deepStrictEqual(failedOrigEscapeResult.ownershipViolations, ['src/escape.ts']);
+assert.deepStrictEqual(failedOrigEscapeResult.metadata.generatedFailedEvidence.paths, ['src/apply.ts.orig']);
+const failedOrigCollection = await collectCodexSwarmRun({
+  run: failedOrigOutDir,
+  cwd: failedOrigRepo,
+  outDir: path.join(tmp, 'failed-orig-collection'),
+  checkStale: false
+});
+assert.strictEqual(failedOrigCollection.summary['failed-evidence'], 2);
+assert.strictEqual(failedOrigCollection.summary['needs-human-port'], 0);
+assert.strictEqual(failedOrigCollection.summary.mergeQueueRejectCount, 2);
+assert.strictEqual(failedOrigCollection.summary.mergeQueueBlockCount, 0);
+const failedOrigCollectedEntries = new Map(failedOrigCollection.buckets['failed-evidence'].map((entry) => [entry.jobId, entry]));
+const failedOrigOnlyBundle = failedOrigCollectedEntries.get(failedOrigOnlyJob.id)?.bundle;
+const failedOrigEscapeBundle = failedOrigCollectedEntries.get(failedOrigEscapeJob.id)?.bundle;
+assert.ok(failedOrigOnlyBundle);
+assert.ok(failedOrigEscapeBundle);
+assert.strictEqual(failedOrigOnlyBundle.disposition, 'rejected');
+assert.deepStrictEqual(failedOrigOnlyBundle.changedPaths, []);
+assert.deepStrictEqual(failedOrigOnlyBundle.ownershipViolations, []);
+assert.deepStrictEqual(failedOrigOnlyBundle.metadata.generatedFailedEvidence.paths, ['src/apply.ts.orig', 'src/apply.ts.rej']);
+assert.strictEqual(failedOrigEscapeBundle.disposition, 'rejected');
+assert.deepStrictEqual(failedOrigEscapeBundle.changedPaths, ['src/escape.ts']);
+assert.deepStrictEqual(failedOrigEscapeBundle.ownershipViolations, ['src/escape.ts']);
+const failedOrigAssignments = new Map(failedOrigCollection.hierarchicalMergeQueue.assignments.map((assignment) => [assignment.jobId, assignment]));
+assert.strictEqual(failedOrigAssignments.get(failedOrigOnlyJob.id)?.action, 'reject');
+assert.ok(failedOrigAssignments.get(failedOrigOnlyJob.id)?.reasons.includes('failed-or-invalid-evidence'));
+assert.ok(!failedOrigAssignments.get(failedOrigOnlyJob.id)?.reasons.includes('true-blocker'));
+assert.strictEqual(failedOrigAssignments.get(failedOrigEscapeJob.id)?.action, 'reject');
+assert.ok(failedOrigAssignments.get(failedOrigEscapeJob.id)?.reasons.includes('failed-or-invalid-evidence'));
+assert.ok(!failedOrigAssignments.get(failedOrigEscapeJob.id)?.reasons.includes('true-blocker'));
+
 const queueMetadataRunDir = path.join(tmp, 'queue-metadata-run');
 await writeSyntheticMergeBundle(queueMetadataRunDir, 'apply-local', {
   disposition: 'auto-mergeable',

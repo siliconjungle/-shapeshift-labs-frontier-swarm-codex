@@ -175,6 +175,7 @@ const DEFAULT_WORKSPACE_EXCLUDES = [
   'agent-runs',
   'target'
 ];
+const GENERATED_PATCH_REJECT_LEFTOVER_SUFFIXES = ['.orig', '.rej'];
 const DEFAULT_SEMANTIC_IMPORT_MAX_FILES = 24;
 const DEFAULT_SEMANTIC_IMPORT_MAX_BYTES = 512 * 1024;
 const SEMANTIC_IMPORT_MAX_STRING_CHARS = 2048;
@@ -2193,6 +2194,7 @@ type WorkspaceFileSnapshot = Map<string, string>;
 interface ChangedPathCollection {
   changedPaths: string[];
   ignoredChangedPaths: string[];
+  generatedFailedEvidencePaths: string[];
 }
 
 export function createCodexSwarmPlan(input: FrontierCodexSwarmCliInput): FrontierSwarmPlan {
@@ -3956,7 +3958,8 @@ export async function runCodexJob(
     fileSnapshot,
     workspacePlan,
     executionChangedPaths: execution.changedPaths,
-    collectGitStatus: options.collectGitStatus
+    collectGitStatus: options.collectGitStatus,
+    ignoreGeneratedFailedEvidencePaths: execution.exitCode !== 0
   });
   const rawChangedPaths = collected.changedPaths;
   const changedPaths = options.changedPathFilter ? [...options.changedPathFilter(rawChangedPaths, hookInput)] : rawChangedPaths;
@@ -3980,6 +3983,13 @@ export async function runCodexJob(
     evidenceDir: paths.evidenceDir,
     options: options.semanticImport
   });
+  const generatedFailedEvidence = collected.generatedFailedEvidencePaths.length
+    ? {
+      source: 'frontier.swarm-codex.generated-failed-evidence',
+      reason: 'patch-reject-leftover',
+      paths: [...collected.generatedFailedEvidencePaths]
+    }
+    : undefined;
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });
   const evidencePaths = uniqueStrings([
     paths.evidenceDir,
@@ -4011,6 +4021,7 @@ export async function runCodexJob(
       resourceAllocation,
       codexRunMetrics,
       codexCostEstimate,
+      ...(generatedFailedEvidence ? { generatedFailedEvidence } : {}),
       ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {}),
       codexHandoffArtifacts: handoffArtifacts
     }
@@ -4021,6 +4032,7 @@ export async function runCodexJob(
       sourceTask
     },
     ...(codexRunMetrics.hasTokenUsage ? { codexRunMetrics, codexCostEstimate } : {}),
+    ...(generatedFailedEvidence ? { generatedFailedEvidence } : {}),
     ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {})
   };
   const mergeBundle = createSwarmMergeBundle({
@@ -9805,6 +9817,13 @@ function uniqueWorkspacePaths(values: readonly string[]): string[] {
   return out;
 }
 
+function isGeneratedPatchRejectLeftoverPath(file: string): boolean {
+  const normalized = file.trim().replace(/\\/g, '/');
+  if (!normalized || normalized.includes('\0')) return false;
+  const name = normalized.split('/').filter(Boolean).pop()?.toLowerCase() ?? normalized.toLowerCase();
+  return GENERATED_PATCH_REJECT_LEFTOVER_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+
 async function gitChangedPaths(cwd: string): Promise<string[]> {
   const result = await runProcess('git', ['status', '--porcelain'], { cwd, allowFailure: true });
   if (result.status !== 0) return [];
@@ -9814,10 +9833,15 @@ async function gitChangedPaths(cwd: string): Promise<string[]> {
   });
 }
 
-async function collectChangedPaths(cwd: string, baseline: WorkspaceFileSnapshot | undefined, plan: FrontierCodexWorkspacePlan): Promise<ChangedPathCollection> {
-  if (!baseline) return filterWorkspaceChangedPaths(await gitChangedPaths(cwd), plan);
+async function collectChangedPaths(
+  cwd: string,
+  baseline: WorkspaceFileSnapshot | undefined,
+  plan: FrontierCodexWorkspacePlan,
+  options: { ignoreGeneratedFailedEvidencePaths?: boolean } = {}
+): Promise<ChangedPathCollection> {
+  if (!baseline) return filterWorkspaceChangedPaths(await gitChangedPaths(cwd), plan, options);
   const after = await snapshotWorkspaceFiles(cwd);
-  return filterWorkspaceChangedPaths(diffWorkspaceFiles(baseline, after), plan);
+  return filterWorkspaceChangedPaths(diffWorkspaceFiles(baseline, after), plan, options);
 }
 
 async function collectJobChangedPaths(input: {
@@ -9826,10 +9850,12 @@ async function collectJobChangedPaths(input: {
   workspacePlan: FrontierCodexWorkspacePlan;
   executionChangedPaths?: readonly string[];
   collectGitStatus?: boolean;
+  ignoreGeneratedFailedEvidencePaths?: boolean;
 }): Promise<ChangedPathCollection> {
+  const filterOptions = { ignoreGeneratedFailedEvidencePaths: input.ignoreGeneratedFailedEvidencePaths };
   const hasExecutionPaths = input.executionChangedPaths !== undefined;
   const executionCollection = hasExecutionPaths
-    ? filterWorkspaceChangedPaths(input.executionChangedPaths ?? [], input.workspacePlan)
+    ? filterWorkspaceChangedPaths(input.executionChangedPaths ?? [], input.workspacePlan, filterOptions)
     : undefined;
   const useSnapshotProof = input.collectGitStatus !== false
     && !!input.fileSnapshot
@@ -9837,18 +9863,19 @@ async function collectJobChangedPaths(input: {
   if (executionCollection && useSnapshotProof) {
     return mergeChangedPathCollections(
       executionCollection,
-      await collectChangedPaths(input.workspace, input.fileSnapshot, input.workspacePlan)
+      await collectChangedPaths(input.workspace, input.fileSnapshot, input.workspacePlan, filterOptions)
     );
   }
   if (executionCollection) return executionCollection;
-  if (input.collectGitStatus === false) return { changedPaths: [], ignoredChangedPaths: [] };
-  return collectChangedPaths(input.workspace, input.fileSnapshot, input.workspacePlan);
+  if (input.collectGitStatus === false) return { changedPaths: [], ignoredChangedPaths: [], generatedFailedEvidencePaths: [] };
+  return collectChangedPaths(input.workspace, input.fileSnapshot, input.workspacePlan, filterOptions);
 }
 
 function mergeChangedPathCollections(left: ChangedPathCollection, right: ChangedPathCollection): ChangedPathCollection {
   return {
     changedPaths: uniqueWorkspacePaths([...left.changedPaths, ...right.changedPaths]),
-    ignoredChangedPaths: uniqueWorkspacePaths([...left.ignoredChangedPaths, ...right.ignoredChangedPaths])
+    ignoredChangedPaths: uniqueWorkspacePaths([...left.ignoredChangedPaths, ...right.ignoredChangedPaths]),
+    generatedFailedEvidencePaths: uniqueWorkspacePaths([...left.generatedFailedEvidencePaths, ...right.generatedFailedEvidencePaths])
   };
 }
 
@@ -9903,14 +9930,23 @@ function normalizeNoIndexWorkspacePatch(diff: string, file: string, sourceExists
   }).join('\n');
 }
 
-function filterWorkspaceChangedPaths(paths: readonly string[], plan: FrontierCodexWorkspacePlan): ChangedPathCollection {
+function filterWorkspaceChangedPaths(
+  paths: readonly string[],
+  plan: FrontierCodexWorkspacePlan,
+  options: { ignoreGeneratedFailedEvidencePaths?: boolean } = {}
+): ChangedPathCollection {
   const changedPaths: string[] = [];
   const ignoredChangedPaths: string[] = [];
+  const generatedFailedEvidencePaths: string[] = [];
   for (const file of uniqueWorkspacePaths(paths)) {
     if (isIgnoredWorkspaceChangedPath(file, plan)) ignoredChangedPaths.push(file);
+    else if (options.ignoreGeneratedFailedEvidencePaths && isGeneratedPatchRejectLeftoverPath(file)) {
+      ignoredChangedPaths.push(file);
+      generatedFailedEvidencePaths.push(file);
+    }
     else changedPaths.push(file);
   }
-  return { changedPaths, ignoredChangedPaths };
+  return { changedPaths, ignoredChangedPaths, generatedFailedEvidencePaths };
 }
 
 function isIgnoredWorkspaceChangedPath(file: string, plan: FrontierCodexWorkspacePlan): boolean {
@@ -10599,27 +10635,29 @@ async function synthesizePatchOnlyMergeBundle(input: {
     ...stringArray(allowedWriteCheck.allowedGlobs),
     ...stringArray(promptTask.allowedWrites)
   ]).sort();
+  const allowedWriteOk = readPatchOnlyAllowedWriteOk(evidence, allowedWriteCheck);
+  const statusText = readFirstString(evidence.status, evidence.result, evidence.outcome)?.toLowerCase();
+  const evidenceFailed = !!statusText && ['failed', 'fail', 'error', 'errored', 'rejected'].includes(statusText);
+  const evidenceBlocked = !!statusText && ['blocked', 'human-blocked'].includes(statusText);
   const patchNormalization = await normalizePatchOnlyPatch({
     patchPath: input.patchPath,
     patchText,
     cwd: input.cwd,
     evidenceChangedPaths,
-    allowedWrites
+    allowedWrites,
+    ignoreGeneratedFailedEvidencePaths: evidenceFailed || evidenceBlocked || allowedWriteOk === false
   });
-  const patchChangedPaths = patchNormalization.changedPaths;
-  const changedPaths = uniqueStrings([
-    ...(patchChangedPaths.length ? patchChangedPaths : evidenceChangedPaths)
-  ]).sort();
+  const generatedFailedEvidencePaths = patchNormalization.generatedFailedEvidencePaths;
+  const changedPaths = uniqueStrings(patchNormalization.changedPaths).sort();
   let ownershipViolations = allowedWrites.length
     ? changedPaths.filter((file) => !allowedWrites.some((glob) => matchesGlob(file, glob))).sort()
     : [];
-  const allowedWriteOk = readPatchOnlyAllowedWriteOk(evidence, allowedWriteCheck);
-  if (allowedWriteOk === false && ownershipViolations.length === 0) ownershipViolations = changedPaths.length ? [...changedPaths] : ['patch-only-output'];
-  const statusText = readFirstString(evidence.status, evidence.result, evidence.outcome)?.toLowerCase();
-  const evidenceFailed = !!statusText && ['failed', 'fail', 'error', 'errored', 'rejected'].includes(statusText);
-  const evidenceBlocked = !!statusText && ['blocked', 'human-blocked'].includes(statusText);
+  if (allowedWriteOk === false && ownershipViolations.length === 0 && generatedFailedEvidencePaths.length === 0) {
+    ownershipViolations = changedPaths.length ? [...changedPaths] : ['patch-only-output'];
+  }
   const hasPatchContent = patchText.trim().length > 0;
-  const failedEvidence = evidenceFailed || ownershipViolations.length > 0;
+  const generatedFailedEvidence = generatedFailedEvidencePaths.length > 0 && (evidenceFailed || evidenceBlocked || allowedWriteOk === false);
+  const failedEvidence = evidenceFailed || generatedFailedEvidence || ownershipViolations.length > 0;
   const blockedEvidence = !failedEvidence && evidenceBlocked;
   const discoveryOnly = !failedEvidence && !blockedEvidence && (!hasPatchContent || changedPaths.length === 0);
   const status: FrontierSwarmMergeBundle['status'] = failedEvidence
@@ -10679,7 +10717,14 @@ async function synthesizePatchOnlyMergeBundle(input: {
     commandsFailed: [],
     queueItemIds,
     staleAgainstHead: false,
-    reasons: patchOnlyBundleReasons({ disposition, discoveryOnly, failedEvidence, blockedEvidence, ownershipViolations }),
+    reasons: patchOnlyBundleReasons({
+      disposition,
+      discoveryOnly,
+      failedEvidence,
+      blockedEvidence,
+      ownershipViolations,
+      generatedFailedEvidencePaths
+    }),
     metadata: {
       patchOnlyCollection: {
         source: FRONTIER_SWARM_CODEX_COLLECTION_KIND,
@@ -10691,6 +10736,10 @@ async function synthesizePatchOnlyMergeBundle(input: {
         ...(promptPath ? { promptPath } : {}),
         ...(statusText ? { evidenceStatus: statusText } : {}),
         changedPathSource: patchNormalization.changedPathSource,
+        ...(generatedFailedEvidencePaths.length ? {
+          generatedFailedEvidenceReason: 'patch-reject-leftover',
+          generatedFailedEvidencePaths
+        } : {}),
         ...(patchNormalization.normalized ? { normalizedPatchPath: patchNormalization.patchPath } : {}),
         allowedWriteEvidence: allowedWriteOk === undefined ? 'unknown' : allowedWriteOk,
         cwd: input.cwd
@@ -10705,14 +10754,28 @@ async function normalizePatchOnlyPatch(input: {
   cwd: string;
   evidenceChangedPaths: readonly string[];
   allowedWrites: readonly string[];
+  ignoreGeneratedFailedEvidencePaths?: boolean;
 }): Promise<{
   patchPath: string;
   patchText: string;
   changedPaths: string[];
   changedPathSource: 'patch' | 'normalized-patch' | 'evidence' | 'unknown';
   normalized: boolean;
+  generatedFailedEvidencePaths: string[];
 }> {
-  const patchChangedPaths = changedPathsFromPatchText(input.patchText);
+  const rawPatchChangedPaths = changedPathsFromPatchText(input.patchText);
+  const patchChangedPaths = input.ignoreGeneratedFailedEvidencePaths
+    ? rawPatchChangedPaths.filter((file) => !isGeneratedPatchRejectLeftoverPath(file))
+    : rawPatchChangedPaths;
+  const evidenceChangedPaths = input.ignoreGeneratedFailedEvidencePaths
+    ? input.evidenceChangedPaths.filter((file) => !isGeneratedPatchRejectLeftoverPath(file))
+    : [...input.evidenceChangedPaths];
+  const generatedFailedEvidencePaths = input.ignoreGeneratedFailedEvidencePaths
+    ? uniqueStrings([
+      ...rawPatchChangedPaths.filter(isGeneratedPatchRejectLeftoverPath),
+      ...input.evidenceChangedPaths.filter(isGeneratedPatchRejectLeftoverPath)
+    ]).sort()
+    : [];
   const normalizedChangedPaths = uniqueStrings(patchChangedPaths
     .map((file) => normalizePatchOnlyChangedPath(file, input))
     .filter((file): file is string => !!file)).sort();
@@ -10720,19 +10783,20 @@ async function normalizePatchOnlyPatch(input: {
     ? normalizedChangedPaths.filter((file) => !input.allowedWrites.some((glob) => matchesGlob(file, glob)))
     : [];
   const evidenceViolations = input.allowedWrites.length
-    ? input.evidenceChangedPaths.filter((file) => !input.allowedWrites.some((glob) => matchesGlob(file, glob)))
+    ? evidenceChangedPaths.filter((file) => !input.allowedWrites.some((glob) => matchesGlob(file, glob)))
     : [];
-  const useEvidencePaths = input.evidenceChangedPaths.length > 0
+  const useEvidencePaths = evidenceChangedPaths.length > 0
     && evidenceViolations.length === 0
     && (normalizedChangedPaths.length === 0 || patchViolations.length > 0);
-  const changedPaths = useEvidencePaths ? [...input.evidenceChangedPaths].sort() : normalizedChangedPaths;
+  const changedPaths = useEvidencePaths ? [...evidenceChangedPaths].sort() : normalizedChangedPaths;
   if (!input.patchText.trim()) {
     return {
       patchPath: input.patchPath,
       patchText: input.patchText,
       changedPaths,
       changedPathSource: changedPaths.length ? useEvidencePaths ? 'evidence' : 'patch' : 'unknown',
-      normalized: false
+      normalized: false,
+      generatedFailedEvidencePaths
     };
   }
   const normalizedText = rewritePatchOnlyPatchHeaders(input.patchText, input);
@@ -10742,18 +10806,22 @@ async function normalizePatchOnlyPatch(input: {
       patchText: input.patchText,
       changedPaths,
       changedPathSource: changedPaths.length ? useEvidencePaths ? 'evidence' : 'patch' : 'unknown',
-      normalized: false
+      normalized: false,
+      generatedFailedEvidencePaths
     };
   }
   const normalizedPath = path.join(path.dirname(input.patchPath), 'changes.normalized.patch');
   await fs.writeFile(normalizedPath, normalizedText);
-  const normalizedPaths = changedPathsFromPatchText(normalizedText);
+  const normalizedPaths = input.ignoreGeneratedFailedEvidencePaths
+    ? changedPathsFromPatchText(normalizedText).filter((file) => !isGeneratedPatchRejectLeftoverPath(file))
+    : changedPathsFromPatchText(normalizedText);
   return {
     patchPath: normalizedPath,
     patchText: normalizedText,
     changedPaths: normalizedPaths.length ? normalizedPaths : changedPaths,
     changedPathSource: 'normalized-patch',
-    normalized: true
+    normalized: true,
+    generatedFailedEvidencePaths
   };
 }
 
@@ -10839,9 +10907,11 @@ function patchOnlyBundleReasons(input: {
   failedEvidence: boolean;
   blockedEvidence: boolean;
   ownershipViolations: readonly string[];
+  generatedFailedEvidencePaths: readonly string[];
 }): string[] {
   if (input.failedEvidence) return uniqueStrings([
     'rejected',
+    ...(input.generatedFailedEvidencePaths.length ? ['generated-failed-evidence'] : []),
     ...input.ownershipViolations.map((file) => `ownership-violation:${file}`)
   ]).sort();
   if (input.blockedEvidence) return ['blocked'];
