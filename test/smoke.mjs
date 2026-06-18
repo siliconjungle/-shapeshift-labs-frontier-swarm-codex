@@ -2250,6 +2250,17 @@ assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.iterations[0].final
 assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.iterations[0].skippedRequiredGateCount, 0);
 assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.iterations[0].finalGateContinuationDecisionCount, 0);
 assert.strictEqual(autoDrainApplyRerunRun.autoDrainArtifacts.iterations[0].finalGateContinuationSkippedRequiredGateCount, 0);
+const autoDrainApplyRerunCollectionArtifact = JSON.parse(await fs.readFile(autoDrainApplyRerunRun.autoDrain.iterations[0].collection.artifacts.collectionPath, 'utf8'));
+assert.strictEqual(autoDrainApplyRerunCollectionArtifact.summary['ready-to-apply'], 2);
+assert.strictEqual(autoDrainApplyRerunCollectionArtifact.summary.mergeQueueApplyLocalCount, 2);
+assert.strictEqual(autoDrainApplyRerunCollectionArtifact.summary.mergeQueueRerunCount, 0);
+const autoDrainApplyRerunApplyArtifact = JSON.parse(await fs.readFile(path.join(autoDrainApplyRerunApply.outDir, 'autonomous-apply.json'), 'utf8'));
+assert.strictEqual(autoDrainApplyRerunApplyArtifact.summary.committed, 2);
+assert.strictEqual(autoDrainApplyRerunApplyArtifact.summary.rerun, 0);
+assert.strictEqual(autoDrainApplyRerunApplyArtifact.summary.skippedRequiredGateCount, 0);
+assert.strictEqual(autoDrainApplyRerunApplyArtifact.summary.finalGateContinuationDecisionCount, 0);
+assert.strictEqual(autoDrainApplyRerunApplyArtifact.summary.finalGateContinuationSkippedRequiredGateCount, 0);
+assert.deepStrictEqual(autoDrainApplyRerunApplyArtifact.decisions.map((decision) => decision.status), ['committed', 'committed']);
 const autoDrainApplyRerunManifest = JSON.parse(await fs.readFile(autoDrainApplyRerunRun.autoDrainArtifacts.rerunManifest.paths[0], 'utf8'));
 assert.strictEqual(autoDrainApplyRerunManifest.summary.taskCount, 0);
 assert.strictEqual(autoDrainApplyRerunManifest.summary.decisionRerunCount, 0);
