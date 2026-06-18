@@ -456,7 +456,7 @@ const cliHelp = await execFileP(process.execPath, [
 ], { cwd: tmp });
 assert.ok(cliHelp.stdout.includes('Default run auto-drain is autonomous coordinator drain work.'));
 assert.ok(cliHelp.stdout.includes('frontier.swarm.coordinator-agent-drain-work contract'));
-assert.ok(cliHelp.stdout.includes('--auto-drain-commit (create audited coordinator commits tied to queue item ids and the decision ledger)'));
+assert.ok(cliHelp.stdout.includes('--auto-drain-commit (run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)'));
 assert.ok(cliHelp.stdout.includes('Terminal coordinator decisions such as applied, committed, checked,'));
 assert.ok(cliHelp.stdout.includes('queue outcomes, not\nhuman blockers.'));
 assert.ok(cliHelp.stdout.includes('--no-auto-drain (raw worker diagnostics only; skips coordinator drain-work)'));
@@ -822,6 +822,64 @@ assert.strictEqual(autoDrainCommitApplyArtifact.summary.committed, 1);
 assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].status, 'committed');
 assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].headAfter, autoDrainCommitDecision.headAfter);
 assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].commit, autoDrainCommitDecision.headAfter);
+
+const cliAutoDrainCommitRepo = await createApplyFixtureRepo(tmp, 'cli-auto-drain-commit-run-repo');
+const cliAutoDrainCommitOutDir = path.join(tmp, 'cli-auto-drain-commit-run-out');
+const cliAutoDrainCommitPlanPath = path.join(tmp, 'cli-auto-drain-commit-plan.json');
+const cliAutoDrainCommitCodex = await writeFakeCodexApplyScript(tmp);
+await fs.writeFile(cliAutoDrainCommitPlanPath, JSON.stringify(autoDrainPlan, null, 2) + '\n');
+const cliAutoDrainCommit = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'run',
+  '--plan',
+  cliAutoDrainCommitPlanPath,
+  '--outDir',
+  cliAutoDrainCommitOutDir,
+  '--codex',
+  cliAutoDrainCommitCodex,
+  '--workspace',
+  'copy',
+  '--worktree-root',
+  path.join(cliAutoDrainCommitOutDir, 'workspaces'),
+  '--replace-workspace',
+  '--include',
+  'src',
+  '--link-node-modules',
+  'false',
+  '--verify',
+  '--auto-drain-commit',
+  '--auto-drain-max-iterations',
+  '2',
+  '--focused-command',
+  "node -e \"const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
+], { cwd: cliAutoDrainCommitRepo, maxBuffer: 8 * 1024 * 1024 });
+const cliAutoDrainCommitRun = JSON.parse(cliAutoDrainCommit.stdout);
+assert.strictEqual(cliAutoDrainCommitRun.ok, true);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.summary.applyCount, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.summary.terminalCount, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.iterations[0].apply.summary.committed, 1);
+const cliAutoDrainCommitDecision = cliAutoDrainCommitRun.autoDrain.iterations[0].apply.decisions[0];
+assert.strictEqual(cliAutoDrainCommitDecision.status, 'committed');
+assert.strictEqual(cliAutoDrainCommitDecision.reason, 'patch committed and verification passed');
+assert.strictEqual(cliAutoDrainCommitDecision.jobId, cliAutoDrainCommitRun.run.results[0].jobId);
+assert.deepStrictEqual(cliAutoDrainCommitDecision.queueItemIds, ['apply-task']);
+assert.match(cliAutoDrainCommitDecision.commit, /^[0-9a-f]{40}$/);
+assert.strictEqual(cliAutoDrainCommitDecision.commit, cliAutoDrainCommitDecision.headAfter);
+assert.strictEqual(await fs.readFile(path.join(cliAutoDrainCommitRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: cliAutoDrainCommitRepo })).stdout, '');
+assert.strictEqual((await execFileP('git', ['rev-parse', 'HEAD'], { cwd: cliAutoDrainCommitRepo })).stdout.trim(), cliAutoDrainCommitDecision.commit);
+const cliAutoDrainCommitDashboard = JSON.parse(await fs.readFile(path.join(cliAutoDrainCommitOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(cliAutoDrainCommitDashboard.queueMetadata.queueHealth.appliedDecisionCount, 1);
+assert.strictEqual(cliAutoDrainCommitDashboard.queueMetadata.queueHealth.committedDecisionCount, 1);
+assert.strictEqual(cliAutoDrainCommitDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 1);
+const cliAutoDrainCommitDecisionLogPath = cliAutoDrainCommitRun.autoDrain.iterations[0].apply.decisionLogPath;
+const cliAutoDrainCommitDecisionLines = (await fs.readFile(cliAutoDrainCommitDecisionLogPath, 'utf8')).trim().split(/\r?\n/);
+assert.strictEqual(cliAutoDrainCommitDecisionLines.length, 1);
+const cliAutoDrainCommitDecisionEntry = JSON.parse(cliAutoDrainCommitDecisionLines[0]);
+assert.strictEqual(cliAutoDrainCommitDecisionEntry.status, 'committed');
+assert.strictEqual(cliAutoDrainCommitDecisionEntry.commit, cliAutoDrainCommitDecision.commit);
+assert.deepStrictEqual(cliAutoDrainCommitDecisionEntry.queueItemIds, ['apply-task']);
+assert.deepStrictEqual(cliAutoDrainCommitDecisionEntry.lockKeys, ['region:src/apply.ts#apply']);
 
 const autoDrainCandidateRepo = await createApplyFixtureRepo(tmp, 'auto-drain-candidate-run-repo');
 const autoDrainCandidateOutDir = path.join(autoDrainCandidateRepo, 'agent-runs', 'auto-drain-candidate-run');
@@ -1604,7 +1662,7 @@ assert.ok(cliSource.includes('--auto-drain-allow-dirty'));
 assert.ok(cliSource.includes('--auto-drain-check-stale'));
 assert.ok(cliSource.includes('--auto-drain-branch-prefix <prefix>'));
 assert.ok(cliSource.includes('--auto-drain-dry-run'));
-assert.ok(cliSource.includes('--auto-drain-commit (create audited coordinator commits tied to queue item ids and the decision ledger)'));
+assert.ok(cliSource.includes('--auto-drain-commit (run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)'));
 assert.ok(cliSource.includes('--auto-drain-limit <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-iterations <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-ready <n>'));
@@ -1686,6 +1744,34 @@ async function writeSyntheticMergeBundle(runDir, jobId, overrides = {}) {
     reasons: [],
     ...overrides
   }, null, 2) + '\n');
+}
+
+async function writeFakeCodexApplyScript(root) {
+  const file = path.join(root, 'fake-codex-apply.mjs');
+  await fs.writeFile(file, [
+    '#!/usr/bin/env node',
+    "import fs from 'node:fs/promises';",
+    "import path from 'node:path';",
+    '',
+    'const args = process.argv.slice(2);',
+    "const valueAfter = (flag) => {",
+    '  const index = args.indexOf(flag);',
+    '  return index >= 0 ? args[index + 1] : undefined;',
+    '};',
+    "const workspace = valueAfter('--cd');",
+    "const lastMessage = valueAfter('--output-last-message');",
+    'if (!workspace || !lastMessage) {',
+    "  console.error('missing workspace or last-message path');",
+    '  process.exit(2);',
+    '}',
+    "await fs.mkdir(path.join(workspace, 'src'), { recursive: true });",
+    "await fs.writeFile(path.join(workspace, 'src', 'apply.ts'), 'new\\n');",
+    "await fs.writeFile(lastMessage, 'cli commit auto drained\\n');",
+    "process.stdout.write(JSON.stringify({ type: 'fake-codex', workspace }) + '\\n');",
+    ''
+  ].join('\n'));
+  await fs.chmod(file, 0o755);
+  return file;
 }
 
 async function exists(file) {

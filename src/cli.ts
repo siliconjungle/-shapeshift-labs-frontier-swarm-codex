@@ -203,7 +203,7 @@ function printHelp() {
     '  --auto-drain-out-dir <path> --auto-drain-allow-dirty --auto-drain-check-stale',
     '  --auto-drain-branch-prefix <prefix>',
     '  --auto-drain-dry-run',
-    '  --auto-drain-commit (create audited coordinator commits tied to queue item ids and the decision ledger)',
+    '  --auto-drain-commit (run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)',
     '  --auto-drain-limit <n> --auto-drain-max-iterations <n>',
     '  --auto-drain-max-ready <n> --auto-drain-max-changed-paths <n>',
     '  --auto-drain-max-changed-regions <n> --auto-drain-max-high-risk <n>',
