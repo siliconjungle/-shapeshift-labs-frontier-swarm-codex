@@ -1169,9 +1169,13 @@ export interface FrontierCodexWorkspaceProof {
 export interface FrontierCodexPidEntry {
   pid: number;
   role: 'parent' | 'codex' | string;
+  status?: 'running' | 'finished';
   runId?: string;
   jobId?: string;
   startedAt: number;
+  finishedAt?: number;
+  exitCode?: number;
+  signal?: string;
   command?: string[];
 }
 
@@ -2306,59 +2310,71 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   });
   await initFileSwarmEventStream(eventStream);
   const pidManifestPath = path.resolve(options.cwd ?? process.cwd(), options.pidManifestPath ?? path.join(outDir, 'pids.json'));
-  await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: plan.runId, startedAt: Date.now() }, plan.runId);
-  let run = createSwarmRun({ plan, status: 'running', startedAt: Date.now() });
-  const startedEvent = { type: 'swarm.started', runId: run.id, at: run.startedAt, data: { jobCount: plan.jobs.length } };
-  run = recordSwarmEvent(run, startedEvent);
-  await appendFileSwarmEvent(eventStream, startedEvent);
-  const runOptions = { ...options, eventStream, pidManifestPath };
-  const results = await runScheduledJobPool(plan, Math.max(1, options.maxConcurrency ?? 1), (job, lease) => runCodexJob(job, runOptions, outDir, lease));
-  for (const result of results) {
-    const job = plan.jobs.find((entry) => entry.id === result.jobId);
-    if (job) {
-      await options.onJobFinished?.({ job, result });
-      await appendFileSwarmEvent(eventStream, {
-        type: 'agent.finished',
-        runId: run.id,
-        jobId: job.id,
-        taskId: job.taskId,
-        lane: job.lane,
-        data: { status: result.status, mergeReadiness: result.mergeReadiness, changedPathCount: result.changedPaths?.length ?? 0 }
-      });
+  await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', status: 'running', runId: plan.runId, startedAt: Date.now() }, plan.runId);
+  let parentExitCode = 1;
+  try {
+    let run = createSwarmRun({ plan, status: 'running', startedAt: Date.now() });
+    const startedEvent = { type: 'swarm.started', runId: run.id, at: run.startedAt, data: { jobCount: plan.jobs.length } };
+    run = recordSwarmEvent(run, startedEvent);
+    await appendFileSwarmEvent(eventStream, startedEvent);
+    const runOptions = { ...options, eventStream, pidManifestPath };
+    const results = await runScheduledJobPool(plan, Math.max(1, options.maxConcurrency ?? 1), (job, lease) => runCodexJob(job, runOptions, outDir, lease));
+    for (const result of results) {
+      const job = plan.jobs.find((entry) => entry.id === result.jobId);
+      if (job) {
+        await options.onJobFinished?.({ job, result });
+        await appendFileSwarmEvent(eventStream, {
+          type: 'agent.finished',
+          runId: run.id,
+          jobId: job.id,
+          taskId: job.taskId,
+          lane: job.lane,
+          data: { status: result.status, mergeReadiness: result.mergeReadiness, changedPathCount: result.changedPaths?.length ?? 0 }
+        });
+      }
     }
+    for (const result of results) run = completeSwarmJob(run, result);
+    const proof = createSwarmProof(run, { validation: plan.validation });
+    const workerOk = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
+    const autoDrain = await runCodexSwarmAutoDrain({
+      plan,
+      run,
+      cwd,
+      outDir,
+      options
+    });
+    const autoDrainArtifacts = autoDrain?.artifacts;
+    const ok = workerOk && (autoDrain?.ok ?? true);
+    await appendFileSwarmEvent(eventStream, {
+      type: 'swarm.finished',
+      runId: run.id,
+      data: { ok, summary: run.summary, autoDrain: autoDrain?.summary ?? null }
+    });
+    await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({ ok, outDir, run, proof, ...(autoDrain ? { autoDrain } : {}), ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}) }, null, 2) + '\n');
+    await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
+      ok,
+      outDir,
+      plan,
+      run,
+      proof,
+      ...(autoDrain ? { autoDrain } : {}),
+      ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}),
+      eventStream,
+      pidManifestPath
+    });
+    const result = { ok, outDir, plan, run, proof, ...(autoDrain ? { autoDrain } : {}), ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}) };
+    await options.onSwarmFinished?.({ result });
+    parentExitCode = ok ? 0 : 1;
+    return result;
+  } finally {
+    await finishCodexPidManifestEntry(pidManifestPath, {
+      pid: process.pid,
+      role: 'parent'
+    }, {
+      finishedAt: Date.now(),
+      exitCode: parentExitCode
+    }, plan.runId).catch(() => {});
   }
-  for (const result of results) run = completeSwarmJob(run, result);
-  const proof = createSwarmProof(run, { validation: plan.validation });
-  const workerOk = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
-  const autoDrain = await runCodexSwarmAutoDrain({
-    plan,
-    run,
-    cwd,
-    outDir,
-    options
-  });
-  const autoDrainArtifacts = autoDrain?.artifacts;
-  const ok = workerOk && (autoDrain?.ok ?? true);
-  await appendFileSwarmEvent(eventStream, {
-    type: 'swarm.finished',
-    runId: run.id,
-    data: { ok, summary: run.summary, autoDrain: autoDrain?.summary ?? null }
-  });
-  await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({ ok, outDir, run, proof, ...(autoDrain ? { autoDrain } : {}), ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}) }, null, 2) + '\n');
-  await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
-    ok,
-    outDir,
-    plan,
-    run,
-    proof,
-    ...(autoDrain ? { autoDrain } : {}),
-    ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}),
-    eventStream,
-    pidManifestPath
-  });
-  const result = { ok, outDir, plan, run, proof, ...(autoDrain ? { autoDrain } : {}), ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}) };
-  await options.onSwarmFinished?.({ result });
-  return result;
 }
 
 async function runCodexSwarmAutoDrain(input: {
@@ -4538,12 +4554,24 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...input.env }
     });
+    const childPid = child.pid;
     let timer: NodeJS.Timeout;
     const settle = async (result: FrontierCodexExecutorResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       await Promise.all([finishWriteStream(eventsStream), finishWriteStream(stderrStream)]);
+      if (childPid) {
+        await finishCodexPidManifestEntry(input.paths.pidManifestPath, {
+          pid: childPid,
+          role: 'codex',
+          jobId: input.job.id
+        }, {
+          finishedAt: Date.now(),
+          exitCode: result.exitCode,
+          ...(result.signal ? { signal: result.signal } : {})
+        }).catch(() => {});
+      }
       const metrics = eventMetrics.finish();
       resolve({
         ...result,
@@ -4558,10 +4586,11 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
     };
     eventsStream.on('error', onStreamError);
     stderrStream.on('error', onStreamError);
-    if (child.pid) {
+    if (childPid) {
       appendCodexPidManifest(input.paths.pidManifestPath, {
-        pid: child.pid,
+        pid: childPid,
         role: 'codex',
+        status: 'running',
         jobId: input.job.id,
         startedAt: Date.now(),
         command: [input.codexPath, ...input.args]
@@ -7168,13 +7197,65 @@ async function appendCodexPidManifestUnlocked(file: string, entry: FrontierCodex
     entries: []
   } satisfies FrontierCodexPidManifest));
   const entries = manifest.entries.filter((existing) => existing.pid !== entry.pid || existing.jobId !== entry.jobId);
-  entries.push(entry);
+  entries.push({ ...entry, status: entry.status ?? 'running' });
   await fs.mkdir(path.dirname(file), { recursive: true });
   await writeJsonAtomic(file, { ...manifest, ...(runId ? { runId } : {}), entries });
 }
 
 export async function readCodexPidManifest(file: string): Promise<FrontierCodexPidManifest> {
   return JSON.parse(await fs.readFile(file, 'utf8')) as FrontierCodexPidManifest;
+}
+
+async function finishCodexPidManifestEntry(
+  file: string,
+  match: { pid: number; role?: string; jobId?: string },
+  update: { finishedAt: number; exitCode?: number; signal?: string },
+  runId?: string
+): Promise<void> {
+  const absolute = path.resolve(file);
+  const previous = pidManifestWriteQueues.get(absolute) ?? Promise.resolve();
+  let next: Promise<void>;
+  next = previous
+    .catch(() => {})
+    .then(() => finishCodexPidManifestEntryUnlocked(absolute, match, update, runId))
+    .finally(() => {
+      if (pidManifestWriteQueues.get(absolute) === next) pidManifestWriteQueues.delete(absolute);
+    });
+  pidManifestWriteQueues.set(absolute, next);
+  return next;
+}
+
+async function finishCodexPidManifestEntryUnlocked(
+  file: string,
+  match: { pid: number; role?: string; jobId?: string },
+  update: { finishedAt: number; exitCode?: number; signal?: string },
+  runId?: string
+): Promise<void> {
+  const manifest = await readCodexPidManifest(file).catch(() => undefined);
+  if (!manifest) return;
+  const entries = manifest.entries.map((entry) => {
+    if (!codexPidEntryMatches(entry, match)) return entry;
+    return {
+      ...entry,
+      status: 'finished' as const,
+      finishedAt: update.finishedAt,
+      ...(update.exitCode !== undefined ? { exitCode: update.exitCode } : {}),
+      ...(update.signal ? { signal: update.signal } : {})
+    };
+  });
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await writeJsonAtomic(file, { ...manifest, ...(runId ? { runId } : {}), entries });
+}
+
+function codexPidEntryMatches(entry: FrontierCodexPidEntry, match: { pid: number; role?: string; jobId?: string }): boolean {
+  if (entry.pid !== match.pid) return false;
+  if (match.role !== undefined && entry.role !== match.role) return false;
+  if (match.jobId !== undefined && entry.jobId !== match.jobId) return false;
+  return true;
+}
+
+function codexPidEntryIsActive(entry: FrontierCodexPidEntry): boolean {
+  return entry.finishedAt === undefined && entry.status !== 'finished';
 }
 
 export async function stopCodexSwarmRun(input: { run: string; signal?: NodeJS.Signals }): Promise<FrontierCodexStopResult> {
@@ -7184,7 +7265,7 @@ export async function stopCodexSwarmRun(input: { run: string; signal?: NodeJS.Si
   const stopped: number[] = [];
   const missing: number[] = [];
   const errors: Array<{ pid: number; error: string }> = [];
-  for (const entry of manifest.entries.filter((item) => item.pid !== process.pid).sort((left, right) => right.startedAt - left.startedAt)) {
+  for (const entry of manifest.entries.filter((item) => item.pid !== process.pid && codexPidEntryIsActive(item)).sort((left, right) => right.startedAt - left.startedAt)) {
     try {
       process.kill(entry.pid, signal);
       stopped.push(entry.pid);
