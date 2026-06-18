@@ -805,7 +805,7 @@ await fs.writeFile(autoDrainAnswerLogPath, JSON.stringify({
   status: 'answered',
   answer: 'No human action needed for already-applied coordinator work.',
   evidencePath: 'operator-answer.md'
-}) + '\n');
+}) + '\n{invalid-json\n');
 const autoDrainPlan = createCodexSwarmPlan({
   manifest: {
     id: 'auto-drain',
@@ -873,8 +873,23 @@ assert.deepStrictEqual(autoDrainRun.autoDrain.humanAnswers.paths, [autoDrainAnsw
 assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.count, 1);
 assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.consumedCount, 0);
 assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.routedDecisionCount, 0);
+assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.ignoredCount, 1);
+assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.parseErrorCount, 1);
 assert.strictEqual(autoDrainDashboard.humanAnswers.available, true);
-assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanAnswers, autoDrainRun.autoDrain.humanAnswers);
+assert.deepStrictEqual(autoDrainDashboard.humanAnswers, autoDrainDashboard.queueMetadata.humanAnswers);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanAnswers.kind, 'frontier.swarm-codex.dashboard-human-answers');
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanAnswers.routingKind, 'frontier.swarm-codex.human-answer-routing');
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanAnswers.count, 1);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanAnswers.answeredCount, 1);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanAnswers.consumedCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanAnswers.routedDecisionCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanAnswers.ignoredCount, 1);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanAnswers.parseErrorCount, 1);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanAnswers.answerIds, ['answer:answer-apply-task']);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanAnswers.answerRoutes, ['answered']);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanAnswers.evidencePaths, ['operator-answer.md']);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanAnswers.paths, [autoDrainAnswerLogPath]);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.paths.humanAnswers, [autoDrainAnswerLogPath]);
 assert.ok(await exists(path.join(autoDrainOutDir, 'auto-drain', 'human-answer-routing.json')));
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.applyLocalCount, 1);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.queueLocalCount, 0);
@@ -916,7 +931,14 @@ assert.ok(!Object.hasOwn(autoDrainDashboard.queueMetadata.queueHealth, 'humanRev
 assert.ok(!Object.hasOwn(autoDrainDashboard.queueMetadata.queueHealth, 'humanPortCount'));
 assert.strictEqual(autoDrainDashboard.queueMetadata.humanQuestions.kind, 'frontier.swarm-codex.dashboard-human-questions');
 assert.strictEqual(autoDrainDashboard.queueMetadata.humanQuestions.count, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanQuestions.decisionCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanQuestions.answeredCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanQuestions.routedDecisionCount, 0);
 assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanQuestions.jobIds, []);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanQuestions.openDecisionIds, []);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanQuestions.answeredDecisionIds, []);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanQuestions.answerIds, []);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanQuestions.answerRoutes, []);
 assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.kind, 'frontier.swarm-codex.dashboard-operator-queue');
 assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.available, true);
 assert.strictEqual(autoDrainDashboard.queueMetadata.operatorSummary.status, 'ok');
@@ -2343,14 +2365,30 @@ await writeSwarmCoordinatorSnapshot(explicitHumanQuestionDashboardPath, {
 });
 const explicitHumanQuestionDashboard = JSON.parse(await fs.readFile(explicitHumanQuestionDashboardPath, 'utf8'));
 assert.strictEqual(explicitHumanQuestionDashboard.autoDrain.summary.humanBlockedCount, 3);
-assert.deepStrictEqual(explicitHumanQuestionDashboard.humanAnswers, explicitHumanQuestionAutoDrain.humanAnswers);
-assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers, explicitHumanQuestionAutoDrain.humanAnswers);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.humanAnswers, explicitHumanQuestionDashboard.queueMetadata.humanAnswers);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.kind, 'frontier.swarm-codex.dashboard-human-answers');
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.routingKind, 'frontier.swarm-codex.human-answer-routing');
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.count, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.answeredCount, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.consumedCount, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.routedDecisionCount, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.ignoredCount, 0);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.answerIds, ['answer:answer-prefixed-human-question']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.answerRoutes, ['approve-parent-assignment']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.evidencePaths, [explicitHumanQuestionAnswerEvidencePath]);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.paths.humanAnswers, [explicitHumanQuestionAnswerLogPath]);
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.count, 1);
-assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.decisionCount, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.decisionCount, 2);
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredCount, 1);
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedDecisionCount, 1);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.questionIds, [
   'question-mark-human-question'
+]);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.openDecisionIds, [
+  'question-mark-human-question'
+]);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredDecisionIds, [
+  'prefixed-human-question'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.questionCodes, [
   'queue:question-mark-human-question-task'
@@ -2365,6 +2403,12 @@ assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.in
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.taskIds, [
   'question-mark-human-question-task'
 ]);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredJobIds, [
+  'prefixed-human-question-job'
+]);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredTaskIds, [
+  'prefixed-human-question-task'
+]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.reasons, [
   'Can the parent coordinator assign this cross-lane surface?'
 ]);
@@ -2373,6 +2417,8 @@ assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestio
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedTaskIds, ['prefixed-human-question-task']);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedQuestionIds, ['prefixed-human-question']);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedQuestionCodes, ['queue:prefixed-human-question-task']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answerIds, ['answer:answer-prefixed-human-question']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answerRoutes, ['approve-parent-assignment']);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answerLogPaths, [explicitHumanQuestionAnswerLogPath]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answerEvidencePaths, [explicitHumanQuestionAnswerEvidencePath]);
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.operatorSummary.status, 'blocked');

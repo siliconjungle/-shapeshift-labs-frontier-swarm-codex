@@ -97,6 +97,8 @@ export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND = 'frontier.swarm-
 export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND = 'frontier.swarm-codex.dashboard-human-questions';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_ANSWERS_KIND = 'frontier.swarm-codex.dashboard-human-answers';
+export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_ANSWERS_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND = 'frontier.swarm-codex.dashboard-operator-queue';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_KIND = 'frontier.swarm-codex.dashboard-cost-summary';
@@ -1198,13 +1200,14 @@ export interface FrontierCodexDashboardQueueMetadata {
   source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND | 'not-collected';
   available: boolean;
   collectOnly?: FrontierCodexDashboardCollectOnlyMetadata;
-  humanAnswers?: FrontierCodexHumanAnswerRoutingSummary;
+  humanAnswers: FrontierCodexDashboardHumanAnswers;
   paths: {
     autoDrain: string[];
     collections: string[];
     mergeQueues: string[];
     coordinatorAgentDrainWork: string[];
     queueOverlays: string[];
+    humanAnswers: string[];
   };
   coordinatorAgentDrainWork: FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata;
   actionCounts: {
@@ -1318,16 +1321,50 @@ export interface FrontierCodexDashboardHumanQuestions {
   routedDecisionCount: number;
   questionIds: string[];
   questionCodes: string[];
+  openDecisionIds: string[];
+  answeredDecisionIds: string[];
   jobIds: string[];
   taskIds: string[];
   reasons: string[];
+  answeredJobIds: string[];
+  answeredTaskIds: string[];
   routedDecisionIds: string[];
   routedJobIds: string[];
   routedTaskIds: string[];
   routedQuestionIds: string[];
   routedQuestionCodes: string[];
+  answerIds: string[];
+  answerRoutes: string[];
   answerLogPaths: string[];
   answerEvidencePaths: string[];
+}
+
+export interface FrontierCodexDashboardHumanAnswers {
+  kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_ANSWERS_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_ANSWERS_VERSION;
+  source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND | 'not-collected';
+  available: boolean;
+  routingKind?: typeof FRONTIER_SWARM_CODEX_HUMAN_ANSWER_ROUTING_KIND;
+  routingPath?: string;
+  paths: string[];
+  count: number;
+  answeredCount: number;
+  consumedCount: number;
+  routedDecisionCount: number;
+  ignoredCount: number;
+  parseErrorCount: number;
+  answeredQuestionIds: string[];
+  answeredQuestionCodes: string[];
+  routedDecisionIds: string[];
+  routedJobIds: string[];
+  routedTaskIds: string[];
+  routedQueueItemIds: string[];
+  answerIds: string[];
+  answerRoutes: string[];
+  evidencePaths: string[];
+  answers: FrontierCodexHumanActionAnswer[];
+  routedDecisions: FrontierCodexHumanAnswerRoutedDecision[];
+  parseErrors: Array<{ path: string; line: number; error: string }>;
 }
 
 export interface FrontierCodexDashboardCostModelSummary {
@@ -3703,7 +3740,7 @@ export async function writeSwarmCoordinatorSnapshot(
     queueMetadata,
     queueHealth: queueMetadata.queueHealth,
     humanQuestions: queueMetadata.humanQuestions,
-    humanAnswers: input.autoDrain?.humanAnswers ?? null,
+    humanAnswers: queueMetadata.humanAnswers,
     operatorSummary: queueMetadata.operatorSummary,
     autoDrain: input.autoDrain ?? null,
     autoDrainArtifacts: input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null,
@@ -3824,6 +3861,7 @@ function createDashboardQueueMetadata(
   const staleOrRerunCount = Math.max(staleCount, queueRerunCount)
     + decisionSummary.rerunDecisionCount
     + currentHeadConflictCount;
+  const humanAnswers = createDashboardHumanAnswers(autoDrain);
   const humanQuestions = createDashboardHumanQuestions(autoDrain, decisionSummary);
   const conflictRetryWork = decisionSummary.conflictRetryWork;
   const queueHealth: FrontierCodexDashboardQueueHealth = {
@@ -3869,13 +3907,14 @@ function createDashboardQueueMetadata(
     source: artifacts ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND : 'not-collected',
     available: !!artifacts,
     ...(collectOnly ? { collectOnly } : {}),
-    ...(autoDrain?.humanAnswers ? { humanAnswers: autoDrain.humanAnswers } : {}),
+    humanAnswers,
     paths: {
       autoDrain: artifacts ? [artifacts.autoDrainPath] : [],
       collections: compactArtifactPaths(iterations.map((iteration) => iteration.collectionPath)),
       mergeQueues: artifacts?.mergeQueue.paths ?? [],
       coordinatorAgentDrainWork: artifacts?.coordinatorAgentDrainWork?.paths ?? [],
-      queueOverlays: compactArtifactPaths(iterations.map((iteration) => iteration.queueOverlayPath))
+      queueOverlays: compactArtifactPaths(iterations.map((iteration) => iteration.queueOverlayPath)),
+      humanAnswers: humanAnswers.paths
     },
     coordinatorAgentDrainWork,
     actionCounts: {
@@ -4318,18 +4357,23 @@ function formatDashboardConflictRetryWorkDetail(work: readonly FrontierCodexDash
   return `; conflict retry queue ${queueId} from ${patchPath}${more}`;
 }
 
-function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAutoDrainResult | null): {
+interface DashboardAutonomousDecisionSummary {
   appliedDecisionCount: number;
   committedDecisionCount: number;
   rerunDecisionCount: number;
   conflictBlockedDecisionCount: number;
   conflictRetryWork: FrontierCodexDashboardConflictRetryWork[];
   humanQuestionDecisionCount: number;
+  humanQuestionOpenDecisionCount: number;
   humanQuestionIds: string[];
   humanQuestionCodes: string[];
+  humanQuestionOpenDecisionIds: string[];
+  humanQuestionAnsweredDecisionIds: string[];
   humanQuestionJobIds: string[];
   humanQuestionTaskIds: string[];
   humanQuestionReasons: string[];
+  humanQuestionAnsweredJobIds: string[];
+  humanQuestionAnsweredTaskIds: string[];
   humanAnswerConsumedCount: number;
   humanAnswerRoutedDecisionCount: number;
   humanAnswerRoutedDecisionIds: string[];
@@ -4337,14 +4381,18 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
   humanAnswerRoutedTaskIds: string[];
   humanAnswerRoutedQuestionIds: string[];
   humanAnswerRoutedQuestionCodes: string[];
+  humanAnswerIds: string[];
+  humanAnswerRoutes: string[];
   humanAnswerLogPaths: string[];
   humanAnswerEvidencePaths: string[];
-} {
+}
+
+function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAutoDrainResult | null): DashboardAutonomousDecisionSummary {
   const decisions = latestDashboardAutonomousDecisions((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
   const humanAnswerRouting = autoDrain?.humanAnswers;
-  const humanQuestionDecisions = decisions
-    .filter(dashboardAutonomousDecisionIsExplicitHumanQuestion)
-    .filter((decision) => !dashboardHumanQuestionHasRoutedAnswer(decision, humanAnswerRouting));
+  const humanQuestionDecisions = decisions.filter(dashboardAutonomousDecisionIsExplicitHumanQuestion);
+  const openHumanQuestionDecisions = humanQuestionDecisions.filter((decision) => !dashboardHumanQuestionHasRoutedAnswer(decision, humanAnswerRouting));
+  const answeredHumanQuestionDecisions = humanQuestionDecisions.filter((decision) => dashboardHumanQuestionHasRoutedAnswer(decision, humanAnswerRouting));
   const conflictBlockedDecisions = decisions.filter((decision) => decision.status === 'conflict-blocked');
   return {
     appliedDecisionCount: decisions.filter((decision) => decision.status === 'applied' || decision.status === 'committed').length,
@@ -4353,11 +4401,16 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
     conflictBlockedDecisionCount: conflictBlockedDecisions.length,
     conflictRetryWork: conflictBlockedDecisions.map(dashboardConflictRetryWorkFromDecision),
     humanQuestionDecisionCount: humanQuestionDecisions.length,
-    humanQuestionIds: uniqueStrings(humanQuestionDecisions.flatMap(dashboardHumanQuestionIds)).sort(),
-    humanQuestionCodes: uniqueStrings(humanQuestionDecisions.flatMap(dashboardHumanQuestionCodes)).sort(),
-    humanQuestionJobIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.jobId)).sort(),
-    humanQuestionTaskIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.taskId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
-    humanQuestionReasons: uniqueStrings(humanQuestionDecisions.map((decision) => decision.reason).filter((entry) => entry.length > 0)).sort(),
+    humanQuestionOpenDecisionCount: openHumanQuestionDecisions.length,
+    humanQuestionIds: uniqueStrings(openHumanQuestionDecisions.flatMap(dashboardHumanQuestionIds)).sort(),
+    humanQuestionCodes: uniqueStrings(openHumanQuestionDecisions.flatMap(dashboardHumanQuestionCodes)).sort(),
+    humanQuestionOpenDecisionIds: uniqueStrings(openHumanQuestionDecisions.map((decision) => decision.id)).sort(),
+    humanQuestionAnsweredDecisionIds: uniqueStrings(answeredHumanQuestionDecisions.map((decision) => decision.id)).sort(),
+    humanQuestionJobIds: uniqueStrings(openHumanQuestionDecisions.map((decision) => decision.jobId)).sort(),
+    humanQuestionTaskIds: uniqueStrings(openHumanQuestionDecisions.map((decision) => decision.taskId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
+    humanQuestionReasons: uniqueStrings(openHumanQuestionDecisions.map((decision) => decision.reason).filter((entry) => entry.length > 0)).sort(),
+    humanQuestionAnsweredJobIds: uniqueStrings(answeredHumanQuestionDecisions.map((decision) => decision.jobId)).sort(),
+    humanQuestionAnsweredTaskIds: uniqueStrings(answeredHumanQuestionDecisions.map((decision) => decision.taskId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
     humanAnswerConsumedCount: humanAnswerRouting?.consumedCount ?? 0,
     humanAnswerRoutedDecisionCount: humanAnswerRouting?.routedDecisionCount ?? 0,
     humanAnswerRoutedDecisionIds: humanAnswerRouting?.routedDecisionIds ?? [],
@@ -4365,6 +4418,8 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
     humanAnswerRoutedTaskIds: humanAnswerRouting?.routedTaskIds ?? [],
     humanAnswerRoutedQuestionIds: humanAnswerRouting?.answeredQuestionIds ?? [],
     humanAnswerRoutedQuestionCodes: humanAnswerRouting?.answeredQuestionCodes ?? [],
+    humanAnswerIds: uniqueStrings((humanAnswerRouting?.routedDecisions ?? []).flatMap((decision) => decision.answerIds)).sort(),
+    humanAnswerRoutes: uniqueStrings((humanAnswerRouting?.routedDecisions ?? []).flatMap((decision) => decision.answerRoutes)).sort(),
     humanAnswerLogPaths: humanAnswerRouting?.paths ?? [],
     humanAnswerEvidencePaths: humanAnswerRouting?.evidencePaths ?? []
   };
@@ -4388,29 +4443,69 @@ function dashboardConflictRetryWorkFromDecision(decision: FrontierCodexAutonomou
 
 function createDashboardHumanQuestions(
   autoDrain: FrontierCodexSwarmAutoDrainResult | null,
-  decisionSummary: ReturnType<typeof summarizeDashboardAutonomousDecisions>
+  decisionSummary: DashboardAutonomousDecisionSummary
 ): FrontierCodexDashboardHumanQuestions {
   return {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION,
     source: autoDrain ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND : 'not-collected',
     available: !!autoDrain,
-    count: decisionSummary.humanQuestionDecisionCount,
+    count: decisionSummary.humanQuestionOpenDecisionCount,
     decisionCount: decisionSummary.humanQuestionDecisionCount,
     answeredCount: decisionSummary.humanAnswerRoutedDecisionCount,
     routedDecisionCount: decisionSummary.humanAnswerRoutedDecisionCount,
     questionIds: decisionSummary.humanQuestionIds,
     questionCodes: decisionSummary.humanQuestionCodes,
+    openDecisionIds: decisionSummary.humanQuestionOpenDecisionIds,
+    answeredDecisionIds: decisionSummary.humanQuestionAnsweredDecisionIds,
     jobIds: decisionSummary.humanQuestionJobIds,
     taskIds: decisionSummary.humanQuestionTaskIds,
     reasons: decisionSummary.humanQuestionReasons,
+    answeredJobIds: decisionSummary.humanQuestionAnsweredJobIds,
+    answeredTaskIds: decisionSummary.humanQuestionAnsweredTaskIds,
     routedDecisionIds: decisionSummary.humanAnswerRoutedDecisionIds,
     routedJobIds: decisionSummary.humanAnswerRoutedJobIds,
     routedTaskIds: decisionSummary.humanAnswerRoutedTaskIds,
     routedQuestionIds: decisionSummary.humanAnswerRoutedQuestionIds,
     routedQuestionCodes: decisionSummary.humanAnswerRoutedQuestionCodes,
+    answerIds: decisionSummary.humanAnswerIds,
+    answerRoutes: decisionSummary.humanAnswerRoutes,
     answerLogPaths: decisionSummary.humanAnswerLogPaths,
     answerEvidencePaths: decisionSummary.humanAnswerEvidencePaths
+  };
+}
+
+function createDashboardHumanAnswers(autoDrain: FrontierCodexSwarmAutoDrainResult | null): FrontierCodexDashboardHumanAnswers {
+  const routing = autoDrain?.humanAnswers;
+  const answers = routing?.answers ?? [];
+  const routedDecisions = routing?.routedDecisions ?? [];
+  const parseErrors = routing?.parseErrors ?? [];
+  return {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_ANSWERS_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_ANSWERS_VERSION,
+    source: autoDrain ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND : 'not-collected',
+    available: !!autoDrain,
+    ...(routing ? { routingKind: routing.kind } : {}),
+    ...(routing?.routingPath ? { routingPath: routing.routingPath } : {}),
+    paths: routing?.paths ?? [],
+    count: routing?.count ?? 0,
+    answeredCount: routing?.count ?? 0,
+    consumedCount: routing?.consumedCount ?? 0,
+    routedDecisionCount: routing?.routedDecisionCount ?? 0,
+    ignoredCount: routing?.ignoredCount ?? 0,
+    parseErrorCount: routing?.parseErrorCount ?? 0,
+    answeredQuestionIds: routing?.answeredQuestionIds ?? [],
+    answeredQuestionCodes: routing?.answeredQuestionCodes ?? [],
+    routedDecisionIds: routing?.routedDecisionIds ?? [],
+    routedJobIds: routing?.routedJobIds ?? [],
+    routedTaskIds: routing?.routedTaskIds ?? [],
+    routedQueueItemIds: routing?.routedQueueItemIds ?? [],
+    answerIds: uniqueStrings(answers.map(humanActionAnswerIdentity)).sort(),
+    answerRoutes: uniqueStrings(answers.flatMap((answer) => answer.routes)).sort(),
+    evidencePaths: uniqueStrings(answers.flatMap((answer) => answer.evidencePaths)).sort(),
+    answers,
+    routedDecisions,
+    parseErrors
   };
 }
 
