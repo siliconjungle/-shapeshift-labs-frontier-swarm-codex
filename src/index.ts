@@ -120,12 +120,15 @@ export const FRONTIER_SWARM_CODEX_DASHBOARD_AUTONOMOUS_QUEUE_HEALTH_KIND = 'fron
 export const FRONTIER_SWARM_CODEX_DASHBOARD_AUTONOMOUS_QUEUE_HEALTH_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_HUMAN_ANSWER_ROUTING_KIND = 'frontier.swarm-codex.human-answer-routing';
 export const FRONTIER_SWARM_CODEX_HUMAN_ANSWER_ROUTING_VERSION = 1;
-const DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIXES = [
-  'human-question:',
-  'human question:',
-  'human/authority question:',
-  'question:'
-];
+const DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIX = 'human-question:';
+const DASHBOARD_HUMAN_QUESTION_REQUIRED_FIELDS = [
+  'owner',
+  'surface',
+  'missing-authority',
+  'question',
+  'answer-code'
+] as const;
+const DASHBOARD_HUMAN_QUESTION_MISSING_AUTHORITY_VALUES = new Set(['policy', 'fact', 'approval']);
 const DEFAULT_HUMAN_ACTION_ANSWER_LOG_FILENAMES = [
   'human-action-answers.jsonl',
   'human-answers.jsonl',
@@ -147,6 +150,17 @@ export type FrontierCodexCostEstimateReason =
   | 'missing-token-breakdown'
   | 'missing-token-usage'
   | 'unknown-model-pricing';
+
+export type FrontierCodexHumanQuestionMissingAuthority = 'policy' | 'fact' | 'approval';
+
+export interface FrontierCodexHumanQuestionContractFields {
+  raw: string;
+  owner: string;
+  surface: string;
+  missingAuthority: FrontierCodexHumanQuestionMissingAuthority;
+  question: string;
+  answerCode: string;
+}
 
 export interface FrontierCodexModelPricing {
   model: string;
@@ -1103,9 +1117,11 @@ export interface FrontierCodexHumanAnswerRoutedDecision {
   queueItemIds: string[];
   questionIds: string[];
   questionCodes: string[];
+  questionContract?: FrontierCodexHumanQuestionContractFields;
   reason: string;
   answerIds: string[];
   answerRoutes: string[];
+  answerTexts: string[];
   answerEvidencePaths: string[];
 }
 
@@ -1117,6 +1133,7 @@ export interface FrontierCodexHumanQuestionContinuation {
   queueItemIds: string[];
   questionIds: string[];
   questionCodes: string[];
+  questionContract?: FrontierCodexHumanQuestionContractFields;
   reason: string;
   bundlePath?: string;
   patchPath?: string;
@@ -1135,11 +1152,13 @@ export interface FrontierCodexHumanAnswerRoutedContinuation {
   queueItemIds: string[];
   questionIds: string[];
   questionCodes: string[];
+  questionContract?: FrontierCodexHumanQuestionContractFields;
   reason: string;
   bundlePath?: string;
   patchPath?: string;
   answerIds: string[];
   answerRoutes: string[];
+  answerTexts: string[];
   answerEvidencePaths: string[];
 }
 
@@ -1932,10 +1951,12 @@ export interface FrontierCodexDashboardMergeQueueHumanQuestion {
   queueKeys: string[];
   questionIds: string[];
   questionCodes: string[];
+  questionContract?: FrontierCodexHumanQuestionContractFields;
   reason: string;
   answered: boolean;
   answerIds: string[];
   answerRoutes: string[];
+  answerTexts: string[];
   answerEvidencePaths: string[];
   bundlePath?: string;
   patchPath?: string;
@@ -2177,6 +2198,30 @@ export interface FrontierCodexDashboardHumanQuestions {
   answerIds: string[];
   answerRoutes: string[];
   answerLogPaths: string[];
+  answerEvidencePaths: string[];
+  openQuestions: FrontierCodexDashboardHumanQuestionDetail[];
+  answeredQuestions: FrontierCodexDashboardHumanQuestionDetail[];
+}
+
+export interface FrontierCodexDashboardHumanQuestionDetail {
+  id: string;
+  decisionId: string;
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  questionIds: string[];
+  questionCodes: string[];
+  questionContract: FrontierCodexHumanQuestionContractFields;
+  owner: string;
+  surface: string;
+  missingAuthority: FrontierCodexHumanQuestionMissingAuthority;
+  question: string;
+  answerCode: string;
+  reason: string;
+  answered: boolean;
+  answerIds: string[];
+  answerRoutes: string[];
+  answerTexts: string[];
   answerEvidencePaths: string[];
 }
 
@@ -6284,6 +6329,8 @@ function createDashboardMergeQueueHumanQuestion(
   decision: FrontierCodexAutonomousMergeDecision,
   humanQuestions: FrontierCodexDashboardHumanQuestions
 ): FrontierCodexDashboardMergeQueueHumanQuestion {
+  const detail = [...humanQuestions.openQuestions, ...humanQuestions.answeredQuestions]
+    .find((entry) => entry.decisionId === decision.id);
   return {
     id: decision.id,
     jobId: decision.jobId,
@@ -6292,11 +6339,13 @@ function createDashboardMergeQueueHumanQuestion(
     queueKeys: dashboardAutonomousDecisionAliasKeys(decision),
     questionIds: dashboardHumanQuestionIds(decision),
     questionCodes: dashboardHumanQuestionCodes(decision),
+    ...(detail?.questionContract ? { questionContract: detail.questionContract } : {}),
     reason: decision.reason,
-    answered: humanQuestions.answeredDecisionIds.includes(decision.id),
-    answerIds: humanQuestions.answerIds,
-    answerRoutes: humanQuestions.answerRoutes,
-    answerEvidencePaths: humanQuestions.answerEvidencePaths,
+    answered: detail?.answered ?? humanQuestions.answeredDecisionIds.includes(decision.id),
+    answerIds: detail?.answerIds ?? [],
+    answerRoutes: detail?.answerRoutes ?? [],
+    answerTexts: detail?.answerTexts ?? [],
+    answerEvidencePaths: detail?.answerEvidencePaths ?? [],
     bundlePath: decision.bundlePath,
     ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
     changedPaths: [...decision.changedPaths],
@@ -7042,6 +7091,8 @@ interface DashboardAutonomousDecisionSummary {
   humanQuestionReasons: string[];
   humanQuestionAnsweredJobIds: string[];
   humanQuestionAnsweredTaskIds: string[];
+  humanQuestionOpenDetails: FrontierCodexDashboardHumanQuestionDetail[];
+  humanQuestionAnsweredDetails: FrontierCodexDashboardHumanQuestionDetail[];
   humanAnswerConsumedCount: number;
   humanAnswerRoutedDecisionCount: number;
   humanAnswerRoutedDecisionIds: string[];
@@ -7061,6 +7112,12 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
   const humanQuestionDecisions = decisions.filter(dashboardAutonomousDecisionIsExplicitHumanQuestion);
   const openHumanQuestionDecisions = humanQuestionDecisions.filter((decision) => !dashboardHumanQuestionHasRoutedAnswer(decision, humanAnswerRouting));
   const answeredHumanQuestionDecisions = humanQuestionDecisions.filter((decision) => dashboardHumanQuestionHasRoutedAnswer(decision, humanAnswerRouting));
+  const humanQuestionOpenDetails = openHumanQuestionDecisions
+    .map((decision) => createDashboardHumanQuestionDetail(decision, humanAnswerRouting))
+    .filter((entry): entry is FrontierCodexDashboardHumanQuestionDetail => !!entry);
+  const humanQuestionAnsweredDetails = answeredHumanQuestionDecisions
+    .map((decision) => createDashboardHumanQuestionDetail(decision, humanAnswerRouting))
+    .filter((entry): entry is FrontierCodexDashboardHumanQuestionDetail => !!entry);
   const conflictBlockedDecisions = decisions.filter((decision) => decision.status === 'conflict-blocked');
   return {
     appliedDecisionCount: decisions.filter((decision) => decision.status === 'applied' || decision.status === 'committed').length,
@@ -7079,6 +7136,8 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
     humanQuestionReasons: uniqueStrings(openHumanQuestionDecisions.map((decision) => decision.reason).filter((entry) => entry.length > 0)).sort(),
     humanQuestionAnsweredJobIds: uniqueStrings(answeredHumanQuestionDecisions.map((decision) => decision.jobId)).sort(),
     humanQuestionAnsweredTaskIds: uniqueStrings(answeredHumanQuestionDecisions.map((decision) => decision.taskId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
+    humanQuestionOpenDetails,
+    humanQuestionAnsweredDetails,
     humanAnswerConsumedCount: humanAnswerRouting?.consumedCount ?? 0,
     humanAnswerRoutedDecisionCount: humanAnswerRouting?.routedDecisionCount ?? 0,
     humanAnswerRoutedDecisionIds: humanAnswerRouting?.routedDecisionIds ?? [],
@@ -7106,6 +7165,37 @@ function dashboardConflictRetryWorkFromDecision(decision: FrontierCodexAutonomou
     changedRegions: [...decision.changedRegions],
     reason: decision.reason,
     finishedAt: decision.finishedAt
+  };
+}
+
+function createDashboardHumanQuestionDetail(
+  decision: FrontierCodexAutonomousMergeDecision,
+  routing: FrontierCodexHumanAnswerRoutingSummary | undefined
+): FrontierCodexDashboardHumanQuestionDetail | undefined {
+  const questionContract = parseHumanQuestionContractLine(decision.reason);
+  if (!questionContract) return undefined;
+  const routed = routing?.routedDecisions.find((entry) => entry.decisionId === decision.id);
+  const answered = dashboardHumanQuestionHasRoutedAnswer(decision, routing);
+  return {
+    id: decision.id,
+    decisionId: decision.id,
+    jobId: decision.jobId,
+    ...(decision.taskId ? { taskId: decision.taskId } : {}),
+    queueItemIds: [...decision.queueItemIds],
+    questionIds: dashboardHumanQuestionIds(decision),
+    questionCodes: dashboardHumanQuestionCodes(decision),
+    questionContract,
+    owner: questionContract.owner,
+    surface: questionContract.surface,
+    missingAuthority: questionContract.missingAuthority,
+    question: questionContract.question,
+    answerCode: questionContract.answerCode,
+    reason: decision.reason,
+    answered,
+    answerIds: routed?.answerIds ?? [],
+    answerRoutes: routed?.answerRoutes ?? [],
+    answerTexts: routed?.answerTexts ?? [],
+    answerEvidencePaths: routed?.answerEvidencePaths ?? []
   };
 }
 
@@ -7139,7 +7229,9 @@ function createDashboardHumanQuestions(
     answerIds: decisionSummary.humanAnswerIds,
     answerRoutes: decisionSummary.humanAnswerRoutes,
     answerLogPaths: decisionSummary.humanAnswerLogPaths,
-    answerEvidencePaths: decisionSummary.humanAnswerEvidencePaths
+    answerEvidencePaths: decisionSummary.humanAnswerEvidencePaths,
+    openQuestions: decisionSummary.humanQuestionOpenDetails,
+    answeredQuestions: decisionSummary.humanQuestionAnsweredDetails
   };
 }
 
@@ -7186,10 +7278,48 @@ function dashboardAutonomousDecisionIsExplicitHumanQuestion(decision: FrontierCo
 }
 
 function dashboardTextIsExplicitHumanQuestion(text: string): boolean {
-  const normalized = text.trim().toLowerCase();
+  return parseHumanQuestionContractLine(text) !== undefined;
+}
+
+function parseHumanQuestionContractLine(text: string): FrontierCodexHumanQuestionContractFields | undefined {
+  const raw = text.trim();
+  if (!raw.toLowerCase().startsWith(DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIX)) return undefined;
+  const body = raw.slice(DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIX.length).trim();
+  if (!body) return undefined;
+  const fields = new Map<string, string>();
+  for (const part of body.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator <= 0) return undefined;
+    const key = part.slice(0, separator).trim().toLowerCase();
+    const value = part.slice(separator + 1).trim();
+    if (!key || !value || fields.has(key)) return undefined;
+    fields.set(key, value);
+  }
+  for (const field of DASHBOARD_HUMAN_QUESTION_REQUIRED_FIELDS) {
+    if (!fields.has(field)) return undefined;
+  }
+  const missingAuthority = fields.get('missing-authority')?.toLowerCase();
+  if (!missingAuthority || !DASHBOARD_HUMAN_QUESTION_MISSING_AUTHORITY_VALUES.has(missingAuthority)) return undefined;
+  const answerCode = fields.get('answer-code') ?? '';
+  if (!humanQuestionAnswerCodeIsStructured(answerCode)) return undefined;
+  return {
+    raw,
+    owner: fields.get('owner') ?? '',
+    surface: fields.get('surface') ?? '',
+    missingAuthority: missingAuthority as FrontierCodexHumanQuestionMissingAuthority,
+    question: fields.get('question') ?? '',
+    answerCode
+  };
+}
+
+function humanQuestionAnswerCodeIsStructured(answerCode: string): boolean {
+  const normalized = answerCode.trim();
   if (!normalized) return false;
-  if (normalized.includes('?')) return true;
-  return DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+  if (normalized === 'approve' || normalized === 'reject') return true;
+  if (normalized === 'approve|reject' || normalized === 'reject|approve') return true;
+  const match = /^(choose|provide):(.+)$/.exec(normalized);
+  if (!match) return false;
+  return match[2].split('|').every((option) => /^[a-z0-9][a-z0-9._:/-]*$/i.test(option.trim()));
 }
 
 function explicitHumanQuestionReasonFromBundle(bundle: FrontierSwarmMergeBundle): string | undefined {
@@ -7316,6 +7446,7 @@ function createHumanQuestionContinuationFromCollectionEntry(
 ): FrontierCodexHumanQuestionContinuation {
   const mergePath = path.join(entry.outputDir, 'merge.json');
   const patchPath = resolveBundlePatchPath(entry.bundle, mergePath);
+  const questionContract = parseHumanQuestionContractLine(reason);
   const taskId = subjectOverride.taskId ?? entry.bundle.taskId;
   const queueItemIds = uniqueStrings([
     ...(subjectOverride.queueItemIds ?? []),
@@ -7333,6 +7464,7 @@ function createHumanQuestionContinuationFromCollectionEntry(
     queueItemIds,
     questionIds: [id],
     questionCodes,
+    ...(questionContract ? { questionContract } : {}),
     reason,
     bundlePath: mergePath,
     ...(patchPath ? { patchPath } : {}),
@@ -7558,6 +7690,7 @@ function createHumanAnswerRoutedDecision(
     dashboardHumanQuestionMatchKeys(decision).flatMap((key) => answerKeyIndex.get(key) ?? [])
   );
   if (!matches.length) return undefined;
+  const questionContract = parseHumanQuestionContractLine(decision.reason);
   return {
     decisionId: decision.id,
     jobId: decision.jobId,
@@ -7565,9 +7698,11 @@ function createHumanAnswerRoutedDecision(
     queueItemIds: [...decision.queueItemIds],
     questionIds: dashboardHumanQuestionIds(decision),
     questionCodes: dashboardHumanQuestionCodes(decision),
+    ...(questionContract ? { questionContract } : {}),
     reason: decision.reason,
     answerIds: matches.map(humanActionAnswerIdentity),
     answerRoutes: uniqueStrings(matches.flatMap((answer) => answer.routes)).sort(),
+    answerTexts: uniqueStrings(matches.map((answer) => answer.answer).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
     answerEvidencePaths: uniqueStrings(matches.flatMap((answer) => answer.evidencePaths)).sort()
   };
 }
@@ -7588,11 +7723,13 @@ function createHumanAnswerRoutedContinuation(
     queueItemIds: [...continuation.queueItemIds],
     questionIds: [...continuation.questionIds],
     questionCodes: [...continuation.questionCodes],
+    ...(continuation.questionContract ? { questionContract: continuation.questionContract } : {}),
     reason: continuation.reason,
     ...(continuation.bundlePath ? { bundlePath: continuation.bundlePath } : {}),
     ...(continuation.patchPath ? { patchPath: continuation.patchPath } : {}),
     answerIds: matches.map(humanActionAnswerIdentity),
     answerRoutes: uniqueStrings(matches.flatMap((answer) => answer.routes)).sort(),
+    answerTexts: uniqueStrings(matches.map((answer) => answer.answer).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
     answerEvidencePaths: uniqueStrings(matches.flatMap((answer) => answer.evidencePaths)).sort()
   };
 }

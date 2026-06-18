@@ -199,6 +199,13 @@ assert.strictEqual(
 assert.strictEqual(
   classifyCodexAutonomousDecisionCollapse({
     status: 'human-blocked',
+    reason: 'Can the coordinator review this stale patch?'
+  }).humanNeeded,
+  false
+);
+assert.strictEqual(
+  classifyCodexAutonomousDecisionCollapse({
+    status: 'human-blocked',
     reason: 'human-question: owner=release; surface=packages/frontier-swarm-codex; missing-authority=approval; question=Approve release?; answer-code=approve|reject'
   }).dashboardCategory,
   'human-needed'
@@ -1648,7 +1655,7 @@ assert.deepStrictEqual(packageLocalGateArtifact.decisions[0].lockKeys, ['region:
 const autonomousHumanQuestionRepo = await createApplyFixtureRepo(tmp, 'autonomous-human-question-repo');
 const autonomousHumanQuestionCollection = path.join(tmp, 'autonomous-human-question-collection');
 const autonomousHumanQuestionDir = path.join(autonomousHumanQuestionCollection, 'ready-to-apply', 'human-question-job');
-const autonomousHumanQuestionReason = 'human-question: Should the parent coordinator approve this ownership exception?';
+const autonomousHumanQuestionReason = 'human-question: owner=coordinator; surface=src/apply.ts; missing-authority=approval; question=Should the parent coordinator approve this ownership exception?; answer-code=approve|reject';
 await fs.mkdir(autonomousHumanQuestionDir, { recursive: true });
 await fs.writeFile(path.join(autonomousHumanQuestionDir, 'changes.patch'), [
   'diff --git a/src/apply.ts b/src/apply.ts',
@@ -4925,6 +4932,8 @@ explicitHumanQuestionArtifacts.summary.decisionCount = 5;
 await fs.mkdir(explicitHumanQuestionOutDir, { recursive: true });
 const explicitHumanQuestionAnswerLogPath = path.join(explicitHumanQuestionOutDir, 'human-action-answers.jsonl');
 const explicitHumanQuestionAnswerEvidencePath = path.join(explicitHumanQuestionOutDir, 'answer-evidence.md');
+const answeredDashboardHumanQuestionReason = 'human-question: owner=coordinator; surface=packages/frontier-swarm-codex/src/index.ts; missing-authority=approval; question=Should the parent coordinator approve this ownership exception?; answer-code=approve|reject';
+const openDashboardHumanQuestionReason = 'human-question: owner=coordinator; surface=packages/frontier-swarm-codex/src/index.ts; missing-authority=approval; question=Can the parent coordinator assign this cross-lane surface?; answer-code=approve|reject';
 await fs.writeFile(explicitHumanQuestionAnswerLogPath, JSON.stringify({
   id: 'answer-prefixed-human-question',
   questionId: 'prefixed-human-question',
@@ -4949,7 +4958,7 @@ const explicitHumanQuestionAutoDrain = {
     admittedJobIds: [
       'generic-human-blocked-job',
       'prefixed-human-question-job',
-      'question-mark-human-question-job',
+      'structured-open-human-question-job',
       'failed-apply-job',
       'coordinator-review-job'
     ],
@@ -4986,15 +4995,15 @@ const explicitHumanQuestionAutoDrain = {
           jobId: 'prefixed-human-question-job',
           taskId: 'prefixed-human-question-task',
           queueItemIds: ['prefixed-human-question-task'],
-          reason: 'human-question: Should the parent coordinator approve this ownership exception',
+          reason: answeredDashboardHumanQuestionReason,
           finishedAt: explicitHumanQuestionArtifacts.generatedAt + 2
         }),
         createSyntheticAutonomousDecision('human-blocked', {
-          id: 'question-mark-human-question',
-          jobId: 'question-mark-human-question-job',
-          taskId: 'question-mark-human-question-task',
-          queueItemIds: ['question-mark-human-question-task'],
-          reason: 'Can the parent coordinator assign this cross-lane surface?',
+          id: 'structured-open-human-question',
+          jobId: 'structured-open-human-question-job',
+          taskId: 'structured-open-human-question-task',
+          queueItemIds: ['structured-open-human-question-task'],
+          reason: openDashboardHumanQuestionReason,
           finishedAt: explicitHumanQuestionArtifacts.generatedAt + 3
         }),
         createSyntheticAutonomousDecision('failed', {
@@ -5019,7 +5028,7 @@ const explicitHumanQuestionAutoDrain = {
   lockKeys: [],
   lockScopeCounts: { semantic: 0, path: 0, repo: 0 },
   terminalJobIds: ['coordinator-review-job', 'failed-apply-job'],
-  blockedJobIds: ['generic-human-blocked-job', 'prefixed-human-question-job', 'question-mark-human-question-job'],
+  blockedJobIds: ['generic-human-blocked-job', 'prefixed-human-question-job', 'structured-open-human-question-job'],
   humanAnswers: {
     kind: 'frontier.swarm-codex.human-answer-routing',
     version: 1,
@@ -5061,9 +5070,18 @@ const explicitHumanQuestionAutoDrain = {
       queueItemIds: ['prefixed-human-question-task'],
       questionIds: ['prefixed-human-question'],
       questionCodes: ['queue:prefixed-human-question-task'],
-      reason: 'human-question: Should the parent coordinator approve this ownership exception',
+      questionContract: {
+        raw: answeredDashboardHumanQuestionReason,
+        owner: 'coordinator',
+        surface: 'packages/frontier-swarm-codex/src/index.ts',
+        missingAuthority: 'approval',
+        question: 'Should the parent coordinator approve this ownership exception?',
+        answerCode: 'approve|reject'
+      },
+      reason: answeredDashboardHumanQuestionReason,
       answerIds: ['answer:answer-prefixed-human-question'],
       answerRoutes: ['approve-parent-assignment'],
+      answerTexts: ['Approve the parent coordinator ownership exception.'],
       answerEvidencePaths: [explicitHumanQuestionAnswerEvidencePath]
     }],
     parseErrors: []
@@ -5120,26 +5138,26 @@ assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.d
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredCount, 1);
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedDecisionCount, 1);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.questionIds, [
-  'question-mark-human-question'
+  'structured-open-human-question'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.openDecisionIds, [
-  'question-mark-human-question'
+  'structured-open-human-question'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredDecisionIds, [
   'prefixed-human-question'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.questionCodes, [
-  'queue:question-mark-human-question-task'
+  'queue:structured-open-human-question-task'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds, [
-  'question-mark-human-question-job'
+  'structured-open-human-question-job'
 ]);
 assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.includes('generic-human-blocked-job'));
 assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.includes('prefixed-human-question-job'));
 assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.includes('failed-apply-job'));
 assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.includes('coordinator-review-job'));
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.taskIds, [
-  'question-mark-human-question-task'
+  'structured-open-human-question-task'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredJobIds, [
   'prefixed-human-question-job'
@@ -5148,11 +5166,19 @@ assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestio
   'prefixed-human-question-task'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.reasons, [
-  'Can the parent coordinator assign this cross-lane surface?'
+  openDashboardHumanQuestionReason
+]);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.openQuestions[0].owner, 'coordinator');
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.openQuestions[0].surface, 'packages/frontier-swarm-codex/src/index.ts');
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.openQuestions[0].missingAuthority, 'approval');
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.openQuestions[0].answerCode, 'approve|reject');
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredQuestions[0].question, 'Should the parent coordinator approve this ownership exception?');
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredQuestions[0].answerTexts, [
+  'Approve the parent coordinator ownership exception.'
 ]);
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.mergeQueueHealth.counts.blockedHumanQuestionCount, 1);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.mergeQueueHealth.blockedHumanQuestions.map((question) => question.id), [
-  'question-mark-human-question'
+  'structured-open-human-question'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedDecisionIds, ['prefixed-human-question']);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedJobIds, ['prefixed-human-question-job']);
@@ -5178,6 +5204,147 @@ assert.strictEqual(explicitHumanQuestionHealthSections.get('real-blockers').valu
 assert.deepStrictEqual(explicitHumanQuestionDashboard.autonomousQueueHealth.realBlockers.map((blocker) => blocker.id), [
   'human-blocked-decision:generic-human-blocked'
 ]);
+
+const nonQuestionWorkflowOutDir = path.join(tmp, 'non-question-workflow-dashboard');
+const nonQuestionWorkflowArtifacts = createSyntheticAutoDrainArtifacts(nonQuestionWorkflowOutDir);
+nonQuestionWorkflowArtifacts.summary.decisionCount = 6;
+await fs.mkdir(nonQuestionWorkflowOutDir, { recursive: true });
+const nonQuestionWorkflowAutoDrain = {
+  kind: 'frontier.swarm-codex.auto-drain',
+  version: 1,
+  ok: false,
+  enabled: true,
+  cwd: tmp,
+  runDir: nonQuestionWorkflowOutDir,
+  outDir: nonQuestionWorkflowOutDir,
+  generatedAt: nonQuestionWorkflowArtifacts.generatedAt,
+  iterations: [{
+    index: 1,
+    admittedJobIds: [
+      'non-question-human-blocked-job',
+      'failed-apply-question-job',
+      'stale-question-job',
+      'conflict-question-job',
+      'review-question-job',
+      'rejected-question-job'
+    ],
+    deferredJobIds: [],
+    readyJobIds: [],
+    coordinatorAgentDrainWork: {
+      summary: {
+        leaseCount: 0,
+        assignmentCount: 0,
+        terminalCount: 0,
+        nonTerminalCount: 0,
+        promotedWorkCount: 0,
+        appliedCount: 0,
+        queuedCount: 0,
+        escalatedCount: 0,
+        rerunCount: 0,
+        rejectedCount: 0,
+        recordedCount: 0,
+        blockedCount: 0
+      }
+    },
+    apply: {
+      decisions: [
+        createSyntheticAutonomousDecision('human-blocked', {
+          id: 'non-question-human-blocked',
+          jobId: 'non-question-human-blocked-job',
+          taskId: 'non-question-human-blocked-task',
+          queueItemIds: ['non-question-human-blocked-task'],
+          reason: 'Can the coordinator review this ordinary ownership note?',
+          finishedAt: nonQuestionWorkflowArtifacts.generatedAt + 1
+        }),
+        createSyntheticAutonomousDecision('failed', {
+          id: 'failed-apply-question',
+          jobId: 'failed-apply-question-job',
+          taskId: 'failed-apply-question-task',
+          queueItemIds: ['failed-apply-question-task'],
+          reason: 'git apply --check failed?',
+          finishedAt: nonQuestionWorkflowArtifacts.generatedAt + 2
+        }),
+        createSyntheticAutonomousDecision('rerun', {
+          id: 'stale-question',
+          jobId: 'stale-question-job',
+          taskId: 'stale-question-task',
+          queueItemIds: ['stale-question-task'],
+          reason: 'bundle is stale against current head?',
+          finishedAt: nonQuestionWorkflowArtifacts.generatedAt + 3
+        }),
+        createSyntheticAutonomousDecision('conflict-blocked', {
+          id: 'conflict-question',
+          jobId: 'conflict-question-job',
+          taskId: 'conflict-question-task',
+          queueItemIds: ['conflict-question-task'],
+          reason: 'git apply --check failed after head moved?',
+          finishedAt: nonQuestionWorkflowArtifacts.generatedAt + 4
+        }),
+        createSyntheticAutonomousDecision('skipped', {
+          id: 'review-question',
+          jobId: 'review-question-job',
+          taskId: 'review-question-task',
+          queueItemIds: ['review-question-task'],
+          reason: 'coordinator review artifact recorded?',
+          finishedAt: nonQuestionWorkflowArtifacts.generatedAt + 5
+        }),
+        createSyntheticAutonomousDecision('rejected', {
+          id: 'rejected-question',
+          jobId: 'rejected-question-job',
+          taskId: 'rejected-question-task',
+          queueItemIds: ['rejected-question-task'],
+          reason: 'required verification failed?',
+          finishedAt: nonQuestionWorkflowArtifacts.generatedAt + 6
+        })
+      ]
+    }
+  }],
+  lockKeys: [],
+  lockScopeCounts: { semantic: 0, path: 0, repo: 0 },
+  terminalJobIds: ['failed-apply-question-job', 'stale-question-job', 'conflict-question-job', 'review-question-job', 'rejected-question-job'],
+  blockedJobIds: ['non-question-human-blocked-job'],
+  artifacts: nonQuestionWorkflowArtifacts,
+  summary: {
+    iterationCount: 1,
+    collectionCount: 1,
+    applyCount: 1,
+    terminalCount: 5,
+    blockedCount: 1,
+    conflictBlockedCount: 1,
+    humanBlockedCount: 1,
+    remainingReadyCount: 0,
+    admittedCount: 6,
+    deferredCount: 0,
+    reviewerAssignmentCount: 1,
+    reviewerTaskCount: 1,
+    patchStackCount: 0
+  }
+};
+const nonQuestionWorkflowDashboardPath = path.join(nonQuestionWorkflowOutDir, 'coordinator-dashboard.json');
+await writeSwarmCoordinatorSnapshot(nonQuestionWorkflowDashboardPath, {
+  ok: false,
+  outDir: nonQuestionWorkflowOutDir,
+  plan,
+  run: {
+    id: 'non-question-workflow-run',
+    jobs: [],
+    results: [],
+    summary: {}
+  },
+  proof: {},
+  autoDrain: nonQuestionWorkflowAutoDrain,
+  autoDrainArtifacts: nonQuestionWorkflowArtifacts
+});
+const nonQuestionWorkflowDashboard = JSON.parse(await fs.readFile(nonQuestionWorkflowDashboardPath, 'utf8'));
+assert.strictEqual(nonQuestionWorkflowDashboard.queueMetadata.humanQuestions.count, 0);
+assert.strictEqual(nonQuestionWorkflowDashboard.queueMetadata.humanQuestions.decisionCount, 0);
+assert.deepStrictEqual(nonQuestionWorkflowDashboard.queueMetadata.humanQuestions.openDecisionIds, []);
+assert.deepStrictEqual(nonQuestionWorkflowDashboard.queueMetadata.humanQuestions.reasons, []);
+assert.deepStrictEqual(nonQuestionWorkflowDashboard.queueMetadata.humanQuestions.openQuestions, []);
+assert.strictEqual(nonQuestionWorkflowDashboard.queueMetadata.mergeQueueHealth.counts.blockedHumanQuestionCount, 0);
+assert.strictEqual(nonQuestionWorkflowDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
+assert.strictEqual(nonQuestionWorkflowDashboard.autonomousQueueHealth.summary.humanQuestionCount, 0);
+assert.deepStrictEqual(nonQuestionWorkflowDashboard.autonomousQueueHealth.humanQuestions.openQuestions, []);
 
 const autoDrainDryRunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dry-run-repo');
 const autoDrainDryRun = await runCodexSwarm(autoDrainPlan, {
@@ -5406,6 +5573,11 @@ assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.ignoredCount,
 assert.strictEqual(answeredHumanQuestionRun.autoDrain.summary.humanAnswerContinuationCount, 1);
 assert.deepStrictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedJobIds, ['answered-human-question']);
 assert.deepStrictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedQueueItemIds, ['answered-human-question-task']);
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedContinuations[0].questionContract.owner, 'product');
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedContinuations[0].questionContract.surface, 'src/question.ts');
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedContinuations[0].questionContract.missingAuthority, 'policy');
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedContinuations[0].questionContract.answerCode, 'choose:ship|hold');
+assert.deepStrictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedContinuations[0].answerTexts, ['Ship this behavior.']);
 assert.deepStrictEqual(answeredHumanQuestionDashboard.queueMetadata.humanAnswers.routedContinuationIds, answeredHumanQuestionRun.autoDrain.humanAnswers.routedContinuationIds);
 assert.strictEqual(answeredHumanQuestionDashboard.queueMetadata.actionCounts.blockCount, 0);
 assert.strictEqual(answeredHumanQuestionDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
