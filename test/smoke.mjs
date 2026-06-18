@@ -1840,7 +1840,8 @@ const autoDrainCommitRerunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-c
 const autoDrainCommitRerunPlan = createCodexSwarmPlan({
   manifest: {
     id: 'auto-drain-commit-rerun',
-    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }],
+    layers: [{ id: 'merge' }]
   },
   tasks: {
     items: [{
@@ -1856,8 +1857,14 @@ const autoDrainCommitRerunPlan = createCodexSwarmPlan({
     }, {
       id: 'apply-second-commit-task',
       lane: 'apply',
+      layer: 'merge',
+      compute: 'codex.deep',
+      priority: 17,
+      concurrencyKey: 'auto-drain-commit-rerun:apply-second-commit-task',
       ownedFiles: ['src/apply.ts'],
+      ownedRegions: ['src/apply.ts#apply'],
       changedRegions: ['src/apply.ts#apply'],
+      acceptance: ['second commit rerun keeps scheduling metadata'],
       verification: [{
         name: 'worker-sees-second-commit',
         command: 'node',
@@ -1929,10 +1936,29 @@ assert.strictEqual(autoDrainCommitRerunManifest.summary.sourceHeadCount, 1);
 assert.strictEqual(autoDrainCommitRerunManifest.items.length, 1);
 const autoDrainCommitRerunTask = autoDrainCommitRerunManifest.items[0];
 assert.strictEqual(autoDrainCommitRerunTask.id, 'apply-second-commit-task-rerun-current-head');
+assert.strictEqual(autoDrainCommitRerunTask.lane, 'apply');
+assert.strictEqual(autoDrainCommitRerunTask.layer, 'merge');
+assert.strictEqual(autoDrainCommitRerunTask.compute, 'codex.deep');
+assert.strictEqual(autoDrainCommitRerunTask.priority, 17);
+assert.strictEqual(autoDrainCommitRerunTask.concurrencyKey, 'auto-drain-commit-rerun:apply-second-commit-task');
 assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.originalTaskId, 'apply-second-commit-task');
 assert.deepStrictEqual(autoDrainCommitRerunTask.metadata.rerun.queueItemIds, ['apply-second-commit-task']);
 assert.deepStrictEqual(autoDrainCommitRerunTask.targetRefs, ['src/apply.ts']);
 assert.deepStrictEqual(autoDrainCommitRerunTask.allowedWrites, ['src/apply.ts']);
+assert.deepStrictEqual(autoDrainCommitRerunTask.ownedRegions, ['src/apply.ts#apply']);
+assert.deepStrictEqual(autoDrainCommitRerunTask.acceptance, ['second commit rerun keeps scheduling metadata']);
+assert.deepStrictEqual(autoDrainCommitRerunTask.verification, [{
+  name: 'worker-sees-second-commit',
+  command: 'node',
+  args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='second-commit\\n') process.exit(1);"],
+  required: true
+}]);
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.id, 'apply-second-commit-task');
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.lane, 'apply');
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.layer, 'merge');
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.compute, 'codex.deep');
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.priority, 17);
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.concurrencyKey, 'auto-drain-commit-rerun:apply-second-commit-task');
 assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourceKinds.includes('stale-against-head'));
 assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourceKinds.includes('queue-rerun'));
 assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.currentHead, autoDrainCommitRerunHead);
@@ -2072,17 +2098,46 @@ assert.strictEqual(await fs.readFile(path.join(autoDrainApplyRerunRepo, 'src', '
 
 const autoDrainCommitRerunContinuationTasks = coerceCodexSwarmTasksInput(autoDrainCommitRerunManifest);
 assert.deepStrictEqual(autoDrainCommitRerunContinuationTasks.map((task) => task.id), ['apply-second-commit-task-rerun-current-head']);
+assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].lane, 'apply');
+assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].layer, 'merge');
+assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].compute, 'codex.deep');
+assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].priority, 17);
+assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].concurrencyKey, 'auto-drain-commit-rerun:apply-second-commit-task');
+assert.deepStrictEqual(autoDrainCommitRerunContinuationTasks[0].ownedRegions, ['src/apply.ts#apply']);
+assert.deepStrictEqual(autoDrainCommitRerunContinuationTasks[0].acceptance, ['second commit rerun keeps scheduling metadata']);
+assert.deepStrictEqual(autoDrainCommitRerunContinuationTasks[0].verification, [{
+  name: 'worker-sees-second-commit',
+  command: 'node',
+  args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='second-commit\\n') process.exit(1);"],
+  required: true
+}]);
 assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].metadata.rerun.originalTaskId, 'apply-second-commit-task');
 assert.strictEqual(autoDrainCommitRerunContinuationTasks[0].metadata.source.metadata.rerun.originalTaskId, 'apply-second-commit-task');
 const autoDrainCommitRerunContinuationManifestInput = {
   id: 'auto-drain-commit-rerun-continuation',
-  lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+  lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }],
+  layers: [{ id: 'merge' }]
 };
 const autoDrainCommitRerunContinuationPlan = createCodexSwarmPlan({
   manifest: autoDrainCommitRerunContinuationManifestInput,
   tasks: autoDrainCommitRerunManifest
 });
 assert.strictEqual(autoDrainCommitRerunContinuationPlan.validation.valid, true);
+assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].lane, 'apply');
+assert.notStrictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].lane, 'unassigned');
+assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].layer, 'merge');
+assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].compute.id, 'codex.deep');
+assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].priority, 17);
+assert.notStrictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].priority, 100);
+assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].concurrencyKey, 'auto-drain-commit-rerun:apply-second-commit-task');
+assert.deepStrictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].ownedRegions, ['src/apply.ts#apply']);
+assert.deepStrictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].acceptance, ['second commit rerun keeps scheduling metadata']);
+assert.deepStrictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].verification, [{
+  name: 'worker-sees-second-commit',
+  command: 'node',
+  args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='second-commit\\n') process.exit(1);"],
+  required: true
+}]);
 assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].task.metadata.rerun.originalTaskId, 'apply-second-commit-task');
 assert.strictEqual(autoDrainCommitRerunContinuationPlan.jobs[0].metadata.rerun.originalTaskId, 'apply-second-commit-task');
 const autoDrainCommitRerunContinuationManifestPath = path.join(tmp, 'auto-drain-commit-rerun-continuation-manifest.json');
@@ -2100,6 +2155,11 @@ const cliRerunContinuationPlan = await execFileP(process.execPath, [
 const cliRerunContinuationPlanOutput = JSON.parse(cliRerunContinuationPlan.stdout);
 assert.strictEqual(cliRerunContinuationPlanOutput.ok, true);
 assert.strictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].taskId, 'apply-second-commit-task-rerun-current-head');
+assert.strictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].lane, 'apply');
+assert.notStrictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].lane, 'unassigned');
+assert.strictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].priority, 17);
+assert.notStrictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].priority, 100);
+assert.strictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].concurrencyKey, 'auto-drain-commit-rerun:apply-second-commit-task');
 assert.strictEqual(cliRerunContinuationPlanOutput.plan.jobs[0].task.metadata.rerun.originalTaskId, 'apply-second-commit-task');
 
 const autoDrainPromotedDebtRepo = path.join(tmp, 'auto-drain-promoted-debt-repo');

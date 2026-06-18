@@ -1316,7 +1316,26 @@ export interface FrontierCodexAutoDrainRerunTaskMetadata {
   conflictingJobIds: string[];
   scopeIds: string[];
   leaseKeys: string[];
+  sourceTask?: FrontierCodexAutoDrainRerunSourceTaskMetadata;
   generatedAt: number;
+}
+
+export interface FrontierCodexAutoDrainRerunSourceTaskMetadata {
+  id?: string;
+  title?: string;
+  lane?: string;
+  layer?: string;
+  compute?: string;
+  priority?: number;
+  concurrencyKey?: string;
+  sourceRefs: string[];
+  targetRefs: string[];
+  allowedWrites: string[];
+  ownershipRegions: NonNullable<FrontierSwarmTaskInput['ownershipRegions']>;
+  ownedRegions: string[];
+  changedRegions: string[];
+  acceptance: string[];
+  verification: NonNullable<FrontierSwarmTaskInput['verification']>;
 }
 
 export interface FrontierCodexAutoDrainRerunTask extends FrontierSwarmTaskInput {
@@ -1324,10 +1343,19 @@ export interface FrontierCodexAutoDrainRerunTask extends FrontierSwarmTaskInput 
   title: string;
   objective: string;
   status: 'todo';
+  lane?: string;
+  layer?: string;
+  compute?: string;
+  concurrencyKey?: string;
+  priority?: number;
   sourceRefs: string[];
   targetRefs: string[];
   allowedWrites: string[];
+  ownershipRegions: NonNullable<FrontierSwarmTaskInput['ownershipRegions']>;
+  ownedRegions: string[];
   changedRegions: string[];
+  acceptance: string[];
+  verification: NonNullable<FrontierSwarmTaskInput['verification']>;
   tags: string[];
   metadata: {
     source: typeof FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND;
@@ -3718,7 +3746,11 @@ export async function runCodexJob(
       codexHandoffArtifacts: handoffArtifacts
     }
   };
+  const sourceTask = createCodexRerunSourceTaskMetadata(job);
   const mergeMetadata = {
+    [FRONTIER_SWARM_CODEX_METADATA_KEY]: {
+      sourceTask
+    },
     ...(codexRunMetrics.hasTokenUsage ? { codexRunMetrics, codexCostEstimate } : {}),
     ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {})
   };
@@ -7041,6 +7073,10 @@ interface AutoDrainRerunCandidate {
   jobId: string;
   taskId?: string;
   lane?: string;
+  layer?: string;
+  compute?: string;
+  priority?: number;
+  concurrencyKey?: string;
   title?: string;
   queueItemIds: string[];
   sourceKinds: FrontierCodexAutoDrainRerunSourceKind[];
@@ -7057,6 +7093,11 @@ interface AutoDrainRerunCandidate {
   targetRefs: string[];
   changedRegions: string[];
   allowedWrites: string[];
+  ownershipRegions: NonNullable<FrontierSwarmTaskInput['ownershipRegions']>;
+  ownedRegions: string[];
+  acceptance: string[];
+  verification: NonNullable<FrontierSwarmTaskInput['verification']>;
+  sourceTask?: FrontierCodexAutoDrainRerunSourceTaskMetadata;
   queueActions: FrontierSwarmMergeQueueAssignmentAction[];
   decisionStatuses: FrontierCodexAutonomousDecisionStatus[];
   conflictHeadBefore: string[];
@@ -7125,7 +7166,11 @@ export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainR
   const decisionLogPathById = new Map<string, string>();
   const applyPathByDecisionId = new Map<string, string>();
   const autonomousQueueOverlayPathByDecisionId = new Map<string, string>();
+  const collectedEntriesByJobId = new Map<string, FrontierCodexCollectedBundle>();
   for (const iteration of input.iterations) {
+    for (const collection of [iteration.collection, iteration.postApplyCollection].filter((entry): entry is FrontierCodexCollectResult => entry !== undefined)) {
+      for (const [jobId, entry] of collectionEntriesByJobId(collection)) collectedEntriesByJobId.set(jobId, entry);
+    }
     const applyPath = iteration.apply ? path.join(iteration.apply.outDir, 'autonomous-apply.json') : undefined;
     const autonomousQueueOverlayPath = iteration.apply ? path.join(iteration.apply.outDir, 'autonomous-queue-overlay.json') : undefined;
     for (const decision of iteration.apply?.decisions ?? []) {
@@ -7145,10 +7190,12 @@ export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainR
       const subject = { jobId: record.jobId, taskId: record.taskId, queueItemIds: record.queueItemIds };
       if (!dashboardQueueSubjectIsOpen(subject, terminalJobIds, blockedJobIds, resolvedQueueKeys)) continue;
       const assignment = assignmentsByJobId.get(record.jobId);
+      const sourceTask = sourceTaskMetadataForAutoDrainEntry(entry);
       mergeAutoDrainRerunCandidate(candidates, subject, {
         jobId: record.jobId,
         taskId: record.taskId,
         lane: record.lane,
+        sourceTask,
         queueItemIds: record.queueItemIds,
         sourceKinds: assignment?.action === 'rerun' ? ['stale-against-head', 'queue-rerun'] : ['stale-against-head'],
         reasons: uniqueStrings(['stale-against-head', ...entry.bundle.reasons, ...(assignment?.reasons ?? [])]),
@@ -7174,10 +7221,12 @@ export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainR
       if (!entry) continue;
       const record = autoDrainGroupingRecord(entry);
       if (!record.patchPath || !assignment.changedPaths.length) continue;
+      const sourceTask = sourceTaskMetadataForAutoDrainEntry(entry);
       mergeAutoDrainRerunCandidate(candidates, assignment, {
         jobId: assignment.jobId,
         taskId: assignment.taskId ?? record.taskId,
         lane: assignment.lane ?? record.lane,
+        sourceTask,
         title: assignment.title,
         queueItemIds: assignment.queueItemIds.length ? assignment.queueItemIds : record.queueItemIds,
         sourceKinds: ['queue-rerun'],
@@ -7203,9 +7252,12 @@ export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainR
   for (const decision of decisions.filter((entry) => entry.status === 'conflict-blocked' || entry.status === 'rerun')) {
     if (!decision.patchPath || !decision.changedPaths.length) continue;
     const sourceKind: FrontierCodexAutoDrainRerunSourceKind = decision.status === 'conflict-blocked' ? 'conflict-blocked' : 'decision-rerun';
+    const sourceEntry = collectedEntriesByJobId.get(decision.jobId);
+    const sourceTask = sourceEntry ? sourceTaskMetadataForAutoDrainEntry(sourceEntry) : undefined;
     mergeAutoDrainRerunCandidate(candidates, decision, {
       jobId: decision.jobId,
       taskId: decision.taskId,
+      sourceTask,
       queueItemIds: decision.queueItemIds.length ? decision.queueItemIds : [decision.taskId ?? decision.jobId],
       sourceKinds: [sourceKind],
       reasons: uniqueStrings([decision.status, decision.reason]),
@@ -7291,6 +7343,10 @@ function mergeAutoDrainRerunCandidate(
     targetRefs: [],
     changedRegions: [],
     allowedWrites: [],
+    ownershipRegions: [],
+    ownedRegions: [],
+    acceptance: [],
+    verification: [],
     queueActions: [],
     decisionStatuses: [],
     conflictHeadBefore: [],
@@ -7300,12 +7356,17 @@ function mergeAutoDrainRerunCandidate(
     leaseKeys: [],
     generatedAt: input.generatedAt ?? Date.now()
   };
+  const sourceTask = mergeRerunSourceTaskMetadata(base.sourceTask, input.sourceTask);
   const sourceHeads = compactArtifactPaths([...base.sourceHeads, ...(input.sourceHeads ?? [])]).sort();
   candidates.set(key, {
     ...base,
     taskId: base.taskId ?? input.taskId,
-    lane: base.lane ?? input.lane,
-    title: base.title ?? input.title,
+    lane: sourceTask?.lane ?? base.lane ?? input.lane,
+    layer: sourceTask?.layer ?? base.layer ?? input.layer,
+    compute: sourceTask?.compute ?? base.compute ?? input.compute,
+    priority: sourceTask?.priority ?? base.priority ?? input.priority,
+    concurrencyKey: sourceTask?.concurrencyKey ?? base.concurrencyKey ?? input.concurrencyKey,
+    title: base.title ?? input.title ?? sourceTask?.title,
     queueItemIds: uniqueStrings([...base.queueItemIds, ...(input.queueItemIds ?? [])]).sort(),
     sourceKinds: uniqueStrings([...base.sourceKinds, ...(input.sourceKinds ?? [])]) as FrontierCodexAutoDrainRerunSourceKind[],
     reasons: uniqueStrings([...base.reasons, ...(input.reasons ?? [])]).sort(),
@@ -7318,9 +7379,14 @@ function mergeAutoDrainRerunCandidate(
     sourceMergeQueuePaths: compactArtifactPaths([...base.sourceMergeQueuePaths, ...(input.sourceMergeQueuePaths ?? [])]).sort(),
     sourceDecisionLogPaths: compactArtifactPaths([...base.sourceDecisionLogPaths, ...(input.sourceDecisionLogPaths ?? [])]).sort(),
     evidencePaths: compactArtifactPaths([...base.evidencePaths, ...(input.evidencePaths ?? [])]).slice(0, 100),
-    targetRefs: uniqueWorkspacePaths([...base.targetRefs, ...(input.targetRefs ?? [])]).sort(),
-    changedRegions: uniqueStrings([...base.changedRegions, ...(input.changedRegions ?? [])]).sort(),
-    allowedWrites: uniqueWorkspacePaths([...base.allowedWrites, ...(input.allowedWrites ?? [])]).sort(),
+    targetRefs: uniqueWorkspacePaths([...base.targetRefs, ...(input.targetRefs ?? []), ...(sourceTask?.targetRefs ?? [])]).sort(),
+    changedRegions: uniqueStrings([...base.changedRegions, ...(input.changedRegions ?? []), ...(sourceTask?.changedRegions ?? [])]).sort(),
+    allowedWrites: uniqueStrings([...base.allowedWrites, ...(input.allowedWrites ?? []), ...(sourceTask?.allowedWrites ?? [])]).sort(),
+    ownershipRegions: mergeRerunOwnershipRegions(base.ownershipRegions, input.ownershipRegions, sourceTask?.ownershipRegions),
+    ownedRegions: uniqueStrings([...base.ownedRegions, ...(input.ownedRegions ?? []), ...(sourceTask?.ownedRegions ?? [])]).sort(),
+    acceptance: uniqueStrings([...base.acceptance, ...(input.acceptance ?? []), ...(sourceTask?.acceptance ?? [])]),
+    verification: uniqueRerunVerificationCommands(base.verification, input.verification, sourceTask?.verification),
+    ...(sourceTask ? { sourceTask } : {}),
     queueActions: uniqueStrings([...base.queueActions, ...(input.queueActions ?? [])]) as FrontierSwarmMergeQueueAssignmentAction[],
     decisionStatuses: uniqueStrings([...base.decisionStatuses, ...(input.decisionStatuses ?? [])]) as FrontierCodexAutonomousDecisionStatus[],
     conflictHeadBefore: compactArtifactPaths([...base.conflictHeadBefore, ...(input.conflictHeadBefore ?? [])]).sort(),
@@ -7355,6 +7421,7 @@ function createAutoDrainRerunTask(
       ? ` from ${sourceHeads.length} source heads`
       : '';
   const sourceRefs = compactArtifactPaths([
+    ...(candidate.sourceTask?.sourceRefs ?? []),
     ...candidate.sourcePatchPaths,
     ...candidate.sourceBundlePaths,
     ...candidate.sourceDecisionLogPaths,
@@ -7362,6 +7429,12 @@ function createAutoDrainRerunTask(
     ...candidate.sourceCollectionPaths,
     ...candidate.sourceMergeQueuePaths
   ]);
+  const ownedRegions = uniqueStrings(candidate.ownedRegions.length ? candidate.ownedRegions : candidate.changedRegions).sort();
+  const allowedWrites = candidate.sourceTask?.allowedWrites.length
+    ? uniqueStrings(candidate.sourceTask.allowedWrites).sort()
+    : candidate.allowedWrites.length
+      ? uniqueStrings(candidate.allowedWrites).sort()
+      : targetRefs;
   const rerun: FrontierCodexAutoDrainRerunTaskMetadata = {
     source: FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
     sourceAutoDrainPath: input.autoDrainPath,
@@ -7388,6 +7461,7 @@ function createAutoDrainRerunTask(
     conflictingJobIds: [...candidate.conflictingJobIds],
     scopeIds: [...candidate.scopeIds],
     leaseKeys: [...candidate.leaseKeys],
+    ...(candidate.sourceTask ? { sourceTask: candidate.sourceTask } : {}),
     generatedAt: input.generatedAt
   };
   return {
@@ -7397,10 +7471,18 @@ function createAutoDrainRerunTask(
     kind: 'agent-task',
     status: 'todo',
     ...(candidate.lane ? { lane: candidate.lane } : {}),
+    ...(candidate.layer ? { layer: candidate.layer } : {}),
+    ...(candidate.compute ? { compute: candidate.compute } : {}),
+    ...(candidate.concurrencyKey ? { concurrencyKey: candidate.concurrencyKey } : {}),
+    ...(candidate.priority !== undefined ? { priority: candidate.priority } : {}),
     sourceRefs,
     targetRefs,
-    allowedWrites: candidate.allowedWrites.length ? uniqueWorkspacePaths(candidate.allowedWrites).sort() : targetRefs,
+    allowedWrites,
+    ownershipRegions: [...candidate.ownershipRegions],
+    ownedRegions,
     changedRegions: [...candidate.changedRegions],
+    acceptance: [...candidate.acceptance],
+    verification: [...candidate.verification],
     tags: uniqueStrings(['auto-drain-rerun', ...sourceKinds.map((kind) => `auto-drain-${kind}`)]),
     metadata: {
       source: FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
@@ -8632,6 +8714,231 @@ function assertGeneratedWorkspacePath(plan: FrontierCodexWorkspacePlan): void {
 function readRawTask(job: FrontierSwarmJob): Record<string, unknown> {
   const metadata = isObject(job.task.metadata) ? job.task.metadata : {};
   return isObject(metadata.source) ? metadata.source : {};
+}
+
+function createCodexRerunSourceTaskMetadata(job: FrontierSwarmJob): FrontierCodexAutoDrainRerunSourceTaskMetadata {
+  const rawTask = normalizeRerunSourceTaskMetadata(readRawTask(job));
+  const taskSnapshot: FrontierCodexAutoDrainRerunSourceTaskMetadata = {
+    id: job.task.id,
+    title: job.task.title,
+    lane: job.task.lane ?? job.lane,
+    ...(job.task.layer ?? job.layer ? { layer: job.task.layer ?? job.layer } : {}),
+    compute: job.task.compute ?? job.compute.id,
+    priority: job.priority,
+    concurrencyKey: job.concurrencyKey,
+    sourceRefs: [...job.task.sourceRefs],
+    targetRefs: [...job.task.targetRefs],
+    allowedWrites: [...job.task.allowedWrites],
+    ownershipRegions: cloneRerunJsonArray<NonNullable<FrontierSwarmTaskInput['ownershipRegions']>[number]>(job.task.ownershipRegions),
+    ownedRegions: [...job.task.ownedRegions],
+    changedRegions: [...job.changedRegions],
+    acceptance: [...job.acceptance],
+    verification: cloneRerunJsonArray<NonNullable<FrontierSwarmTaskInput['verification']>[number]>(job.verification)
+  };
+  return mergeRerunSourceTaskMetadata(taskSnapshot, rawTask) ?? taskSnapshot;
+}
+
+function sourceTaskMetadataForAutoDrainEntry(entry: FrontierCodexCollectedBundle): FrontierCodexAutoDrainRerunSourceTaskMetadata {
+  const bundle = entry.bundle;
+  const metadata = isObject(bundle.metadata) ? bundle.metadata : {};
+  const codex = isObject(metadata[FRONTIER_SWARM_CODEX_METADATA_KEY]) ? metadata[FRONTIER_SWARM_CODEX_METADATA_KEY] : {};
+  const sourceTask = mergeRerunSourceTaskMetadata(
+    normalizeRerunSourceTaskMetadata(codex.sourceTask),
+    normalizeRerunSourceTaskMetadata(metadata.sourceTask),
+    normalizeRerunSourceTaskMetadata(metadata.source)
+  );
+  if (sourceTask) return sourceTask;
+  const fallback: FrontierCodexAutoDrainRerunSourceTaskMetadata = {
+    ...(bundle.taskId ? { id: bundle.taskId } : {}),
+    ...(bundle.title ? { title: bundle.title } : {}),
+    ...(bundle.lane ? { lane: bundle.lane } : {}),
+    sourceRefs: [],
+    targetRefs: uniqueWorkspacePaths(bundle.changedPaths).sort(),
+    allowedWrites: uniqueStrings(bundle.allowedWrites).sort(),
+    ownershipRegions: [],
+    ownedRegions: [],
+    changedRegions: uniqueStrings(bundle.changedRegions).sort(),
+    acceptance: [],
+    verification: []
+  };
+  return fallback;
+}
+
+function normalizeRerunSourceTaskMetadata(value: unknown): FrontierCodexAutoDrainRerunSourceTaskMetadata | undefined {
+  if (!isObject(value)) return undefined;
+  const id = readFirstString(value.id, value.taskId, value.originalTaskId, value.sourceTaskId);
+  const title = readFirstString(value.title);
+  const lane = readFirstString(value.lane);
+  const layer = readFirstString(value.layer);
+  const compute = readFirstString(value.compute);
+  const concurrencyKey = readFirstString(value.concurrencyKey);
+  const priority = typeof value.priority === 'number' && Number.isFinite(value.priority) ? value.priority : undefined;
+  const sourceRefs = compactArtifactPaths([
+    ...readStringValues(value.sourceRefs),
+    ...readStringValues(value.legacySourcePaths)
+  ]);
+  const targetRefs = uniqueWorkspacePaths([
+    ...readStringValues(value.targetRefs),
+    ...readStringValues(value.ownedFiles),
+    ...readStringValues(value.files)
+  ]).sort();
+  const allowedWrites = uniqueStrings([
+    ...readStringValues(value.allowedWrites),
+    ...readStringValues(value.allowedGlobs),
+    ...readStringValues(value.ownedFiles),
+    ...readStringValues(value.files)
+  ]).sort();
+  const ownershipRegions = cloneRerunJsonArray<NonNullable<FrontierSwarmTaskInput['ownershipRegions']>[number]>(value.ownershipRegions);
+  const ownedRegions = uniqueStrings(readStringValues(value.ownedRegions)).sort();
+  const changedRegions = uniqueStrings(readStringValues(value.changedRegions)).sort();
+  const acceptance = uniqueStrings([
+    ...readStringValues(value.acceptance),
+    ...readRerunAcceptanceChecks(value.acceptanceChecks)
+  ]);
+  const verification = readRerunVerification(value.verification);
+  const hasUsefulValue = [
+    id,
+    title,
+    lane,
+    layer,
+    compute,
+    concurrencyKey,
+    priority,
+    sourceRefs.length,
+    targetRefs.length,
+    allowedWrites.length,
+    ownershipRegions.length,
+    ownedRegions.length,
+    changedRegions.length,
+    acceptance.length,
+    verification.length
+  ].some(Boolean);
+  if (!hasUsefulValue) return undefined;
+  return {
+    ...(id ? { id } : {}),
+    ...(title ? { title } : {}),
+    ...(lane ? { lane } : {}),
+    ...(layer ? { layer } : {}),
+    ...(compute ? { compute } : {}),
+    ...(priority !== undefined ? { priority } : {}),
+    ...(concurrencyKey ? { concurrencyKey } : {}),
+    sourceRefs,
+    targetRefs,
+    allowedWrites,
+    ownershipRegions,
+    ownedRegions,
+    changedRegions,
+    acceptance,
+    verification
+  };
+}
+
+function mergeRerunSourceTaskMetadata(
+  ...sources: readonly (FrontierCodexAutoDrainRerunSourceTaskMetadata | undefined)[]
+): FrontierCodexAutoDrainRerunSourceTaskMetadata | undefined {
+  const values = sources.filter((source): source is FrontierCodexAutoDrainRerunSourceTaskMetadata => source !== undefined);
+  if (!values.length) return undefined;
+  const first = values[0];
+  return {
+    ...(first.id ? { id: first.id } : {}),
+    ...(first.title ? { title: first.title } : {}),
+    ...(first.lane ? { lane: first.lane } : {}),
+    ...(first.layer ? { layer: first.layer } : {}),
+    ...(first.compute ? { compute: first.compute } : {}),
+    ...(first.priority !== undefined ? { priority: first.priority } : {}),
+    ...(first.concurrencyKey ? { concurrencyKey: first.concurrencyKey } : {}),
+    ...values.slice(1).reduce<Partial<FrontierCodexAutoDrainRerunSourceTaskMetadata>>((acc, source) => ({
+      id: acc.id ?? source.id,
+      title: acc.title ?? source.title,
+      lane: acc.lane ?? source.lane,
+      layer: acc.layer ?? source.layer,
+      compute: acc.compute ?? source.compute,
+      priority: acc.priority ?? source.priority,
+      concurrencyKey: acc.concurrencyKey ?? source.concurrencyKey
+    }), {
+      id: first.id,
+      title: first.title,
+      lane: first.lane,
+      layer: first.layer,
+      compute: first.compute,
+      priority: first.priority,
+      concurrencyKey: first.concurrencyKey
+    }),
+    sourceRefs: compactArtifactPaths(values.flatMap((source) => source.sourceRefs)),
+    targetRefs: uniqueWorkspacePaths(values.flatMap((source) => source.targetRefs)).sort(),
+    allowedWrites: uniqueStrings(values.flatMap((source) => source.allowedWrites)).sort(),
+    ownershipRegions: mergeRerunOwnershipRegions(...values.map((source) => source.ownershipRegions)),
+    ownedRegions: uniqueStrings(values.flatMap((source) => source.ownedRegions)).sort(),
+    changedRegions: uniqueStrings(values.flatMap((source) => source.changedRegions)).sort(),
+    acceptance: uniqueStrings(values.flatMap((source) => source.acceptance)),
+    verification: uniqueRerunVerificationCommands(...values.map((source) => source.verification))
+  };
+}
+
+function readRerunAcceptanceChecks(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (typeof entry === 'string') return [entry];
+    if (!isObject(entry)) return [];
+    const check = readFirstString(entry.description, entry.id);
+    return check ? [check] : [];
+  });
+}
+
+function readRerunVerification(value: unknown): NonNullable<FrontierSwarmTaskInput['verification']> {
+  if (!Array.isArray(value)) return [];
+  return cloneRerunJsonArray<NonNullable<FrontierSwarmTaskInput['verification']>[number]>(
+    value.filter((entry) => typeof entry === 'string' || isObject(entry))
+  );
+}
+
+function mergeRerunOwnershipRegions(
+  ...groups: readonly (readonly unknown[] | undefined)[]
+): NonNullable<FrontierSwarmTaskInput['ownershipRegions']> {
+  const values = groups.flatMap((group) => group ?? []) as NonNullable<FrontierSwarmTaskInput['ownershipRegions']>;
+  return uniqueRerunJsonArray<NonNullable<FrontierSwarmTaskInput['ownershipRegions']>[number]>(values);
+}
+
+function uniqueRerunVerificationCommands(
+  ...groups: readonly (readonly unknown[] | undefined)[]
+): NonNullable<FrontierSwarmTaskInput['verification']> {
+  const values = groups.flatMap((group) => group ?? []) as NonNullable<FrontierSwarmTaskInput['verification']>;
+  const out: NonNullable<FrontierSwarmTaskInput['verification']>[number][] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const key = typeof value === 'string'
+      ? value
+      : JSON.stringify({
+        name: value.name,
+        command: value.command,
+        args: value.args ?? [],
+        cwd: value.cwd
+      });
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(cloneRerunJsonValue(value));
+  }
+  return out;
+}
+
+function uniqueRerunJsonArray<T>(values: readonly T[]): T[] {
+  const out: T[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const key = typeof value === 'string' ? value : JSON.stringify(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(cloneRerunJsonValue(value));
+  }
+  return out;
+}
+
+function cloneRerunJsonArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value.map((entry) => cloneRerunJsonValue(entry)) as T[] : [];
+}
+
+function cloneRerunJsonValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function codexModelPricing(
