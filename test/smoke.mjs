@@ -1865,6 +1865,7 @@ assert.ok(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].p
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.status, 'warning');
 assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /1 current-head conflict/);
 assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /coordinator retry work/);
+assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /not a human blocker/);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.currentHeadConflicts, 1);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.deferredCoordinatorQueues, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.deferredPromoteQueues, 0);
@@ -1875,10 +1876,12 @@ const autoDrainConflictBlockedCards = new Map(autoDrainConflictBlockedDashboard.
 assert.strictEqual(autoDrainConflictBlockedCards.get('coordination-debt').value, 1);
 assert.strictEqual(autoDrainConflictBlockedCards.get('coordination-debt').status, 'warning');
 assert.match(autoDrainConflictBlockedCards.get('coordination-debt').detail, /1 current-head conflict/);
+assert.match(autoDrainConflictBlockedCards.get('coordination-debt').action, /do not treat this card as a human blocker/);
 assert.strictEqual(autoDrainConflictBlockedCards.get('stale-rerun').value, 1);
 assert.strictEqual(autoDrainConflictBlockedCards.get('stale-rerun').status, 'warning');
-assert.match(autoDrainConflictBlockedCards.get('stale-rerun').detail, /retry queue conflict-blocked-task/);
+assert.match(autoDrainConflictBlockedCards.get('stale-rerun').detail, /conflict retry queue conflict-blocked-task/);
 assert.match(autoDrainConflictBlockedCards.get('stale-rerun').detail, /changes\.patch/);
+assert.match(autoDrainConflictBlockedCards.get('stale-rerun').action, /not a human question/);
 assert.ok(autoDrainConflictBlockedCards.get('stale-rerun').sourceFields.includes('queueHealth.conflictRetryWork'));
 assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').value, 0);
 assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').status, 'ok');

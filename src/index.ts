@@ -4160,8 +4160,8 @@ function createDashboardOperatorQueueSummary(
     : 'Inspect queue artifacts when work is waiting for autonomous coordination.';
   const conflictRetryDetail = formatDashboardConflictRetryWorkDetail(queueHealth.conflictRetryWork);
   const staleRerunAction = queueHealth.conflictRetryWork.length > 0
-    ? 'Rerun or rebase current-head conflict work from the listed queue ids and patch paths before asking a human.'
-    : 'Refresh stale workers or resolve current-head conflicts before asking a human.';
+    ? 'Rerun or rebase current-head conflict work from the listed queue ids and patch paths; this is coordinator retry work, not a human question.'
+    : 'Refresh stale workers or resolve current-head conflicts as coordinator work; escalate only explicit human-blocked or true-blocker entries.';
   return {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION,
@@ -4195,7 +4195,7 @@ function createDashboardOperatorQueueSummary(
         value: coordinationDebtCount,
         detail: `${formatDashboardOperatorQueueCount(queueHealth.currentHeadConflictCount, 'current-head conflict')}, ${formatDashboardOperatorQueueCount(queueHealth.deferredCoordinatorCount, 'deferred coordinator assignment')}, ${formatDashboardOperatorQueueCount(queueHealth.deferredPromoteCount, 'deferred promotion')}`,
         status: coordinationDebtCount > 0 ? 'warning' : 'ok',
-        action: 'Drain deferred coordinator work or rerun conflict-blocked patches against the current head.',
+        action: 'Drain deferred coordinator work or rerun conflict-blocked patches against the current head; do not treat this card as a human blocker.',
         sourceFields: ['queueHealth.currentHeadConflictCount', 'queueHealth.deferredCoordinatorCount', 'queueHealth.deferredPromoteCount']
       },
       {
@@ -4258,7 +4258,7 @@ function createDashboardOperatorQueueHeadline(
     return `${formatDashboardOperatorQueueCount(queueHealth.activeCoordinatorQueueCount, 'coordinator queue item')} collected; apply is waiting for a clean worktree (${formatDashboardOperatorQueueCount(collectOnly.dirtyPathCount, 'dirty path')}).`;
   }
   if (status === 'warning') {
-    return `${formatDashboardOperatorQueueWarningSources(queueHealth)} should be collapsed, drained, or retried as coordinator retry work.`;
+    return `Open coordinator debt: ${formatDashboardOperatorQueueWarningSources(queueHealth)}. Rerun, rebase, or drain this queue pressure as coordinator retry work, not a human blocker.`;
   }
   if (queueHealth.appliedDecisionCount > 0) {
     return `${queueHealth.appliedDecisionCount} autonomous decision${queueHealth.appliedDecisionCount === 1 ? '' : 's'} applied with no true blockers.`;
@@ -4303,7 +4303,7 @@ function formatDashboardConflictRetryWorkDetail(work: readonly FrontierCodexDash
   const queueId = first.queueItemIds[0] ?? first.taskId ?? first.jobId;
   const patchPath = first.patchPath ?? first.bundlePath;
   const more = work.length > 1 ? ` (+${work.length - 1} more)` : '';
-  return `; retry queue ${queueId} from ${patchPath}${more}`;
+  return `; conflict retry queue ${queueId} from ${patchPath}${more}`;
 }
 
 function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAutoDrainResult | null): {
