@@ -2,7 +2,25 @@
 
 `frontier-swarm-codex` currently protects autonomous bundle application with one repo-local lock. The lock is a physical file created with exclusive open semantics before any ready bundle is checked or applied by `applyCodexSwarmAutonomously`. By default the file lives at Git's repo-local path for `frontier-swarm/autonomous-apply.lock`; if that path cannot be resolved, the runner falls back to `autonomous-apply.lock` under the autonomous apply output directory.
 
-The lock file records a token, process id, working directory, dry-run mode, acquisition time, and expiry time. A caller waits for the file until `lockTimeoutMs`; an expired or unreadable stale lock can be removed after `lockStaleMs`. Release removes the file only when the stored token matches the in-memory token, so a later owner is not accidentally unlocked by an older process.
+The lock file records a token, process id, working directory, dry-run mode,
+acquisition time, and expiry time. A caller waits for the file until
+`lockTimeoutMs`. A stale lock can be recovered only when the recorded owner pid
+is provably gone, or when no live owner is recorded and the lock is expired or
+has aged past the `lockStaleMs` mtime fallback. A live owner is never stolen,
+even if its recorded expiry is in the past, and an unexpired lock is never
+stolen. Release removes the file only when the stored token matches the
+in-memory token, so a later owner is not accidentally unlocked by an older
+process.
+
+When acquisition recovers a stale file, `autonomous-apply.json` records a
+`lockRecoveries` list and `summary.lockRecoveryCount`. Each decision made under
+that recovered acquisition also carries the same `lockRecoveries` evidence in
+the append-only decision log. A recovery entry includes the lock path, recovery
+time, reason (`expired`, `owner-pid-gone`, or `mtime-expired`), stale threshold,
+previous token/pid/cwd/timing metadata when available, and the owner pid probe
+result. The pid probe treats only `ESRCH` from `process.kill(pid, 0)` as proof
+that an owner is gone; `EPERM`, malformed pids, and live pids are not dead-owner
+proof.
 
 This physical repo-local lock is intentionally coarse today. It serializes all autonomous apply decisions for the repository, including dry-run checks, patch application, verification gates, rollback, and optional commit creation. The implementation does not yet acquire independent file leases or semantic leases for concurrent application.
 

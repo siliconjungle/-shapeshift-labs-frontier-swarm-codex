@@ -815,6 +815,34 @@ export interface FrontierCodexAutonomousApplyLockKeys {
   keys: string[];
 }
 
+export type FrontierCodexAutonomousApplyLockRecoveryReason =
+  | 'expired'
+  | 'owner-pid-gone'
+  | 'mtime-expired';
+
+export interface FrontierCodexAutonomousApplyLockRecovery {
+  lockPath: string;
+  recoveredAt: number;
+  reason: FrontierCodexAutonomousApplyLockRecoveryReason;
+  staleMs: number;
+  previous: {
+    token?: string;
+    pid?: number;
+    cwd?: string;
+    dryRun?: boolean;
+    acquiredAt?: number;
+    expiresAt?: number;
+    mtimeMs?: number;
+    ageMs?: number;
+    parseError?: string;
+  };
+  ownerProbe?: {
+    pid: number;
+    status: 'gone' | 'alive' | 'unknown';
+    code?: string;
+  };
+}
+
 export interface FrontierCodexAutonomousLockScopeCounts {
   semantic: number;
   path: number;
@@ -1014,6 +1042,7 @@ export interface FrontierCodexAutonomousMergeDecision {
   commit?: string;
   lockPath?: string;
   lockToken?: string;
+  lockRecoveries?: FrontierCodexAutonomousApplyLockRecovery[];
   verification: FrontierCodexAutonomousDecisionVerification;
   finalGateSummary: FrontierCodexAutonomousDecisionFinalGateSummary;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
@@ -1124,6 +1153,7 @@ export interface FrontierCodexAutonomousApplyResult {
   lockPath: string;
   decisions: FrontierCodexAutonomousMergeDecision[];
   decisionReadbacks: FrontierCodexAutonomousDecisionLeaseReadback[];
+  lockRecoveries: FrontierCodexAutonomousApplyLockRecovery[];
   lockKeys: string[];
   lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
   queueOverlay: FrontierSwarmQueueOverlay;
@@ -1142,6 +1172,7 @@ export interface FrontierCodexAutonomousApplyResult {
     finalGateContinuationSkippedRequiredGateCount: number;
     rerunManifestCount: number;
     rerunTaskCount: number;
+    lockRecoveryCount: number;
   };
 }
 
@@ -8614,6 +8645,7 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
     lockPath,
     decisions,
     decisionReadbacks,
+    lockRecoveries: [...lock.recoveries],
     lockKeys: lockSummary.lockKeys,
     lockScopeCounts: lockSummary.lockScopeCounts,
     queueOverlay,
@@ -8631,7 +8663,8 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
       finalGateContinuationDecisionCount: finalGateSummary.continuationDecisionCount,
       finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount,
       rerunManifestCount: 0,
-      rerunTaskCount: 0
+      rerunTaskCount: 0,
+      lockRecoveryCount: lock.recoveries.length
     }
   };
   sourceCollection ??= await synthesizeCodexCollectResultForAutonomousApply({
@@ -8912,6 +8945,7 @@ interface FrontierCodexAutonomousApplyLock {
   acquiredAt: number;
   expiresAt: number;
   dryRun: boolean;
+  recoveries: FrontierCodexAutonomousApplyLockRecovery[];
 }
 
 async function applyCodexMergeBundleAutonomously(input: {
@@ -8970,6 +9004,7 @@ async function applyCodexMergeBundleAutonomously(input: {
       ...(extra.commit ? { commit: extra.commit } : {}),
       lockPath: input.lock.lockPath,
       lockToken: input.lock.token,
+      ...(input.lock.recoveries.length ? { lockRecoveries: [...input.lock.recoveries] } : {}),
       verification: summarizeAutonomousDecisionVerification(plannedVerificationCommands, verificationRuns),
       finalGateSummary: summarizeAutonomousDecisionFinalGates(plannedVerificationCommands, verificationRuns),
       commands,
@@ -9481,6 +9516,7 @@ async function acquireAutonomousApplyLock(input: {
   const timeoutMs = Math.max(0, input.timeoutMs ?? 30_000);
   const staleMs = Math.max(1_000, input.staleMs ?? 10 * 60_000);
   const deadline = Date.now() + timeoutMs;
+  const recoveries: FrontierCodexAutonomousApplyLockRecovery[] = [];
   await fs.mkdir(path.dirname(input.lockPath), { recursive: true });
   for (;;) {
     const acquiredAt = Date.now();
@@ -9490,7 +9526,8 @@ async function acquireAutonomousApplyLock(input: {
       token: randomUUID(),
       acquiredAt,
       expiresAt: acquiredAt + staleMs,
-      dryRun: input.dryRun
+      dryRun: input.dryRun,
+      recoveries: [...recoveries]
     };
     try {
       const handle = await fs.open(input.lockPath, 'wx');
@@ -9511,8 +9548,10 @@ async function acquireAutonomousApplyLock(input: {
       return lock;
     } catch (error) {
       if (!isFileExistsError(error)) throw error;
-      if (await autonomousApplyLockIsStale(input.lockPath, staleMs)) {
-        await fs.rm(input.lockPath, { force: true }).catch(() => {});
+      const recovery = await recoverAutonomousApplyLockIfSafe(input.lockPath, staleMs);
+      if (recovery === 'missing') continue;
+      if (recovery) {
+        recoveries.push(recovery);
         continue;
       }
       if (Date.now() >= deadline) throw new Error(`timed out waiting for autonomous apply lock: ${input.lockPath}`);
@@ -9521,18 +9560,94 @@ async function acquireAutonomousApplyLock(input: {
   }
 }
 
-async function autonomousApplyLockIsStale(lockPath: string, staleMs: number): Promise<boolean> {
-  const text = await fs.readFile(lockPath, 'utf8').catch(() => '');
-  if (text) {
+async function recoverAutonomousApplyLockIfSafe(lockPath: string, staleMs: number): Promise<FrontierCodexAutonomousApplyLockRecovery | 'missing' | undefined> {
+  const inspected = await inspectAutonomousApplyLock(lockPath, staleMs);
+  if (inspected.missing) return 'missing';
+  if (!inspected.recovery) return undefined;
+  const latestText = await fs.readFile(lockPath, 'utf8').catch(() => undefined);
+  const latestStat = await fs.stat(lockPath).catch(() => undefined);
+  if (latestText === undefined && !latestStat) return 'missing';
+  if (latestText !== inspected.text) return undefined;
+  try {
+    await fs.rm(lockPath, { force: true });
+  } catch {
+    return undefined;
+  }
+  return inspected.recovery;
+}
+
+async function inspectAutonomousApplyLock(lockPath: string, staleMs: number): Promise<{
+  text: string;
+  missing?: boolean;
+  recovery?: FrontierCodexAutonomousApplyLockRecovery;
+}> {
+  const recoveredAt = Date.now();
+  const text = await fs.readFile(lockPath, 'utf8').catch(() => undefined);
+  const stat = await fs.stat(lockPath).catch(() => undefined);
+  if (text === undefined && !stat) return { text: '', missing: true };
+  const lockText = text ?? '';
+  const previous: FrontierCodexAutonomousApplyLockRecovery['previous'] = {
+    ...(stat ? { mtimeMs: stat.mtimeMs, ageMs: Math.max(0, recoveredAt - stat.mtimeMs) } : {})
+  };
+  let parsed: {
+    token?: unknown;
+    pid?: unknown;
+    cwd?: unknown;
+    dryRun?: unknown;
+    acquiredAt?: unknown;
+    expiresAt?: unknown;
+  } | undefined;
+  if (lockText) {
     try {
-      const parsed = JSON.parse(text) as { expiresAt?: unknown };
-      if (typeof parsed.expiresAt === 'number') return parsed.expiresAt < Date.now();
-    } catch {
-      return true;
+      parsed = JSON.parse(lockText) as typeof parsed;
+      if (typeof parsed?.token === 'string') previous.token = parsed.token;
+      if (typeof parsed?.pid === 'number' && Number.isSafeInteger(parsed.pid)) previous.pid = parsed.pid;
+      if (typeof parsed?.cwd === 'string') previous.cwd = parsed.cwd;
+      if (typeof parsed?.dryRun === 'boolean') previous.dryRun = parsed.dryRun;
+      if (typeof parsed?.acquiredAt === 'number') previous.acquiredAt = parsed.acquiredAt;
+      if (typeof parsed?.expiresAt === 'number') previous.expiresAt = parsed.expiresAt;
+    } catch (error) {
+      previous.parseError = error instanceof Error ? error.message : String(error);
     }
   }
-  const stat = await fs.stat(lockPath).catch(() => undefined);
-  return stat ? Date.now() - stat.mtimeMs > staleMs : true;
+
+  const ownerProbe = typeof previous.pid === 'number'
+    ? probeAutonomousApplyLockOwner(previous.pid)
+    : undefined;
+  if (ownerProbe?.status === 'gone') {
+    return {
+      text: lockText,
+      recovery: { lockPath, recoveredAt, reason: 'owner-pid-gone', staleMs, previous, ownerProbe }
+    };
+  }
+  if (ownerProbe?.status === 'alive' || ownerProbe?.status === 'unknown') return { text: lockText };
+  if (typeof previous.expiresAt === 'number' && previous.expiresAt < recoveredAt) {
+    return {
+      text: lockText,
+      recovery: { lockPath, recoveredAt, reason: 'expired', staleMs, previous }
+    };
+  }
+  if (stat && recoveredAt - stat.mtimeMs > staleMs) {
+    return {
+      text: lockText,
+      recovery: { lockPath, recoveredAt, reason: 'mtime-expired', staleMs, previous }
+    };
+  }
+  return { text: lockText };
+}
+
+function probeAutonomousApplyLockOwner(pid: number): FrontierCodexAutonomousApplyLockRecovery['ownerProbe'] {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return { pid, status: 'unknown', code: 'invalid-pid' };
+  try {
+    process.kill(pid, 0);
+    return { pid, status: 'alive' };
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : undefined;
+    if (code === 'ESRCH') return { pid, status: 'gone', code };
+    return { pid, status: 'unknown', ...(code ? { code } : {}) };
+  }
 }
 
 async function releaseAutonomousApplyLock(lock: FrontierCodexAutonomousApplyLock): Promise<void> {

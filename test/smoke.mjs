@@ -1201,6 +1201,112 @@ assert.deepStrictEqual(autonomousDecisionLogEntry.leaseReadback.lease.keys, ['pa
 const autonomousApplyArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'autonomous-apply-out', 'autonomous-apply.json'), 'utf8'));
 assert.deepStrictEqual(autonomousApplyArtifact.lockKeys, ['path:src/apply.ts']);
 assert.deepStrictEqual(autonomousApplyArtifact.decisionReadbacks, [autonomousReadback]);
+assert.deepStrictEqual(autonomousApplyArtifact.lockRecoveries, []);
+assert.strictEqual(autonomousApplyArtifact.summary.lockRecoveryCount, 0);
+
+const staleApplyLockRepo = await createApplyFixtureRepo(tmp, 'autonomous-stale-apply-lock-repo');
+const staleApplyLockPath = path.join(tmp, 'autonomous-stale-apply.lock');
+const deadOwnerPid = await new Promise((resolve, reject) => {
+  const deadOwnerProcess = execFile(process.execPath, ['-e', ''], (error) => {
+    if (error) reject(error);
+    else resolve(pid);
+  });
+  const pid = deadOwnerProcess.pid;
+  assert.ok(typeof pid === 'number');
+});
+await fs.writeFile(staleApplyLockPath, JSON.stringify({
+  kind: 'frontier.swarm-codex.autonomous-apply-lock',
+  version: 1,
+  token: 'dead-owner-token',
+  pid: deadOwnerPid,
+  cwd: staleApplyLockRepo,
+  dryRun: false,
+  acquiredAt: Date.now(),
+  expiresAt: Date.now() + 60_000
+}, null, 2) + '\n');
+const staleApplyLockResult = await autonomousApplyCodexSwarmRun({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: staleApplyLockRepo,
+  outDir: path.join(tmp, 'autonomous-stale-apply-lock-out'),
+  lockPath: staleApplyLockPath,
+  lockTimeoutMs: 0,
+  lockStaleMs: 60_000
+});
+assert.strictEqual(staleApplyLockResult.ok, true);
+assert.strictEqual(staleApplyLockResult.summary.applied, 1);
+assert.strictEqual(staleApplyLockResult.summary.lockRecoveryCount, 1);
+assert.strictEqual(staleApplyLockResult.lockRecoveries.length, 1);
+assert.strictEqual(staleApplyLockResult.lockRecoveries[0].reason, 'owner-pid-gone');
+assert.strictEqual(staleApplyLockResult.lockRecoveries[0].previous.pid, deadOwnerPid);
+assert.strictEqual(staleApplyLockResult.lockRecoveries[0].previous.token, 'dead-owner-token');
+assert.strictEqual(staleApplyLockResult.lockRecoveries[0].ownerProbe.status, 'gone');
+assert.strictEqual(staleApplyLockResult.decisions[0].status, 'applied');
+assert.deepStrictEqual(staleApplyLockResult.decisions[0].lockRecoveries, staleApplyLockResult.lockRecoveries);
+assert.strictEqual(await fs.readFile(path.join(staleApplyLockRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+assert.strictEqual(await exists(staleApplyLockPath), false);
+const staleApplyLockArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'autonomous-stale-apply-lock-out', 'autonomous-apply.json'), 'utf8'));
+assert.deepStrictEqual(staleApplyLockArtifact.lockRecoveries, staleApplyLockResult.lockRecoveries);
+assert.strictEqual(staleApplyLockArtifact.summary.lockRecoveryCount, 1);
+const staleApplyLockDecisionLines = (await fs.readFile(staleApplyLockResult.decisionLogPath, 'utf8')).trim().split(/\r?\n/);
+assert.strictEqual(JSON.parse(staleApplyLockDecisionLines[0]).lockRecoveries[0].reason, 'owner-pid-gone');
+
+const liveApplyLockRepo = await createApplyFixtureRepo(tmp, 'autonomous-live-apply-lock-repo');
+const liveApplyLockPath = path.join(tmp, 'autonomous-live-apply.lock');
+await fs.writeFile(liveApplyLockPath, JSON.stringify({
+  kind: 'frontier.swarm-codex.autonomous-apply-lock',
+  version: 1,
+  token: 'live-owner-token',
+  pid: process.pid,
+  cwd: liveApplyLockRepo,
+  dryRun: false,
+  acquiredAt: Date.now(),
+  expiresAt: Date.now() + 60_000
+}, null, 2) + '\n');
+await assert.rejects(
+  () => autonomousApplyCodexSwarmRun({
+    collection: path.join(tmp, 'ready-collection'),
+    cwd: liveApplyLockRepo,
+    outDir: path.join(tmp, 'autonomous-live-apply-lock-out'),
+    lockPath: liveApplyLockPath,
+    lockTimeoutMs: 0,
+    lockStaleMs: 60_000
+  }),
+  /timed out waiting for autonomous apply lock/
+);
+const liveApplyLockReadback = JSON.parse(await fs.readFile(liveApplyLockPath, 'utf8'));
+assert.strictEqual(liveApplyLockReadback.token, 'live-owner-token');
+assert.strictEqual(liveApplyLockReadback.pid, process.pid);
+assert.strictEqual(await fs.readFile(path.join(liveApplyLockRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+assert.strictEqual(await exists(path.join(tmp, 'autonomous-live-apply-lock-out', 'autonomous-apply.json')), false);
+
+const expiredLiveApplyLockRepo = await createApplyFixtureRepo(tmp, 'autonomous-expired-live-apply-lock-repo');
+const expiredLiveApplyLockPath = path.join(tmp, 'autonomous-expired-live-apply.lock');
+await fs.writeFile(expiredLiveApplyLockPath, JSON.stringify({
+  kind: 'frontier.swarm-codex.autonomous-apply-lock',
+  version: 1,
+  token: 'expired-live-owner-token',
+  pid: process.pid,
+  cwd: expiredLiveApplyLockRepo,
+  dryRun: false,
+  acquiredAt: Date.now() - 120_000,
+  expiresAt: Date.now() - 60_000
+}, null, 2) + '\n');
+await assert.rejects(
+  () => autonomousApplyCodexSwarmRun({
+    collection: path.join(tmp, 'ready-collection'),
+    cwd: expiredLiveApplyLockRepo,
+    outDir: path.join(tmp, 'autonomous-expired-live-apply-lock-out'),
+    lockPath: expiredLiveApplyLockPath,
+    lockTimeoutMs: 0,
+    lockStaleMs: 1_000
+  }),
+  /timed out waiting for autonomous apply lock/
+);
+const expiredLiveApplyLockReadback = JSON.parse(await fs.readFile(expiredLiveApplyLockPath, 'utf8'));
+assert.strictEqual(expiredLiveApplyLockReadback.token, 'expired-live-owner-token');
+assert.strictEqual(expiredLiveApplyLockReadback.pid, process.pid);
+assert.strictEqual(await fs.readFile(path.join(expiredLiveApplyLockRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+assert.strictEqual(await exists(path.join(tmp, 'autonomous-expired-live-apply-lock-out', 'autonomous-apply.json')), false);
 
 const readbackSupersedeRepo = await createApplyFixtureRepo(tmp, 'autonomous-readback-supersede-repo');
 await fs.writeFile(path.join(readbackSupersedeRepo, 'src', 'first.ts'), 'old-first\n');
