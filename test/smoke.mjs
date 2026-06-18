@@ -2395,6 +2395,7 @@ const autoDrainCommitRerunManifestPath = path.join(autoDrainCommitRerunOutDir, '
 const autoDrainCommitRerunManifest = JSON.parse(await fs.readFile(autoDrainCommitRerunManifestPath, 'utf8'));
 const autoDrainCommitRerunHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: autoDrainCommitRerunRepo })).stdout.trim();
 assert.strictEqual(autoDrainCommitRerunManifest.kind, FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND);
+assert.deepStrictEqual(autoDrainCommitRerunManifest.tasks, autoDrainCommitRerunManifest.items);
 assert.strictEqual(autoDrainCommitRerunManifest.currentHead, autoDrainCommitRerunHead);
 assert.strictEqual(autoDrainCommitRerunManifest.sourceHead, autoDrainCommitRerunHead);
 assert.deepStrictEqual(autoDrainCommitRerunManifest.sourceHeads, [autoDrainCommitRerunHead]);
@@ -2426,6 +2427,12 @@ assert.deepStrictEqual(autoDrainCommitRerunTask.verification, [{
   args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='second-commit\\n') process.exit(1);"],
   required: true
 }]);
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.lane, 'apply');
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.layer, 'merge');
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.compute, 'codex.deep');
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.priority, 17);
+assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.concurrencyKey, 'auto-drain-commit-rerun:apply-second-commit-task');
+assert.deepStrictEqual(autoDrainCommitRerunTask.metadata.rerun.verification, autoDrainCommitRerunTask.verification);
 assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.id, 'apply-second-commit-task');
 assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.lane, 'apply');
 assert.strictEqual(autoDrainCommitRerunTask.metadata.rerun.sourceTask.layer, 'merge');
@@ -3598,12 +3605,17 @@ const autoDrainConflictBlockedRepo = await createApplyFixtureRepo(tmp, 'auto-dra
 const autoDrainConflictBlockedPlan = createCodexSwarmPlan({
   manifest: {
     id: 'auto-drain-conflict-blocked',
-    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }],
+    layers: [{ id: 'scheduler' }]
   },
   tasks: {
     items: [{
       id: 'conflict-blocked-task',
       lane: 'apply',
+      layer: 'scheduler',
+      compute: 'codex.deep',
+      priority: 42,
+      concurrencyKey: 'auto-drain-conflict-blocked:conflict-blocked-task',
       ownedFiles: ['src/apply.ts'],
       verification: [{
         name: 'worker-sees-new',
@@ -3720,6 +3732,19 @@ assert.strictEqual(autoDrainConflictBlockedRun.autoDrainArtifacts.rerunManifest.
 assert.strictEqual(autoDrainConflictBlockedRun.autoDrainArtifacts.rerunManifest.sourceHead, autoDrainConflictBlockedDecision.headBefore);
 const autoDrainConflictBlockedRerunTask = autoDrainConflictBlockedManifest.items[0];
 assert.strictEqual(autoDrainConflictBlockedRerunTask.id, 'conflict-blocked-task-rerun-current-head');
+assert.deepStrictEqual(autoDrainConflictBlockedManifest.tasks, autoDrainConflictBlockedManifest.items);
+assert.strictEqual(autoDrainConflictBlockedRerunTask.lane, 'apply');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.layer, 'scheduler');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.compute, 'codex.deep');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.priority, 42);
+assert.strictEqual(autoDrainConflictBlockedRerunTask.concurrencyKey, 'auto-drain-conflict-blocked:conflict-blocked-task');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.verification[0].name, 'worker-sees-new');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.lane, 'apply');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.layer, 'scheduler');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.compute, 'codex.deep');
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.priority, 42);
+assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.concurrencyKey, 'auto-drain-conflict-blocked:conflict-blocked-task');
+assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.verification, autoDrainConflictBlockedRerunTask.verification);
 assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.originalJobId, autoDrainConflictBlockedDecision.jobId);
 assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.originalTaskId, 'conflict-blocked-task');
 assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourceKinds, ['conflict-blocked']);
@@ -3736,6 +3761,21 @@ assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(autoDrainConflic
 assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(path.join(autoDrainConflictBlockedRun.autoDrain.iterations[0].apply.outDir, 'autonomous-apply.json')));
 assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(path.join(autoDrainConflictBlockedRun.autoDrain.iterations[0].apply.outDir, 'autonomous-queue-overlay.json')));
 assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainConflictBlockedManifest).map((task) => task.targetRefs), [['src/apply.ts']]);
+assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainConflictBlockedManifest).map((task) => ({
+  lane: task.lane,
+  layer: task.layer,
+  compute: task.compute,
+  priority: task.priority,
+  concurrencyKey: task.concurrencyKey,
+  verificationName: task.verification[0].name
+})), [{
+  lane: 'apply',
+  layer: 'scheduler',
+  compute: 'codex.deep',
+  priority: 42,
+  concurrencyKey: 'auto-drain-conflict-blocked:conflict-blocked-task',
+  verificationName: 'worker-sees-new'
+}]);
 
 const collapsedDecisionOutDir = path.join(tmp, 'collapsed-decision-dashboard');
 const collapsedDecisionArtifacts = createSyntheticAutoDrainArtifacts(collapsedDecisionOutDir);
@@ -4043,7 +4083,18 @@ const openRerunEntry = createSyntheticCollectedRerunEntry(collapsedDecisionOutDi
   jobId: 'open-rerun-old-job',
   taskId: 'open-rerun-task',
   queueItemIds: ['open-rerun-task'],
-  changedPaths: ['src/open-rerun.ts']
+  changedPaths: ['src/open-rerun.ts'],
+  lane: 'rerun-lifecycle',
+  layer: 'scheduler',
+  compute: 'codex.deep',
+  priority: 23,
+  concurrencyKey: 'open-rerun-task-key',
+  verification: [{
+    name: 'open-rerun-verify',
+    command: 'npm',
+    args: ['test'],
+    required: true
+  }]
 });
 const openDecisionPatchPath = path.join(collapsedDecisionOutDir, 'apply-01', 'open-rerun-job', 'changes.patch');
 const openDecisionBundlePath = path.join(collapsedDecisionOutDir, 'apply-01', 'open-rerun-job', 'merge.json');
@@ -4189,6 +4240,19 @@ assert.strictEqual(collapsedDecisionManifest.summary.decisionRerunCount, 1);
 assert.strictEqual(collapsedDecisionManifest.summary.conflictBlockedCount, 0);
 const collapsedDecisionManifestTask = collapsedDecisionManifest.items[0];
 assert.strictEqual(collapsedDecisionManifestTask.id, 'open-rerun-task-rerun-current-head');
+assert.deepStrictEqual(collapsedDecisionManifest.tasks, collapsedDecisionManifest.items);
+assert.strictEqual(collapsedDecisionManifestTask.lane, 'rerun-lifecycle');
+assert.strictEqual(collapsedDecisionManifestTask.layer, 'scheduler');
+assert.strictEqual(collapsedDecisionManifestTask.compute, 'codex.deep');
+assert.strictEqual(collapsedDecisionManifestTask.priority, 23);
+assert.strictEqual(collapsedDecisionManifestTask.concurrencyKey, 'open-rerun-task-key');
+assert.strictEqual(collapsedDecisionManifestTask.verification[0].name, 'open-rerun-verify');
+assert.strictEqual(collapsedDecisionManifestTask.metadata.rerun.lane, 'rerun-lifecycle');
+assert.strictEqual(collapsedDecisionManifestTask.metadata.rerun.layer, 'scheduler');
+assert.strictEqual(collapsedDecisionManifestTask.metadata.rerun.compute, 'codex.deep');
+assert.strictEqual(collapsedDecisionManifestTask.metadata.rerun.priority, 23);
+assert.strictEqual(collapsedDecisionManifestTask.metadata.rerun.concurrencyKey, 'open-rerun-task-key');
+assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.verification, collapsedDecisionManifestTask.verification);
 assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.sourceKinds, ['decision-rerun']);
 assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.sourcePatchPaths, [openDecisionPatchPath]);
 assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.sourceBundlePaths, [openDecisionBundlePath]);
@@ -5113,7 +5177,23 @@ function createSyntheticCollectedRerunEntry(root, overrides = {}) {
       changedRegions,
       reasons: overrides.reasons ?? ['stale-against-head'],
       evidencePaths: overrides.evidencePaths ?? [path.join(root, 'workers', jobId, 'evidence.json')],
-      allowedWrites: overrides.allowedWrites ?? changedPaths
+      allowedWrites: overrides.allowedWrites ?? changedPaths,
+      metadata: overrides.metadata ?? {
+        frontierSwarmCodex: {
+          sourceTask: {
+            id: taskId,
+            lane: overrides.lane ?? 'rerun-lifecycle',
+            ...(overrides.layer ? { layer: overrides.layer } : {}),
+            ...(overrides.compute ? { compute: overrides.compute } : {}),
+            ...(typeof overrides.priority === 'number' ? { priority: overrides.priority } : {}),
+            ...(overrides.concurrencyKey ? { concurrencyKey: overrides.concurrencyKey } : {}),
+            targetRefs: changedPaths,
+            allowedWrites: overrides.allowedWrites ?? changedPaths,
+            changedRegions,
+            verification: overrides.verification ?? []
+          }
+        }
+      }
     }
   };
 }
