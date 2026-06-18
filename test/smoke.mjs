@@ -280,6 +280,16 @@ assert.strictEqual(normalizedUncachedUsage.uncachedInputTokens, 700);
 const knownCost = estimateCodexRunCost(normalizedUsage);
 assert.strictEqual(knownCost.estimated, true);
 assert.strictEqual(knownCost.estimatedCostUsd, 0.0107);
+const uncachedInputOnlyCost = estimateCodexRunCost({ model: 'gpt-5.5', inputTokens: 1000 });
+assert.strictEqual(uncachedInputOnlyCost.estimated, true);
+assert.strictEqual(uncachedInputOnlyCost.uncachedInputCostUsd, 0.005);
+assert.strictEqual(uncachedInputOnlyCost.outputCostUsd, 0);
+assert.strictEqual(uncachedInputOnlyCost.estimatedCostUsd, 0.005);
+const cachedInputOnlyCost = estimateCodexRunCost({ model: 'gpt-5.5', inputTokens: 1000, cachedInputTokens: 1000 });
+assert.strictEqual(cachedInputOnlyCost.estimated, true);
+assert.strictEqual(cachedInputOnlyCost.cachedInputCostUsd, 0.0005);
+assert.strictEqual(cachedInputOnlyCost.uncachedInputCostUsd, 0);
+assert.strictEqual(cachedInputOnlyCost.estimatedCostUsd, 0.0005);
 assert.strictEqual(FRONTIER_SWARM_CODEX_MODEL_PRICING['gpt-5.5'].inputUsdPerUnit, 5);
 assert.strictEqual(FRONTIER_SWARM_CODEX_MODEL_PRICING['gpt-5.5'].cachedInputUsdPerUnit, 0.5);
 assert.strictEqual(FRONTIER_SWARM_CODEX_MODEL_PRICING['gpt-5.5'].outputUsdPerUnit, 30);
@@ -450,12 +460,13 @@ assert.strictEqual(dashboard.costSummary.kind, 'frontier.swarm-codex.dashboard-c
 assert.strictEqual(dashboard.costSummary.jobsWithTokenUsage, 1);
 assert.strictEqual(dashboard.costSummary.estimatedJobCount, 1);
 assert.strictEqual(dashboard.costSummary.unknownPricingJobCount, 0);
+assert.strictEqual(dashboard.costSummary.costEstimateStatus, 'estimated');
 assert.strictEqual(dashboard.costSummary.inputTokens, 1200);
 assert.strictEqual(dashboard.costSummary.cachedInputTokens, 200);
 assert.strictEqual(dashboard.costSummary.uncachedInputTokens, 1000);
 assert.strictEqual(dashboard.costSummary.outputTokens, 300);
 assert.strictEqual(dashboard.costSummary.estimatedCostUsd, 0.0141);
-assert.deepStrictEqual(dashboard.costSummary.byModel.map((entry) => [entry.model, entry.estimatedCostUsd]), [['gpt-5.5', 0.0141]]);
+assert.deepStrictEqual(dashboard.costSummary.byModel.map((entry) => [entry.model, entry.costEstimateStatus, entry.estimatedCostUsd]), [['gpt-5.5', 'estimated', 0.0141]]);
 assert.deepStrictEqual(dashboard.operatorSummary, dashboard.queueMetadata.operatorSummary);
 assert.strictEqual(dashboard.operatorSummary.kind, 'frontier.swarm-codex.dashboard-operator-queue');
 assert.strictEqual(dashboard.operatorSummary.available, dashboard.queueMetadata.available);
@@ -600,11 +611,23 @@ const unknownPricingDashboard = JSON.parse(await fs.readFile(path.join(tmp, 'unk
 assert.strictEqual(unknownPricingDashboard.costSummary.jobsWithTokenUsage, 1);
 assert.strictEqual(unknownPricingDashboard.costSummary.estimatedJobCount, 0);
 assert.strictEqual(unknownPricingDashboard.costSummary.unknownPricingJobCount, 1);
+assert.strictEqual(unknownPricingDashboard.costSummary.costEstimateStatus, 'unknown-pricing');
+assert.strictEqual(Object.hasOwn(unknownPricingDashboard.costSummary, 'estimatedCostUsd'), false);
 assert.deepStrictEqual(unknownPricingDashboard.costSummary.unknownPricing, [{
   jobId: unknownPricingRun.run.results[0].jobId,
   model: 'future-codex-model',
   reason: 'unknown-model-pricing'
 }]);
+assert.deepStrictEqual(
+  unknownPricingDashboard.costSummary.byModel.map((entry) => [
+    entry.model,
+    entry.costEstimateStatus,
+    entry.unknownPricingJobCount,
+    entry.unknownPricingReason,
+    Object.hasOwn(entry, 'estimatedCostUsd')
+  ]),
+  [['future-codex-model', 'unknown-pricing', 1, 'unknown-model-pricing', false]]
+);
 const activeCostDashboardPath = path.join(tmp, 'active-cost-dashboard.json');
 await writeSwarmCoordinatorSnapshot(activeCostDashboardPath, {
   ok: true,
@@ -663,13 +686,21 @@ assert.strictEqual(activeCostDashboard.costSummary.jobCount, 3);
 assert.strictEqual(activeCostDashboard.costSummary.jobsWithTokenUsage, 3);
 assert.strictEqual(activeCostDashboard.costSummary.estimatedJobCount, 2);
 assert.strictEqual(activeCostDashboard.costSummary.unknownPricingJobCount, 1);
+assert.strictEqual(activeCostDashboard.costSummary.costEstimateStatus, 'partial');
 assert.strictEqual(activeCostDashboard.costSummary.estimatedCostUsd, 0.02165);
 assert.deepStrictEqual(activeCostDashboard.costSummary.missingUsageJobIds, []);
 assert.deepStrictEqual(
-  activeCostDashboard.costSummary.byModel.map((entry) => [entry.model, entry.jobCount, entry.estimatedJobCount, entry.estimatedCostUsd]),
+  activeCostDashboard.costSummary.byModel.map((entry) => [
+    entry.model,
+    entry.jobCount,
+    entry.estimatedJobCount,
+    entry.unknownPricingJobCount,
+    entry.costEstimateStatus,
+    Object.hasOwn(entry, 'estimatedCostUsd') ? entry.estimatedCostUsd : 'unknown'
+  ]),
   [
-    ['future-codex-model', 1, 0, 0],
-    ['gpt-5.5', 2, 2, 0.02165]
+    ['future-codex-model', 1, 0, 1, 'unknown-pricing', 'unknown'],
+    ['gpt-5.5', 2, 2, 0, 'estimated', 0.02165]
   ]
 );
 assert.deepStrictEqual(activeCostDashboard.costSummary.unknownPricing, [{

@@ -414,6 +414,8 @@ export interface FrontierCodexRunCostEstimate {
   pricing?: FrontierCodexModelPricing;
 }
 
+export type FrontierCodexDashboardCostEstimateStatus = 'estimated' | 'partial' | 'unknown-pricing' | 'unestimated';
+
 export interface FrontierCodexResourceAllocation {
   capabilities: string[];
   resources: Record<string, number>;
@@ -1875,12 +1877,16 @@ export interface FrontierCodexDashboardCostModelSummary {
   model: string;
   jobCount: number;
   estimatedJobCount: number;
+  unknownPricingJobCount: number;
+  unestimatedJobCount: number;
+  costEstimateStatus: FrontierCodexDashboardCostEstimateStatus;
+  unknownPricingReason?: FrontierCodexCostEstimateReason;
   inputTokens: number;
   cachedInputTokens: number;
   uncachedInputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  estimatedCostUsd: number;
+  estimatedCostUsd?: number;
 }
 
 export interface FrontierCodexDashboardCostUnknownPricing {
@@ -1908,11 +1914,12 @@ export interface FrontierCodexDashboardCostSummary {
   uncachedInputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  inputCostUsd: number;
-  cachedInputCostUsd: number;
-  uncachedInputCostUsd: number;
-  outputCostUsd: number;
-  estimatedCostUsd: number;
+  costEstimateStatus: FrontierCodexDashboardCostEstimateStatus;
+  inputCostUsd?: number;
+  cachedInputCostUsd?: number;
+  uncachedInputCostUsd?: number;
+  outputCostUsd?: number;
+  estimatedCostUsd?: number;
   byModel: FrontierCodexDashboardCostModelSummary[];
   unknownPricing: FrontierCodexDashboardCostUnknownPricing[];
   missingUsageJobIds: string[];
@@ -4576,11 +4583,7 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
     uncachedInputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
-    inputCostUsd: 0,
-    cachedInputCostUsd: 0,
-    uncachedInputCostUsd: 0,
-    outputCostUsd: 0,
-    estimatedCostUsd: 0,
+    costEstimateStatus: 'unestimated',
     byModel: [],
     unknownPricing,
     missingUsageJobIds
@@ -4605,12 +4608,14 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
       model,
       jobCount: 0,
       estimatedJobCount: 0,
+      unknownPricingJobCount: 0,
+      unestimatedJobCount: 0,
+      costEstimateStatus: 'unestimated' as const,
       inputTokens: 0,
       cachedInputTokens: 0,
       uncachedInputTokens: 0,
       outputTokens: 0,
-      totalTokens: 0,
-      estimatedCostUsd: 0
+      totalTokens: 0
     };
     modelSummary.jobCount += 1;
     modelSummary.inputTokens += metrics.inputTokens;
@@ -4621,15 +4626,20 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
     if (estimate?.estimated) {
       summary.estimatedJobCount += 1;
       modelSummary.estimatedJobCount += 1;
-      summary.inputCostUsd = roundUsd(summary.inputCostUsd + (estimate.inputCostUsd ?? 0));
-      summary.cachedInputCostUsd = roundUsd(summary.cachedInputCostUsd + (estimate.cachedInputCostUsd ?? 0));
-      summary.uncachedInputCostUsd = roundUsd(summary.uncachedInputCostUsd + (estimate.uncachedInputCostUsd ?? 0));
-      summary.outputCostUsd = roundUsd(summary.outputCostUsd + (estimate.outputCostUsd ?? 0));
-      summary.estimatedCostUsd = roundUsd(summary.estimatedCostUsd + (estimate.estimatedCostUsd ?? 0));
-      modelSummary.estimatedCostUsd = roundUsd(modelSummary.estimatedCostUsd + (estimate.estimatedCostUsd ?? 0));
+      summary.inputCostUsd = roundUsd((summary.inputCostUsd ?? 0) + (estimate.inputCostUsd ?? 0));
+      summary.cachedInputCostUsd = roundUsd((summary.cachedInputCostUsd ?? 0) + (estimate.cachedInputCostUsd ?? 0));
+      summary.uncachedInputCostUsd = roundUsd((summary.uncachedInputCostUsd ?? 0) + (estimate.uncachedInputCostUsd ?? 0));
+      summary.outputCostUsd = roundUsd((summary.outputCostUsd ?? 0) + (estimate.outputCostUsd ?? 0));
+      summary.estimatedCostUsd = roundUsd((summary.estimatedCostUsd ?? 0) + (estimate.estimatedCostUsd ?? 0));
+      modelSummary.estimatedCostUsd = roundUsd((modelSummary.estimatedCostUsd ?? 0) + (estimate.estimatedCostUsd ?? 0));
     } else {
       const reason = estimate?.reason ?? 'unknown-model-pricing';
-      if (reason === 'unknown-model-pricing' || reason === 'missing-model') summary.unknownPricingJobCount += 1;
+      modelSummary.unestimatedJobCount += 1;
+      if (reason === 'unknown-model-pricing' || reason === 'missing-model') {
+        summary.unknownPricingJobCount += 1;
+        modelSummary.unknownPricingJobCount += 1;
+        modelSummary.unknownPricingReason ??= reason;
+      }
       unknownPricing.push({
         jobId: item.jobId,
         ...(model !== 'unknown' ? { model } : {}),
@@ -4637,6 +4647,26 @@ function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDa
       });
     }
     byModel.set(model, modelSummary);
+  }
+  for (const modelSummary of byModel.values()) {
+    if (modelSummary.estimatedJobCount > 0 && modelSummary.unestimatedJobCount === 0) {
+      modelSummary.costEstimateStatus = 'estimated';
+    } else if (modelSummary.estimatedJobCount > 0) {
+      modelSummary.costEstimateStatus = 'partial';
+    } else if (modelSummary.unknownPricingJobCount > 0) {
+      modelSummary.costEstimateStatus = 'unknown-pricing';
+    } else {
+      modelSummary.costEstimateStatus = 'unestimated';
+    }
+  }
+  if (summary.jobsWithTokenUsage > 0 && summary.estimatedJobCount === summary.jobsWithTokenUsage) {
+    summary.costEstimateStatus = 'estimated';
+  } else if (summary.estimatedJobCount > 0) {
+    summary.costEstimateStatus = 'partial';
+  } else if (summary.unknownPricingJobCount > 0) {
+    summary.costEstimateStatus = 'unknown-pricing';
+  } else {
+    summary.costEstimateStatus = 'unestimated';
   }
   summary.byModel = Array.from(byModel.values()).sort((left, right) => left.model.localeCompare(right.model));
   summary.unknownPricing = unknownPricing.sort((left, right) => left.jobId.localeCompare(right.jobId));
