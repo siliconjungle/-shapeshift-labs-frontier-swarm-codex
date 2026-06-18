@@ -273,7 +273,7 @@ assert.deepStrictEqual(
   [
     ['coordinator-queues', ['queueHealth.activeCoordinatorQueueCount', 'queueHealth.leaseCount', 'queueHealth.lockKeyCount']],
     ['applied-decisions', ['queueHealth.appliedDecisionCount', 'queueHealth.committedDecisionCount', 'queueHealth.recordOnlyCount']],
-    ['stale-rerun', ['queueHealth.staleOrRerunCount', 'queueHealth.staleCount', 'queueHealth.rerunCount', 'queueHealth.conflictBlockedDecisionCount']],
+    ['stale-rerun', ['queueHealth.staleOrRerunCount', 'queueHealth.staleCount', 'queueHealth.rerunCount', 'queueHealth.conflictBlockedDecisionCount', 'queueHealth.conflictRetryWork']],
     ['true-blockers', ['queueHealth.trueBlockerCount', 'humanQuestions.count']],
     ['coordinator-review-artifacts', ['queueHealth.coordinatorReviewCount', 'queueHealth.coordinatorReviewAssignmentCount', 'queueHealth.coordinatorReviewTaskCount']]
   ]
@@ -1515,7 +1515,8 @@ const autoDrainConflictBlockedRun = await runCodexSwarm(autoDrainConflictBlocked
 });
 assert.strictEqual(autoDrainConflictBlockedRun.autoDrain.summary.blockedCount, 0);
 assert.strictEqual(autoDrainConflictBlockedRun.autoDrain.summary.conflictBlockedCount, 1);
-assert.strictEqual(autoDrainConflictBlockedRun.autoDrain.iterations[0].apply.decisions[0].status, 'conflict-blocked');
+const autoDrainConflictBlockedDecision = autoDrainConflictBlockedRun.autoDrain.iterations[0].apply.decisions[0];
+assert.strictEqual(autoDrainConflictBlockedDecision.status, 'conflict-blocked');
 const autoDrainConflictBlockedDashboard = JSON.parse(await fs.readFile(path.join(autoDrainConflictBlockedOutDir, 'coordinator-dashboard.json'), 'utf8'));
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.rerunCount, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
@@ -1528,14 +1529,25 @@ assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.r
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.staleOrRerunCount, 1);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 1);
+assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork, autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.conflictRetryWork);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork.length, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].jobId, autoDrainConflictBlockedDecision.jobId);
+assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].queueItemIds, ['conflict-blocked-task']);
+assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].queueKeys, ['queue:conflict-blocked-task']);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].patchPath, autoDrainConflictBlockedDecision.patchPath);
+assert.ok(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].patchPath.endsWith('changes.patch'));
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.status, 'warning');
-assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /1 stale or rerun item/);
+assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /1 current-head conflict/);
+assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /coordinator retry work/);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 1);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
 const autoDrainConflictBlockedCards = new Map(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
 assert.strictEqual(autoDrainConflictBlockedCards.get('stale-rerun').value, 1);
 assert.strictEqual(autoDrainConflictBlockedCards.get('stale-rerun').status, 'warning');
+assert.match(autoDrainConflictBlockedCards.get('stale-rerun').detail, /retry queue conflict-blocked-task/);
+assert.match(autoDrainConflictBlockedCards.get('stale-rerun').detail, /changes\.patch/);
+assert.ok(autoDrainConflictBlockedCards.get('stale-rerun').sourceFields.includes('queueHealth.conflictRetryWork'));
 assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').value, 0);
 assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').status, 'ok');
 
@@ -1684,6 +1696,8 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committe
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.rerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
+assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictRetryWork, []);
+assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.conflictRetryWork, []);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.rerunCount, 0);

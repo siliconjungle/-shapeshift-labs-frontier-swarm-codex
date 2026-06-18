@@ -1067,6 +1067,7 @@ export interface FrontierCodexDashboardQueueMetadata {
     conflictBlockedDecisionCount: number;
     recordOnlyCount: number;
   };
+  conflictRetryWork: FrontierCodexDashboardConflictRetryWork[];
   bucketCounts: {
     readyToApplyCount: number;
     needsHumanPortCount: number;
@@ -1077,6 +1078,19 @@ export interface FrontierCodexDashboardQueueMetadata {
   queueHealth: FrontierCodexDashboardQueueHealth;
   humanQuestions: FrontierCodexDashboardHumanQuestions;
   operatorSummary: FrontierCodexDashboardOperatorQueueSummary;
+}
+
+export interface FrontierCodexDashboardConflictRetryWork {
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  patchPath?: string;
+  bundlePath: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  reason: string;
+  finishedAt: number;
 }
 
 export interface FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata {
@@ -1119,6 +1133,7 @@ export interface FrontierCodexDashboardQueueHealth {
   staleCount: number;
   rerunCount: number;
   conflictBlockedDecisionCount: number;
+  conflictRetryWork: FrontierCodexDashboardConflictRetryWork[];
   trueBlockerCount: number;
   rejectedCount: number;
   recordOnlyCount: number;
@@ -3188,6 +3203,7 @@ function createDashboardQueueMetadata(
     + decisionSummary.rerunDecisionCount
     + decisionSummary.conflictBlockedDecisionCount;
   const humanQuestions = createDashboardHumanQuestions(autoDrain, decisionSummary);
+  const conflictRetryWork = decisionSummary.conflictRetryWork;
   const queueHealth: FrontierCodexDashboardQueueHealth = {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION,
@@ -3205,6 +3221,7 @@ function createDashboardQueueMetadata(
     staleCount,
     rerunCount,
     conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount,
+    conflictRetryWork,
     trueBlockerCount: actionCounts.trueBlockerCount,
     rejectedCount: actionCounts.rejectCount,
     recordOnlyCount: actionCounts.recordOnlyCount,
@@ -3237,6 +3254,7 @@ function createDashboardQueueMetadata(
       ...actionCounts,
       conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount
     },
+    conflictRetryWork,
     bucketCounts: {
       readyToApplyCount: artifacts?.grouping.readyToApplyCount ?? 0,
       needsHumanPortCount: artifacts?.grouping.needsHumanPortCount ?? 0,
@@ -3503,6 +3521,10 @@ function createDashboardOperatorQueueSummary(
   const coordinatorQueueAction = collectOnly?.reason === 'dirty-worktree'
     ? 'Clean or isolate dirty paths, then rerun auto-drain apply for queued coordinator work.'
     : 'Inspect queue artifacts when work is waiting for autonomous coordination.';
+  const conflictRetryDetail = formatDashboardConflictRetryWorkDetail(queueHealth.conflictRetryWork);
+  const staleRerunAction = queueHealth.conflictRetryWork.length > 0
+    ? 'Rerun or rebase current-head conflict work from the listed queue ids and patch paths before asking a human.'
+    : 'Refresh stale workers or resolve current-head conflicts before asking a human.';
   return {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION,
@@ -3534,10 +3556,10 @@ function createDashboardOperatorQueueSummary(
         id: 'stale-rerun',
         label: 'Stale or rerun work',
         value: queueHealth.staleOrRerunCount,
-        detail: `${queueHealth.staleCount} stale, ${queueHealth.rerunCount} rerun, ${queueHealth.conflictBlockedDecisionCount} current-head conflicts`,
+        detail: `${queueHealth.staleCount} stale, ${queueHealth.rerunCount} rerun, ${queueHealth.conflictBlockedDecisionCount} current-head conflicts${conflictRetryDetail}`,
         status: queueHealth.staleOrRerunCount > 0 ? 'warning' : 'ok',
-        action: 'Refresh stale workers or resolve current-head conflicts before asking a human.',
-        sourceFields: ['queueHealth.staleOrRerunCount', 'queueHealth.staleCount', 'queueHealth.rerunCount', 'queueHealth.conflictBlockedDecisionCount']
+        action: staleRerunAction,
+        sourceFields: ['queueHealth.staleOrRerunCount', 'queueHealth.staleCount', 'queueHealth.rerunCount', 'queueHealth.conflictBlockedDecisionCount', 'queueHealth.conflictRetryWork']
       },
       {
         id: 'true-blockers',
@@ -3587,6 +3609,9 @@ function createDashboardOperatorQueueHeadline(
     return `${formatDashboardOperatorQueueCount(queueHealth.activeCoordinatorQueueCount, 'coordinator queue item')} collected; apply is waiting for a clean worktree (${formatDashboardOperatorQueueCount(collectOnly.dirtyPathCount, 'dirty path')}).`;
   }
   if (status === 'warning') {
+    if (queueHealth.conflictBlockedDecisionCount > 0) {
+      return `${formatDashboardOperatorQueueCount(queueHealth.conflictBlockedDecisionCount, 'current-head conflict')} included in ${formatDashboardOperatorQueueCount(queueHealth.staleOrRerunCount, 'stale or rerun item')} should be rerun or rebased as coordinator retry work.`;
+    }
     return `${queueHealth.staleOrRerunCount} stale or rerun item${queueHealth.staleOrRerunCount === 1 ? '' : 's'} should be collapsed or retried.`;
   }
   if (queueHealth.appliedDecisionCount > 0) {
@@ -3610,11 +3635,21 @@ function formatDashboardOperatorQueueCount(count: number, singular: string): str
   return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
+function formatDashboardConflictRetryWorkDetail(work: readonly FrontierCodexDashboardConflictRetryWork[]): string {
+  if (!work.length) return '';
+  const first = work[0];
+  const queueId = first.queueItemIds[0] ?? first.taskId ?? first.jobId;
+  const patchPath = first.patchPath ?? first.bundlePath;
+  const more = work.length > 1 ? ` (+${work.length - 1} more)` : '';
+  return `; retry queue ${queueId} from ${patchPath}${more}`;
+}
+
 function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAutoDrainResult | null): {
   appliedDecisionCount: number;
   committedDecisionCount: number;
   rerunDecisionCount: number;
   conflictBlockedDecisionCount: number;
+  conflictRetryWork: FrontierCodexDashboardConflictRetryWork[];
   humanQuestionDecisionCount: number;
   humanQuestionJobIds: string[];
   humanQuestionTaskIds: string[];
@@ -3622,15 +3657,33 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
 } {
   const decisions = latestDashboardAutonomousDecisions((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
   const humanQuestionDecisions = decisions.filter(dashboardAutonomousDecisionIsExplicitHumanQuestion);
+  const conflictBlockedDecisions = decisions.filter((decision) => decision.status === 'conflict-blocked');
   return {
     appliedDecisionCount: decisions.filter((decision) => decision.status === 'applied' || decision.status === 'committed').length,
     committedDecisionCount: decisions.filter((decision) => decision.status === 'committed').length,
     rerunDecisionCount: decisions.filter((decision) => decision.status === 'rerun').length,
-    conflictBlockedDecisionCount: decisions.filter((decision) => decision.status === 'conflict-blocked').length,
+    conflictBlockedDecisionCount: conflictBlockedDecisions.length,
+    conflictRetryWork: conflictBlockedDecisions.map(dashboardConflictRetryWorkFromDecision),
     humanQuestionDecisionCount: humanQuestionDecisions.length,
     humanQuestionJobIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.jobId)).sort(),
     humanQuestionTaskIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.taskId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
     humanQuestionReasons: uniqueStrings(humanQuestionDecisions.map((decision) => decision.reason).filter((entry) => entry.length > 0)).sort()
+  };
+}
+
+function dashboardConflictRetryWorkFromDecision(decision: FrontierCodexAutonomousMergeDecision): FrontierCodexDashboardConflictRetryWork {
+  const queueItemIds = uniqueStrings(decision.queueItemIds.filter((entry) => entry.length > 0)).sort();
+  return {
+    jobId: decision.jobId,
+    ...(decision.taskId ? { taskId: decision.taskId } : {}),
+    queueItemIds,
+    queueKeys: dashboardAutonomousDecisionQueueKeys(decision),
+    ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+    bundlePath: decision.bundlePath,
+    changedPaths: [...decision.changedPaths],
+    changedRegions: [...decision.changedRegions],
+    reason: decision.reason,
+    finishedAt: decision.finishedAt
   };
 }
 

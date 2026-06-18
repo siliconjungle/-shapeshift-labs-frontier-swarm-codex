@@ -153,6 +153,22 @@ Every status except `human-blocked` is an automation instruction. Only
 | `failed` | The runner or git workflow failed operationally, such as failing to read HEAD, apply a patch, create a commit, or roll back cleanly. | Inspect command tails, fix the transient/tooling problem or rerun, then replace the queue state with `rerun`, `rejected`, `conflict-blocked`, or `human-blocked` when the cause is known. |
 | `human-blocked` | Automation is not authorized to decide. Use this for ownership violations, bundles that are not marked auto-mergeable, missing parent assignment, or policy/risk conditions that require a human decision. | Pause automation for that queue item and ask the exact human question needed to unblock it. |
 
+## Dashboard Conflict Retry Work
+
+Dashboards must treat latest `conflict-blocked` decisions as coordinator retry
+pressure, not human blockers. The queue metadata exposes this debt in
+`conflictRetryWork` and mirrors it under `queueHealth.conflictRetryWork`.
+Each entry carries the `jobId`, optional `taskId`, `queueItemIds`, derived
+`queueKeys`, `patchPath`, `bundlePath`, changed paths/regions, reason, and
+finish time from the ledger decision.
+
+Operator summaries may warn on current-head conflicts, but the warning should
+name the queue id and source patch path so another coordinator swarm can rerun,
+rebase, or launch a focused conflict-resolution shard. Do not move these entries
+into `humanQuestions`, `trueBlockerCount`, or human-blocker cards unless a later
+`human-blocked` decision records an explicit missing authority or policy
+question.
+
 ## Coordinator Workflow States Versus Human Blockers
 
 Queue and collection states are coordinator workflow states. Examples include
