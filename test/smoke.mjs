@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   appendCodexPidManifest,
   applyCodexSwarmCollection,
@@ -294,17 +295,19 @@ assert.ok(browserPrompt.includes('FRONTIER_SWARM_BROWSER_PROFILE_DIR'));
 const result = await runCodexSwarm(plan, {
   outDir: path.join(tmp, 'run'),
   cwd: tmp,
-  semanticImport: true,
+  semanticImport: { enabled: true, maxFiles: 2, maxBytes: 64 },
   dryRun: false,
   executor: async (input) => {
     assert.strictEqual(input.resourceAllocation.env.FRONTIER_SWARM_JOB_ID, input.job.id);
     assert.strictEqual(input.env.FRONTIER_SWARM_TASK_ID, input.job.taskId);
     await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
     await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function action() { return 1; }\n');
+    await fs.writeFile(path.join(tmp, 'src', 'runtime', 'generated.ts'), `export const generated = "${'x'.repeat(128)}";\n`);
+    await fs.writeFile(path.join(tmp, 'src', 'runtime', 'omitted.ts'), 'export const omitted = true;\n');
     await fs.writeFile(input.paths.lastMessagePath, 'done\n');
     return {
       exitCode: 0,
-      changedPaths: ['src/runtime/action.ts'],
+      changedPaths: ['src/runtime/action.ts', 'src/runtime/generated.ts', 'src/runtime/omitted.ts'],
       lastMessage: 'done',
       metrics: {
         inputTokens: 1200,
@@ -356,16 +359,32 @@ const semanticImportsPath = result.run.results[0].evidencePaths.find((entry) => 
 assert.ok(semanticImportsPath);
 const semanticImports = JSON.parse(await fs.readFile(semanticImportsPath, 'utf8'));
 assert.strictEqual(semanticImports.kind, 'frontier.swarm-codex.semantic-imports');
-assert.strictEqual(semanticImports.summary.total, 1);
-assert.strictEqual(semanticImports.summary.selected, 1);
-assert.strictEqual(semanticImports.summary.eligible, 1);
-assert.strictEqual(semanticImports.summary.omitted, 0);
+assert.strictEqual(semanticImports.summary.total, 2);
+assert.strictEqual(semanticImports.summary.selected, 2);
+assert.strictEqual(semanticImports.summary.eligible, 3);
+assert.strictEqual(semanticImports.summary.omitted, 1);
+assert.strictEqual(semanticImports.summary.maxFiles, 2);
+assert.strictEqual(semanticImports.summary.maxBytes, 64);
 assert.strictEqual(semanticImports.summary.imported + semanticImports.summary.errors, 1);
-assert.ok(semanticImports.summary.sourceMapCount >= 1);
-assert.ok(semanticImports.summary.sourceMapMappingCount >= 1);
-assert.ok(semanticImports.summary.lossCount >= 1);
-assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
-assert.ok(semanticImports.summary.readiness['ready-with-losses'] >= 1 || semanticImports.summary.readiness['ready'] >= 1);
+assert.strictEqual(semanticImports.summary.skipped, 1);
+const actionSemanticImport = semanticImports.records.find((record) => record.path === 'src/runtime/action.ts');
+const generatedSemanticImport = semanticImports.records.find((record) => record.path === 'src/runtime/generated.ts');
+assert.ok(actionSemanticImport);
+assert.ok(generatedSemanticImport);
+assert.strictEqual(generatedSemanticImport.status, 'skipped');
+assert.strictEqual(generatedSemanticImport.reason, 'too-large');
+assert.ok(generatedSemanticImport.bytes > semanticImports.summary.maxBytes);
+if (actionSemanticImport.status === 'imported') {
+  assert.ok(semanticImports.summary.sourceMapCount >= 1);
+  assert.ok(semanticImports.summary.sourceMapMappingCount >= 1);
+  assert.ok(semanticImports.summary.lossCount >= 1);
+  assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
+  assert.ok(semanticImports.summary.readiness['ready-with-losses'] >= 1 || semanticImports.summary.readiness['ready'] >= 1);
+} else {
+  assert.strictEqual(actionSemanticImport.status, 'error');
+  assert.strictEqual(actionSemanticImport.reason, 'frontier-lang-unavailable');
+  assert.ok(actionSemanticImport.error);
+}
 assert.strictEqual(result.run.results[0].metadata.codexRunMetrics.inputTokens, 1200);
 assert.strictEqual(result.run.results[0].metadata.codexRunMetrics.cachedInputTokens, 200);
 assert.strictEqual(result.run.results[0].metadata.codexRunMetrics.uncachedInputTokens, 1000);
@@ -377,10 +396,46 @@ const mergeBundlePath = result.run.results[0].evidencePaths.find((entry) => entr
 const mergeBundle = JSON.parse(await fs.readFile(mergeBundlePath, 'utf8'));
 assert.strictEqual(mergeBundle.disposition, 'needs-port');
 assert.deepStrictEqual(mergeBundle.queueItemIds, ['runtime-action']);
-assert.strictEqual(mergeBundle.metadata.semanticImport.total, 1);
-assert.ok(mergeBundle.metadata.semanticImport.sourceMapCount >= 1);
+assert.strictEqual(mergeBundle.metadata.semanticImport.total, 2);
+assert.strictEqual(mergeBundle.metadata.semanticImport.skipped, 1);
+assert.strictEqual(mergeBundle.metadata.semanticImport.maxBytes, 64);
+if (actionSemanticImport.status === 'imported') assert.ok(mergeBundle.metadata.semanticImport.sourceMapCount >= 1);
 assert.strictEqual(mergeBundle.metadata.codexRunMetrics.inputTokens, 1200);
 assert.strictEqual(mergeBundle.metadata.codexCostEstimate.estimatedCostUsd, 0.0141);
+const isolatedCodexDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frontier-swarm-codex-no-lang-'));
+await fs.mkdir(path.join(isolatedCodexDir, 'dist'), { recursive: true });
+await fs.mkdir(path.join(isolatedCodexDir, 'node_modules', '@shapeshift-labs'), { recursive: true });
+await fs.writeFile(path.join(isolatedCodexDir, 'package.json'), JSON.stringify({ type: 'module' }) + '\n');
+await fs.copyFile(new URL('../dist/index.js', import.meta.url), path.join(isolatedCodexDir, 'dist', 'index.js'));
+await fs.symlink(
+  fileURLToPath(new URL('../../frontier-swarm', import.meta.url)),
+  path.join(isolatedCodexDir, 'node_modules', '@shapeshift-labs', 'frontier-swarm'),
+  process.platform === 'win32' ? 'junction' : 'dir'
+);
+const isolatedCodex = await import(`${pathToFileURL(path.join(isolatedCodexDir, 'dist', 'index.js')).href}?no-lang`);
+const missingLangPlan = isolatedCodex.createCodexSwarmPlan({ manifest: manifestInput, tasks: tasksInput });
+const missingLangResult = await isolatedCodex.runCodexSwarm(missingLangPlan, {
+  outDir: path.join(tmp, 'run-no-lang'),
+  cwd: tmp,
+  semanticImport: true,
+  dryRun: false,
+  executor: async (input) => {
+    await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
+    await fs.writeFile(path.join(tmp, 'src', 'runtime', 'no-lang.ts'), 'export const noLang = true;\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'missing optional done\n');
+    return { exitCode: 0, changedPaths: ['src/runtime/no-lang.ts'], lastMessage: 'missing optional done' };
+  }
+});
+assert.strictEqual(missingLangResult.ok, true);
+const missingLangSemanticImportsPath = missingLangResult.run.results[0].evidencePaths.find((entry) => entry.endsWith('semantic-imports.json'));
+assert.ok(missingLangSemanticImportsPath);
+const missingLangSemanticImports = JSON.parse(await fs.readFile(missingLangSemanticImportsPath, 'utf8'));
+assert.strictEqual(missingLangSemanticImports.summary.total, 1);
+assert.strictEqual(missingLangSemanticImports.summary.errors, 1);
+assert.strictEqual(missingLangSemanticImports.records[0].path, 'src/runtime/no-lang.ts');
+assert.strictEqual(missingLangSemanticImports.records[0].status, 'error');
+assert.strictEqual(missingLangSemanticImports.records[0].reason, 'frontier-lang-unavailable');
+assert.ok(missingLangSemanticImports.records[0].error);
 const unknownPricingPlan = createCodexSwarmPlan({
   manifest: {
     id: 'unknown-pricing',

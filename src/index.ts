@@ -153,6 +153,11 @@ const DEFAULT_WORKSPACE_EXCLUDES = [
   'agent-runs',
   'target'
 ];
+const DEFAULT_SEMANTIC_IMPORT_MAX_FILES = 24;
+const DEFAULT_SEMANTIC_IMPORT_MAX_BYTES = 512 * 1024;
+const SEMANTIC_IMPORT_MAX_STRING_CHARS = 2048;
+const SEMANTIC_IMPORT_MAX_OBJECT_KEYS = 24;
+const SEMANTIC_IMPORT_MAX_ARRAY_ITEMS = 50;
 const AUTONOMOUS_APPLY_REPO_LOCK_KEY = 'repo:*';
 const SUPPORTED_CODEX_MODEL_BY_NORMALIZED = new Map(
   FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.map((model) => [model.toLowerCase(), model])
@@ -286,6 +291,7 @@ export interface FrontierCodexSemanticImportSidecar {
     eligible: number;
     omitted: number;
     maxFiles: number;
+    maxBytes: number;
     imported: number;
     skipped: number;
     errors: number;
@@ -2868,92 +2874,110 @@ async function createCodexSemanticImportSidecar(input: {
 }): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
   const options = normalizeSemanticImportOptions(input.options);
   if (!options) return undefined;
-  const selection = selectSemanticImportPaths(input.changedPaths, options);
-  const selected = selection.selected;
   const records: FrontierCodexSemanticImportRecord[] = [];
   const importPath = path.join(input.evidenceDir, 'semantic-imports.json');
-  if (!selected.length) {
-    const sidecar = createSemanticImportSidecar(input.job, records, selection);
-    await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
-    return { path: importPath, sidecar };
-  }
-  const api = await loadFrontierLangForSemanticImport();
-  if (!api.ok) {
+  try {
+    const selection = selectSemanticImportPaths(input.changedPaths, options);
+    const selected = selection.selected;
+    const importable: SemanticImportImportablePath[] = [];
     for (const file of selected) {
-      records.push({
-        path: file.path,
-        language: file.language,
-        status: 'error',
-        reason: 'frontier-lang-unavailable',
-        error: api.error
-      });
+      const absolute = path.join(input.workspace, file.path);
+      const stat = await fs.stat(absolute).catch(() => undefined);
+      if (!stat?.isFile()) {
+        records.push({ path: file.path, language: file.language, status: 'skipped', reason: 'not-a-file' });
+        continue;
+      }
+      if (stat.size > options.maxBytes) {
+        records.push({ path: file.path, language: file.language, status: 'skipped', reason: 'too-large', bytes: stat.size });
+        continue;
+      }
+      importable.push({ ...file, absolute, bytes: stat.size });
     }
-    const sidecar = createSemanticImportSidecar(input.job, records, selection);
-    await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
-    return { path: importPath, sidecar };
-  }
-  for (const file of selected) {
-    const absolute = path.join(input.workspace, file.path);
-    const stat = await fs.stat(absolute).catch(() => undefined);
-    if (!stat?.isFile()) {
-      records.push({ path: file.path, language: file.language, status: 'skipped', reason: 'not-a-file' });
-      continue;
+    if (!importable.length) {
+      return await finalizeCodexSemanticImportSidecar(input.job, importPath, records, selection);
     }
-    if (stat.size > options.maxBytes) {
-      records.push({ path: file.path, language: file.language, status: 'skipped', reason: 'too-large', bytes: stat.size });
-      continue;
+    const api = await loadFrontierLangForSemanticImport();
+    if (!api.ok) {
+      for (const file of importable) {
+        records.push({
+          path: file.path,
+          language: file.language,
+          status: 'error',
+          reason: 'frontier-lang-unavailable',
+          bytes: file.bytes,
+          error: formatSemanticImportError(api.error)
+        });
+      }
+      return await finalizeCodexSemanticImportSidecar(input.job, importPath, records, selection);
     }
-    try {
-      const sourceText = await fs.readFile(absolute, 'utf8');
-      const importResult = api.importNativeSource({
-        language: file.language,
-        sourcePath: file.path,
-        sourceText,
-        parser: 'source-text',
-        metadata: {
-          swarmJobId: input.job.id,
-          swarmTaskId: input.job.taskId,
-          swarmLane: input.job.lane
+    for (const file of importable) {
+      try {
+        const sourceRead = await readSemanticImportSource(file.absolute, options.maxBytes, file.bytes);
+        if (!sourceRead.ok) {
+          records.push({
+            path: file.path,
+            language: file.language,
+            status: 'skipped',
+            reason: sourceRead.reason,
+            bytes: sourceRead.bytes
+          });
+          continue;
         }
-      });
-      const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
-      const sourceMaps = Array.isArray(importResult?.sourceMaps)
-        ? importResult.sourceMaps
-        : Array.isArray(importResult?.universalAst?.sourceMaps)
-          ? importResult.universalAst.sourceMaps
-          : [];
-      records.push({
-        path: file.path,
-        language: file.language,
-        status: 'imported',
-        bytes: stat.size,
-        importId: importResult?.id,
-        universalAstHash: api.hashUniversalAstEnvelope && importResult?.universalAst
-          ? api.hashUniversalAstEnvelope(importResult.universalAst)
-          : undefined,
-        nativeAstId: importResult?.nativeAst?.id,
-        nativeSourceId: importResult?.nativeSource?.id,
-        sourceMapCount: sourceMaps.length,
-        sourceMapMappingCount: sourceMaps.reduce((sum: number, sourceMap: any) => sum + (Array.isArray(sourceMap?.mappings) ? sourceMap.mappings.length : 0), 0),
-        evidenceCount: Array.isArray(importResult?.evidence) ? importResult.evidence.length : 0,
-        lossCount: Array.isArray(importResult?.losses) ? importResult.losses.length : 0,
-        losses: summarizeSemanticLosses(importResult?.losses),
-        semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
-        mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
-      });
-    } catch (error) {
-      records.push({
-        path: file.path,
-        language: file.language,
-        status: 'error',
-        bytes: stat.size,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        const importResult = api.importNativeSource({
+          language: file.language,
+          sourcePath: file.path,
+          sourceText: sourceRead.sourceText,
+          parser: 'source-text',
+          metadata: {
+            swarmJobId: input.job.id,
+            swarmTaskId: input.job.taskId,
+            swarmLane: input.job.lane
+          }
+        });
+        const mergeCandidate = api.createSemanticMergeCandidateFromImport({ importResult });
+        const sourceMaps = Array.isArray(importResult?.sourceMaps)
+          ? importResult.sourceMaps
+          : Array.isArray(importResult?.universalAst?.sourceMaps)
+            ? importResult.universalAst.sourceMaps
+            : [];
+        records.push({
+          path: file.path,
+          language: file.language,
+          status: 'imported',
+          bytes: sourceRead.bytes,
+          importId: semanticImportString(importResult?.id),
+          universalAstHash: semanticImportUniversalAstHash(api, importResult?.universalAst),
+          nativeAstId: semanticImportString(importResult?.nativeAst?.id),
+          nativeSourceId: semanticImportString(importResult?.nativeSource?.id),
+          sourceMapCount: sourceMaps.length,
+          sourceMapMappingCount: sourceMaps.reduce((sum: number, sourceMap: any) => sum + (Array.isArray(sourceMap?.mappings) ? sourceMap.mappings.length : 0), 0),
+          evidenceCount: Array.isArray(importResult?.evidence) ? importResult.evidence.length : 0,
+          lossCount: Array.isArray(importResult?.losses) ? importResult.losses.length : 0,
+          losses: summarizeSemanticLosses(importResult?.losses),
+          semanticIndex: summarizeSemanticIndex(importResult?.semanticIndex),
+          mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate)
+        });
+      } catch (error) {
+        records.push({
+          path: file.path,
+          language: file.language,
+          status: 'error',
+          bytes: file.bytes,
+          error: formatSemanticImportError(error)
+        });
+      }
     }
+    return await finalizeCodexSemanticImportSidecar(input.job, importPath, records, selection);
+  } catch (error) {
+    const selection = createEmptySemanticImportSelection(options);
+    records.push({
+      path: '<semantic-import>',
+      status: 'error',
+      reason: 'semantic-import-failed',
+      error: formatSemanticImportError(error)
+    });
+    return await finalizeCodexSemanticImportSidecar(input.job, importPath, records, selection);
   }
-  const sidecar = createSemanticImportSidecar(input.job, records, selection);
-  await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
-  return { path: importPath, sidecar };
 }
 
 export async function discoverCodexHandoffArtifacts(input: FrontierCodexHandoffDiscoveryInput): Promise<FrontierCodexHandoffArtifact[]> {
@@ -6197,11 +6221,13 @@ function safePathSegment(value: string): string {
 }
 
 type SemanticImportSelectedPath = { path: string; language: string };
+type SemanticImportImportablePath = SemanticImportSelectedPath & { absolute: string; bytes: number };
 type SemanticImportSelection = {
   selected: SemanticImportSelectedPath[];
   eligibleCount: number;
   omittedCount: number;
   maxFiles: number;
+  maxBytes: number;
 };
 
 type FrontierLangSemanticImportApi = {
@@ -6221,8 +6247,8 @@ function normalizeSemanticImportOptions(input: boolean | FrontierCodexSemanticIm
   return {
     ...options,
     enabled: true,
-    maxFiles: Math.max(0, Math.floor(options.maxFiles ?? 24)),
-    maxBytes: Math.max(0, Math.floor(options.maxBytes ?? 512 * 1024))
+    maxFiles: Math.max(0, Math.floor(options.maxFiles ?? DEFAULT_SEMANTIC_IMPORT_MAX_FILES)),
+    maxBytes: Math.max(0, Math.floor(options.maxBytes ?? DEFAULT_SEMANTIC_IMPORT_MAX_BYTES))
   };
 }
 
@@ -6244,8 +6270,61 @@ function selectSemanticImportPaths(
     selected: eligible.slice(0, maxFiles),
     eligibleCount: eligible.length,
     omittedCount: Math.max(0, eligible.length - maxFiles),
-    maxFiles
+    maxFiles,
+    maxBytes: options.maxBytes
   };
+}
+
+function createEmptySemanticImportSelection(
+  options: Required<Pick<FrontierCodexSemanticImportOptions, 'maxFiles' | 'maxBytes'>> & FrontierCodexSemanticImportOptions
+): SemanticImportSelection {
+  return {
+    selected: [],
+    eligibleCount: 0,
+    omittedCount: 0,
+    maxFiles: options.maxFiles,
+    maxBytes: options.maxBytes
+  };
+}
+
+async function readSemanticImportSource(
+  file: string,
+  maxBytes: number,
+  knownBytes: number
+): Promise<{ ok: true; sourceText: string; bytes: number } | { ok: false; reason: 'too-large'; bytes: number }> {
+  const readLimit = Math.max(1, Math.min(maxBytes + 1, knownBytes + 1));
+  const handle = await fs.open(file, 'r');
+  try {
+    const buffer = Buffer.alloc(readLimit);
+    const { bytesRead } = await handle.read(buffer, 0, readLimit, 0);
+    const bytes = Math.max(knownBytes, bytesRead);
+    if (bytesRead > maxBytes) return { ok: false, reason: 'too-large', bytes };
+    return { ok: true, sourceText: buffer.subarray(0, bytesRead).toString('utf8'), bytes };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function finalizeCodexSemanticImportSidecar(
+  job: FrontierSwarmJob,
+  importPath: string,
+  records: FrontierCodexSemanticImportRecord[],
+  selection: SemanticImportSelection
+): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar }> {
+  const sidecar = createSemanticImportSidecar(job, records, selection);
+  try {
+    await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
+    return { path: importPath, sidecar };
+  } catch (error) {
+    const fallback = createSemanticImportSidecar(job, [{
+      path: '<semantic-import>',
+      status: 'error',
+      reason: 'semantic-import-sidecar-write-failed',
+      error: formatSemanticImportError(error)
+    }], selection);
+    await fs.writeFile(importPath, JSON.stringify(fallback, null, 2) + '\n').catch(() => undefined);
+    return { path: importPath, sidecar: fallback };
+  }
 }
 
 function inferSemanticImportLanguage(file: string, overrides?: Readonly<Record<string, string>>): string | undefined {
@@ -6336,6 +6415,7 @@ function createSemanticImportSidecar(
       eligible: selection?.eligibleCount ?? records.length,
       omitted: selection?.omittedCount ?? 0,
       maxFiles: selection?.maxFiles ?? records.length,
+      maxBytes: selection?.maxBytes ?? DEFAULT_SEMANTIC_IMPORT_MAX_BYTES,
       imported: records.filter((record) => record.status === 'imported').length,
       skipped: records.filter((record) => record.status === 'skipped').length,
       errors: records.filter((record) => record.status === 'error').length,
@@ -6363,27 +6443,79 @@ function summarizeSemanticIndex(value: any): FrontierCodexSemanticImportRecord['
 function summarizeSemanticLosses(value: any): unknown {
   if (!Array.isArray(value) || value.length === 0) return undefined;
   return value.slice(0, 12).map((loss) => ({
-    id: loss?.id,
-    severity: loss?.severity,
-    phase: loss?.phase,
-    kind: loss?.kind,
-    message: loss?.message,
-    nodeId: loss?.nodeId,
-    span: loss?.span
+    id: semanticImportJsonValue(loss?.id),
+    severity: semanticImportJsonValue(loss?.severity),
+    phase: semanticImportJsonValue(loss?.phase),
+    kind: semanticImportJsonValue(loss?.kind),
+    message: semanticImportJsonValue(loss?.message),
+    nodeId: semanticImportJsonValue(loss?.nodeId),
+    span: semanticImportJsonValue(loss?.span)
   }));
 }
 
 function summarizeSemanticMergeCandidate(value: any): unknown {
   if (!value || typeof value !== 'object') return undefined;
   return {
-    kind: value.kind,
-    readiness: value.readiness,
-    touchedSymbols: Array.isArray(value.touchedSymbols) ? value.touchedSymbols.slice(0, 50) : [],
-    touchedSemanticNodes: Array.isArray(value.touchedSemanticNodes) ? value.touchedSemanticNodes.slice(0, 50) : [],
-    nativeSpans: Array.isArray(value.nativeSpans) ? value.nativeSpans.slice(0, 50) : [],
-    conflictKeys: Array.isArray(value.conflictKeys) ? value.conflictKeys.slice(0, 100) : [],
-    reasons: Array.isArray(value.reasons) ? value.reasons.slice(0, 50) : []
+    kind: semanticImportJsonValue(value.kind),
+    readiness: semanticImportJsonValue(value.readiness),
+    touchedSymbols: semanticImportArray(value.touchedSymbols, SEMANTIC_IMPORT_MAX_ARRAY_ITEMS),
+    touchedSemanticNodes: semanticImportArray(value.touchedSemanticNodes, SEMANTIC_IMPORT_MAX_ARRAY_ITEMS),
+    nativeSpans: semanticImportArray(value.nativeSpans, SEMANTIC_IMPORT_MAX_ARRAY_ITEMS),
+    conflictKeys: semanticImportArray(value.conflictKeys, 100),
+    reasons: semanticImportArray(value.reasons, SEMANTIC_IMPORT_MAX_ARRAY_ITEMS)
   };
+}
+
+function semanticImportUniversalAstHash(api: FrontierLangSemanticImportApi, universalAst: unknown): string | undefined {
+  if (!api.ok || !api.hashUniversalAstEnvelope || !universalAst) return undefined;
+  try {
+    return semanticImportString(api.hashUniversalAstEnvelope(universalAst));
+  } catch {
+    return undefined;
+  }
+}
+
+function formatSemanticImportError(error: unknown): string {
+  if (error instanceof Error) return semanticImportString(error.message || error.name) ?? error.name;
+  return semanticImportString(error) ?? 'unknown semantic import error';
+}
+
+function semanticImportString(value: unknown, maxChars = SEMANTIC_IMPORT_MAX_STRING_CHARS): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const text = String(value);
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}...<truncated ${text.length - maxChars} chars>`;
+}
+
+function semanticImportArray(value: unknown, maxItems: number): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maxItems).map((item) => semanticImportJsonValue(item));
+}
+
+function semanticImportJsonValue(value: unknown, depth = 0): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'string') return semanticImportString(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'symbol' || typeof value === 'function') return String(value);
+  if (depth >= 3) return semanticImportString(value);
+  if (Array.isArray(value)) {
+    const out = value.slice(0, SEMANTIC_IMPORT_MAX_ARRAY_ITEMS).map((item) => semanticImportJsonValue(item, depth + 1));
+    if (value.length > SEMANTIC_IMPORT_MAX_ARRAY_ITEMS) {
+      out.push({ truncatedItems: value.length - SEMANTIC_IMPORT_MAX_ARRAY_ITEMS });
+    }
+    return out;
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    const entries = Object.entries(value as Record<string, unknown>);
+    for (const [key, item] of entries.slice(0, SEMANTIC_IMPORT_MAX_OBJECT_KEYS)) {
+      out[semanticImportString(key, 128) ?? 'key'] = semanticImportJsonValue(item, depth + 1);
+    }
+    if (entries.length > SEMANTIC_IMPORT_MAX_OBJECT_KEYS) out.truncatedKeys = entries.length - SEMANTIC_IMPORT_MAX_OBJECT_KEYS;
+    return out;
+  }
+  return semanticImportString(value);
 }
 
 function uniqueStrings(values: readonly string[]): string[] {
