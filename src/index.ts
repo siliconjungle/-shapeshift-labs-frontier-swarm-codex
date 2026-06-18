@@ -3297,8 +3297,9 @@ function createLatestDashboardQueueActionCounts(
   if (!assignments) return undefined;
   const terminalJobIds = new Set(autoDrain?.terminalJobIds ?? []);
   const blockedJobIds = new Set(autoDrain?.blockedJobIds ?? []);
+  const resolvedQueueKeys = createDashboardResolvedQueueKeySet(autoDrain);
   return countDashboardQueueAssignments(
-    assignments.filter((assignment) => !terminalJobIds.has(assignment.jobId) && !blockedJobIds.has(assignment.jobId))
+    assignments.filter((assignment) => dashboardQueueSubjectIsOpen(assignment, terminalJobIds, blockedJobIds, resolvedQueueKeys))
   );
 }
 
@@ -3354,7 +3355,8 @@ function summarizeDashboardActiveQueuePressure(
   const assignments = latestCollection?.hierarchicalMergeQueue?.assignments ?? [];
   const terminalJobIds = new Set(autoDrain.terminalJobIds ?? []);
   const blockedJobIds = new Set(autoDrain.blockedJobIds ?? []);
-  const activeAssignments = assignments.filter((assignment) => !terminalJobIds.has(assignment.jobId) && !blockedJobIds.has(assignment.jobId));
+  const resolvedQueueKeys = createDashboardResolvedQueueKeySet(autoDrain);
+  const activeAssignments = assignments.filter((assignment) => dashboardQueueSubjectIsOpen(assignment, terminalJobIds, blockedJobIds, resolvedQueueKeys));
   const pressureActions = new Set<FrontierSwarmMergeQueueAssignmentAction>(['apply-local', 'queue-local', 'promote']);
   const pressureAssignments = activeAssignments.filter((assignment) => pressureActions.has(assignment.action));
   return {
@@ -3378,17 +3380,17 @@ function summarizeDashboardUnresolvedQueuePressure(
   }
   const terminalJobIds = new Set(autoDrain?.terminalJobIds ?? []);
   const blockedJobIds = new Set(autoDrain?.blockedJobIds ?? []);
-  const activeJobId = (jobId: string) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId);
+  const resolvedQueueKeys = createDashboardResolvedQueueKeySet(autoDrain);
   const staleJobIds = uniqueStrings(
     latestCollection.buckets['stale-against-head']
+      .filter((entry) => dashboardCollectedBundleIsOpen(entry, terminalJobIds, blockedJobIds, resolvedQueueKeys))
       .map((entry) => entry.jobId)
-      .filter(activeJobId)
   );
   const queueRerunJobIds = uniqueStrings(
     (latestCollection.hierarchicalMergeQueue?.assignments ?? [])
       .filter((assignment) => assignment.action === 'rerun')
+      .filter((assignment) => dashboardQueueSubjectIsOpen(assignment, terminalJobIds, blockedJobIds, resolvedQueueKeys))
       .map((assignment) => assignment.jobId)
-      .filter(activeJobId)
   );
   return {
     staleCount: staleJobIds.length,
@@ -3399,6 +3401,43 @@ function summarizeDashboardUnresolvedQueuePressure(
 function latestDashboardAutoDrainCollection(autoDrain: FrontierCodexSwarmAutoDrainResult | null): FrontierCodexCollectResult | undefined {
   const latestIteration = autoDrain?.iterations.at(-1);
   return latestIteration?.postApplyCollection ?? latestIteration?.collection;
+}
+
+function dashboardCollectedBundleIsOpen(
+  entry: FrontierCodexCollectedBundle,
+  terminalJobIds: ReadonlySet<string>,
+  blockedJobIds: ReadonlySet<string>,
+  resolvedQueueKeys: ReadonlySet<string>
+): boolean {
+  const bundle = (entry as FrontierCodexCollectedBundle & { bundle?: Partial<FrontierSwarmMergeBundle> }).bundle;
+  const subject: { jobId: string; taskId?: string; queueItemIds?: readonly string[] } = { jobId: entry.jobId };
+  if (typeof bundle?.taskId === 'string') subject.taskId = bundle.taskId;
+  if (Array.isArray(bundle?.queueItemIds)) subject.queueItemIds = bundle.queueItemIds;
+  return dashboardQueueSubjectIsOpen(subject, terminalJobIds, blockedJobIds, resolvedQueueKeys);
+}
+
+function dashboardQueueSubjectIsOpen(
+  subject: { jobId: string; taskId?: string; queueItemIds?: readonly string[] },
+  terminalJobIds: ReadonlySet<string>,
+  blockedJobIds: ReadonlySet<string>,
+  resolvedQueueKeys: ReadonlySet<string>
+): boolean {
+  if (terminalJobIds.has(subject.jobId) || blockedJobIds.has(subject.jobId)) return false;
+  return dashboardQueueSubjectKeys(subject).every((key) => !resolvedQueueKeys.has(key));
+}
+
+function createDashboardResolvedQueueKeySet(autoDrain: FrontierCodexSwarmAutoDrainResult | null): Set<string> {
+  const decisions = latestDashboardAutonomousDecisions((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
+  return new Set(decisions
+    .filter((decision) => decision.status === 'applied' || decision.status === 'committed')
+    .flatMap(dashboardAutonomousDecisionQueueKeys));
+}
+
+function dashboardQueueSubjectKeys(subject: { jobId: string; taskId?: string; queueItemIds?: readonly string[] }): string[] {
+  const queueItemIds = uniqueStrings((subject.queueItemIds ?? []).filter((entry) => entry.length > 0)).sort();
+  if (queueItemIds.length) return queueItemIds.map((queueItemId) => `queue:${queueItemId}`);
+  if (subject.taskId && subject.taskId.length > 0) return [`task:${subject.taskId}`];
+  return [`job:${subject.jobId}`];
 }
 
 function createDashboardCollectOnlyMetadata(autoDrain: FrontierCodexSwarmAutoDrainResult | null): FrontierCodexDashboardCollectOnlyMetadata | undefined {

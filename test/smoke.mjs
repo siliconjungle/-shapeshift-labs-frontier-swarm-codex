@@ -1534,7 +1534,13 @@ const collapsedDecisionAutoDrain = {
         'ready-to-apply': [],
         'needs-human-port': [],
         'failed-evidence': [],
-        'stale-against-head': [{ jobId: 'collapsed-rerun-old-job' }]
+        'stale-against-head': [{
+          jobId: 'collapsed-rerun-old-job',
+          bundle: {
+            taskId: 'collapsed-rerun-task',
+            queueItemIds: ['collapsed-rerun-task']
+          }
+        }]
       },
       hierarchicalMergeQueue: {
         assignments: [{
@@ -1601,9 +1607,7 @@ const collapsedDecisionAutoDrain = {
   lockScopeCounts: { semantic: 0, path: 0, repo: 0 },
   terminalJobIds: [
     'collapsed-conflict-fresh-job',
-    'collapsed-conflict-old-job',
-    'collapsed-rerun-fresh-job',
-    'collapsed-rerun-old-job'
+    'collapsed-rerun-fresh-job'
   ],
   blockedJobIds: [],
   artifacts: collapsedDecisionArtifacts,
@@ -1611,7 +1615,7 @@ const collapsedDecisionAutoDrain = {
     iterationCount: 1,
     collectionCount: 1,
     applyCount: 1,
-    terminalCount: 4,
+    terminalCount: 2,
     blockedCount: 0,
     conflictBlockedCount: 1,
     humanBlockedCount: 0,
