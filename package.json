@@ -34,6 +34,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "README.md",
     "LICENSE",
     "benchmarks/package-bench.mjs"

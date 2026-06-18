@@ -2054,6 +2054,7 @@ export function renderCodexPrompt(
     '## Evidence',
     '',
     `Write evidence under ${input.paths.evidenceDir}.`,
+    'If this is a copy or snapshot workspace under an ignored parent directory, `git status` may not show your file edits. Verify created or changed files with direct filesystem reads/checks, and let the runner snapshot determine changed paths.',
     'Final response must include changed files, commands run, evidence paths, remaining gaps, and whether changed paths stayed inside allowed write globs.',
     '',
     'Raw task JSON:',

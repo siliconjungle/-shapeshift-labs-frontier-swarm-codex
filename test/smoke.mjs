@@ -145,6 +145,8 @@ const prompt = renderCodexPrompt(plan.jobs[0], { workspacePath: tmp, paths });
 assert.ok(prompt.includes('Allowed write globs'));
 assert.ok(prompt.includes('Resource allocation'));
 assert.ok(prompt.includes('src/runtime/action.ts'));
+assert.ok(prompt.includes('git status'));
+assert.ok(prompt.includes('runner snapshot'));
 
 const browserPlan = createCodexSwarmPlan({
   manifest: {
