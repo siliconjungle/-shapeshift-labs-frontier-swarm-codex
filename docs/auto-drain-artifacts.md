@@ -28,7 +28,7 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 
 The top-level files under `auto-drain/` are summary or latest-snapshot reads. They are useful for dashboards that only need the current state after the run finishes. Use the numbered iteration directories when historical iteration state matters.
 
-When the coordinator checkout is dirty, auto-drain is collect-only. It still writes `swarm-results.json`, `coordinator-dashboard.json`, `auto-drain/auto-drain.json`, collection artifacts, merge admission, grouping, reviewer, patch-stack, queue metadata, and operator-summary artifacts. It intentionally skips `auto-drain/apply-NN/*` and reports `autoDrain.ok: false`, `autoDrain.skippedReason: "dirty-worktree"`, `autoDrain.dirtyPaths[]`, `autoDrain.summary.applyCount: 0`, and any remaining ready count. Dashboards should show this as queued coordinator work waiting for a clean apply window, not as missing data or a worker failure. Ready or promoted counts in this state are pending queue counts; they are not landed changes because there are no apply decisions.
+When the coordinator checkout is dirty, auto-drain is collect-only. It still writes `swarm-results.json`, `coordinator-dashboard.json`, `auto-drain/auto-drain.json`, `auto-drain/rerun-manifest.json`, collection artifacts, merge admission, grouping, reviewer, patch-stack, queue metadata, and operator-summary artifacts. It intentionally skips `auto-drain/apply-NN/*` and reports `autoDrain.ok: false`, `autoDrain.skippedReason: "dirty-worktree"`, `autoDrain.dirtyPaths[]`, `autoDrain.summary.applyCount: 0`, and any remaining ready count. Dashboards should show this as queued coordinator work waiting for a clean apply window, not as missing data or a worker failure. Ready or promoted counts in this state are pending queue counts; they are not landed changes because there are no apply decisions.
 
 ## Cost Summary
 
@@ -58,7 +58,7 @@ It is the preferred machine-readable index for dashboards because it groups arti
 | `patchStack.paths` | Per-iteration `patch-stack-plan.json`, `autonomous-apply.json`, `autonomous-queue-overlay.json`, and patch files | Show patch stack ordering, conflicts, apply ledgers, patch files, and remaining work. |
 | `rerunManifest.paths` | `auto-drain/rerun-manifest.json` | Seed the next focused rerun or conflict-resolution swarm directly from task-shaped `items[]`; use `metadata.rerun.currentHead`, `metadata.rerun.sourceHead`, and `metadata.rerun.sourceHeads` to detect stale follow-up items. |
 | `iterations[]` | One compact row per auto-drain iteration | Render timelines without opening every detailed artifact first. |
-| `summary` | Aggregate counts | Render top-line totals such as iteration count, apply count, admission count, reviewer plan count, patch stack plan count, decision count, and patch count. |
+| `summary` | Aggregate counts | Render top-line totals such as iteration count, apply count, admission count, reviewer plan count, patch stack plan count, decision count, patch count, rerun manifest count, and rerun task count. |
 
 `autoDrainArtifacts.coordinatorAgentDrainWork` summarizes all generic drain-work artifacts. Its `assignmentCount`, `terminalCount`, `nonTerminalCount`, `promotedWorkCount`, and decision counts describe coordinator-agent queue work before source mutation. `autoDrainArtifacts.coordinatorAgent` summarizes the Codex selected/deferred layer for auto-drain iterations. Its `assignmentCount`, `selectedCount`, `deferredCount`, `promoteCount`, and `queueLocalCount` are queue-work counts. They do not mean patches landed. A selected assignment means that the coordinator-agent drain selected the local queue leader for this iteration; the matching `autonomous-apply.json` or `autonomous-merge-decisions.jsonl` still owns the terminal outcome.
 
@@ -215,7 +215,7 @@ In dirty collect-only runs, no `apply-NN` directory is written. The matching `au
 ## Summary Vs Iteration Rules
 
 - Treat `swarm-results.json`, `coordinator-dashboard.json`, `auto-drain/auto-drain.json`, and `autoDrainArtifacts` as whole-run summaries.
-- Treat `auto-drain/merge-admission.json`, `auto-drain/reviewer-lane-plan.json`, `auto-drain/patch-stack-plan.json`, and `auto-drain/merge-index.json` as latest auto-drain snapshots.
+- Treat `auto-drain/merge-admission.json`, `auto-drain/reviewer-lane-plan.json`, `auto-drain/patch-stack-plan.json`, `auto-drain/merge-index.json`, and `auto-drain/rerun-manifest.json` as latest or whole-pass auto-drain snapshots.
 - Treat `auto-drain/collection-NN/*`, `auto-drain/coordinator-agent-drain-work-NN.json`, `auto-drain/coordinator-agent-drain-NN.json`, `auto-drain/auto-drain-groups-NN.json`, and `auto-drain/apply-NN/*` as per-iteration artifacts.
 - Prefer `autoDrainArtifacts.iterations[]` for navigation because it records the exact paths and counts that existed for each iteration.
 - Prefer `auto-drain/rerun-manifest.json` over prose handoffs when scheduling follow-up work for unresolved conflict-blocked, stale, or rerun queue debt.
