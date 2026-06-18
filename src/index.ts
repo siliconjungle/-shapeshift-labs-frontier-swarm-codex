@@ -100,6 +100,8 @@ export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND = 'frontier.swar
 export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND = 'frontier.swarm-codex.dashboard-queue-health';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_DASHBOARD_MERGE_QUEUE_HEALTH_KIND = 'frontier.swarm-codex.dashboard-merge-queue-health';
+export const FRONTIER_SWARM_CODEX_DASHBOARD_MERGE_QUEUE_HEALTH_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND = 'frontier.swarm-codex.dashboard-human-questions';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_ANSWERS_KIND = 'frontier.swarm-codex.dashboard-human-answers';
@@ -1342,6 +1344,203 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
   };
 }
 
+export type FrontierCodexDashboardMergeQueueHealthSource = typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND | 'not-collected';
+export type FrontierCodexDashboardMergeQueueConflictKind = 'queue-conflict' | 'grouping-conflict' | 'current-head-conflict';
+export type FrontierCodexDashboardMergeQueueRerunSourceKind = 'stale-against-head' | 'queue-rerun' | 'decision-rerun' | 'conflict-blocked';
+
+export interface FrontierCodexDashboardMergeQueueLease {
+  id: string;
+  queueId: string;
+  scopeId: string;
+  scopeKind: FrontierSwarmCoordinatorAgentDrainWork['leases'][number]['scopeKind'];
+  title: string;
+  leaseScope: string;
+  leaseKey: string;
+  parentQueueId?: string;
+  lane?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  jobIds: string[];
+  actions: Record<string, string[]>;
+}
+
+export interface FrontierCodexDashboardMergeQueueScope {
+  id: string;
+  kind: FrontierSwarmHierarchicalMergeQueue['scopes'][number]['kind'];
+  parentId?: string;
+  title: string;
+  lane?: string;
+  leaseKey: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  jobIds: string[];
+  assignmentCount: number;
+  openAssignmentCount: number;
+  activeLease: boolean;
+}
+
+export interface FrontierCodexDashboardMergeQueueCoordinatorAssignment {
+  id?: string;
+  jobId: string;
+  taskId?: string;
+  lane?: string;
+  title?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  queueId: string;
+  queueKind?: FrontierSwarmCoordinatorAgentDrainWork['assignments'][number]['queueKind'];
+  rootQueueId?: string;
+  parentQueueIds: string[];
+  promoteToQueueId?: string;
+  leaseId?: string;
+  leaseScope?: string;
+  leaseKey?: string;
+  assignedAction: FrontierSwarmMergeQueueAssignmentAction;
+  decision: string;
+  classification: string;
+  terminal: boolean;
+  open: boolean;
+  selected?: boolean;
+  coordinatorDecision?: FrontierCodexCoordinatorAgentDrainDecision;
+  selectionReason?: string;
+  reasons: string[];
+  admitted?: boolean;
+  changedPaths: string[];
+  changedRegions: string[];
+  conflictingJobIds: string[];
+}
+
+export interface FrontierCodexDashboardMergeQueueTerminalDecision {
+  source: 'coordinator-agent-drain-work' | 'autonomous-apply';
+  id: string;
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  status: string;
+  assignedAction?: FrontierSwarmMergeQueueAssignmentAction;
+  queueId?: string;
+  leaseId?: string;
+  leaseScope?: string;
+  lockScope?: FrontierCodexAutonomousLockScope;
+  lockKeys?: string[];
+  reasons: string[];
+  bundlePath?: string;
+  patchPath?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  finishedAt?: number;
+  commit?: string;
+}
+
+export interface FrontierCodexDashboardMergeQueueHumanQuestion {
+  id: string;
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  questionIds: string[];
+  questionCodes: string[];
+  reason: string;
+  answered: boolean;
+  answerIds: string[];
+  answerRoutes: string[];
+  answerEvidencePaths: string[];
+  bundlePath?: string;
+  patchPath?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  finishedAt: number;
+}
+
+export interface FrontierCodexDashboardMergeQueueConflict {
+  source: 'hierarchical-merge-queue' | 'auto-drain-grouping' | 'autonomous-apply';
+  kind: FrontierCodexDashboardMergeQueueConflictKind | FrontierCodexSwarmAutoDrainGroupingConflictKind;
+  key: string;
+  jobIds: string[];
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  scopeId?: string;
+  leaseKey?: string;
+  patchPath?: string;
+  bundlePath?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  reasons: string[];
+  headBefore?: string;
+  headAfter?: string;
+  value?: string;
+}
+
+export interface FrontierCodexDashboardMergeQueueRerunCandidate {
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  sourceKinds: FrontierCodexDashboardMergeQueueRerunSourceKind[];
+  reasons: string[];
+  sourceHeads: string[];
+  sourcePatchPaths: string[];
+  sourceBundlePaths: string[];
+  sourceCollectionPaths: string[];
+  sourceMergeQueuePaths: string[];
+  sourceDecisionLogPaths: string[];
+  targetRefs: string[];
+  changedRegions: string[];
+  queueActions: FrontierSwarmMergeQueueAssignmentAction[];
+  decisionStatuses: FrontierCodexAutonomousDecisionStatus[];
+  conflictingJobIds: string[];
+  scopeIds: string[];
+  leaseKeys: string[];
+}
+
+export interface FrontierCodexDashboardMergeQueueAppliedDecision {
+  id: string;
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  status: Extract<FrontierCodexAutonomousDecisionStatus, 'applied' | 'committed'>;
+  reason: string;
+  bundlePath: string;
+  patchPath?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  lockScope: FrontierCodexAutonomousLockScope;
+  lockKeys: string[];
+  finishedAt: number;
+  commit?: string;
+  verification: FrontierCodexAutonomousDecisionVerification;
+}
+
+export interface FrontierCodexDashboardMergeQueueHealth {
+  kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_MERGE_QUEUE_HEALTH_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_MERGE_QUEUE_HEALTH_VERSION;
+  source: FrontierCodexDashboardMergeQueueHealthSource;
+  available: boolean;
+  activeLeases: FrontierCodexDashboardMergeQueueLease[];
+  queueScopes: FrontierCodexDashboardMergeQueueScope[];
+  coordinatorAssignments: FrontierCodexDashboardMergeQueueCoordinatorAssignment[];
+  terminalDecisions: FrontierCodexDashboardMergeQueueTerminalDecision[];
+  blockedHumanQuestions: FrontierCodexDashboardMergeQueueHumanQuestion[];
+  realConflicts: FrontierCodexDashboardMergeQueueConflict[];
+  rerunCandidates: FrontierCodexDashboardMergeQueueRerunCandidate[];
+  appliedDecisions: FrontierCodexDashboardMergeQueueAppliedDecision[];
+  counts: {
+    activeLeaseCount: number;
+    queueScopeCount: number;
+    coordinatorAssignmentCount: number;
+    openCoordinatorAssignmentCount: number;
+    terminalDecisionCount: number;
+    blockedHumanQuestionCount: number;
+    realConflictCount: number;
+    rerunCandidateCount: number;
+    appliedDecisionCount: number;
+    committedDecisionCount: number;
+  };
+}
+
 export interface FrontierCodexDashboardQueueMetadata {
   kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND;
   version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION;
@@ -1381,6 +1580,7 @@ export interface FrontierCodexDashboardQueueMetadata {
     staleAgainstHeadCount: number;
     promotedPatchCandidateCount: number;
   };
+  mergeQueueHealth: FrontierCodexDashboardMergeQueueHealth;
   queueHealth: FrontierCodexDashboardQueueHealth;
   humanQuestions: FrontierCodexDashboardHumanQuestions;
   operatorSummary: FrontierCodexDashboardOperatorQueueSummary;
@@ -3954,6 +4154,7 @@ export async function writeSwarmCoordinatorSnapshot(
     costSummary,
     queueMetadata,
     queueHealth: queueMetadata.queueHealth,
+    mergeQueueHealth: queueMetadata.mergeQueueHealth,
     humanQuestions: queueMetadata.humanQuestions,
     humanAnswers: queueMetadata.humanAnswers,
     operatorSummary: queueMetadata.operatorSummary,
@@ -4102,6 +4303,7 @@ function createDashboardQueueMetadata(
     + currentHeadConflictCount;
   const humanAnswers = createDashboardHumanAnswers(autoDrain);
   const humanQuestions = createDashboardHumanQuestions(autoDrain, decisionSummary);
+  const mergeQueueHealth = createDashboardMergeQueueHealth(autoDrain, artifacts, humanQuestions, collectOnly);
   const conflictRetryWork = decisionSummary.conflictRetryWork;
   const queueHealth: FrontierCodexDashboardQueueHealth = {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND,
@@ -4172,6 +4374,7 @@ function createDashboardQueueMetadata(
       staleAgainstHeadCount: artifacts?.grouping.staleAgainstHeadCount ?? 0,
       promotedPatchCandidateCount: artifacts?.mergeQueue.promotedPatchCandidateCount ?? 0
     },
+    mergeQueueHealth,
     queueHealth,
     humanQuestions,
     operatorSummary
@@ -4197,6 +4400,602 @@ function createDashboardCoordinatorAgentDrainWorkMetadata(
     rejectedCount: source?.rejectedCount ?? 0,
     recordedCount: source?.recordedCount ?? 0,
     blockedCount: source?.blockedCount ?? 0
+  };
+}
+
+function createDashboardMergeQueueHealth(
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null,
+  artifacts: FrontierCodexAutoDrainArtifactMetadata | null,
+  humanQuestions: FrontierCodexDashboardHumanQuestions,
+  collectOnly?: FrontierCodexDashboardCollectOnlyMetadata
+): FrontierCodexDashboardMergeQueueHealth {
+  const latestIteration = autoDrain?.iterations.at(-1);
+  const latestCollection = latestDashboardAutoDrainCollection(autoDrain);
+  const latestQueue = latestCollection?.hierarchicalMergeQueue ?? latestIteration?.collection?.hierarchicalMergeQueue;
+  const latestDrainWork = latestIteration?.coordinatorAgentDrainWork;
+  const latestCodexDrain = latestIteration?.coordinatorAgentDrain;
+  const terminalJobIds = new Set(autoDrain?.terminalJobIds ?? []);
+  const blockedJobIds = new Set(autoDrain?.blockedJobIds ?? []);
+  const resolvedQueueKeys = createDashboardResolvedQueueKeySet(autoDrain);
+  const decisions = latestDashboardAutonomousDecisions((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
+  const codexAssignmentsByJobId = new Map((latestCodexDrain?.assignments ?? []).map((assignment) => [assignment.jobId, assignment]));
+  const queueAssignmentsByJobId = new Map((latestQueue?.assignments ?? []).map((assignment) => [assignment.jobId, assignment]));
+  const drainAssignments = latestDrainWork?.assignments ?? [];
+  const coordinatorAssignments = drainAssignments.length > 0
+    ? drainAssignments.map((assignment) => createDashboardMergeQueueCoordinatorAssignmentFromDrain(
+      assignment,
+      codexAssignmentsByJobId.get(assignment.jobId),
+      collectOnly,
+      terminalJobIds,
+      blockedJobIds,
+      resolvedQueueKeys
+    ))
+    : (latestQueue?.assignments ?? []).map((assignment) => createDashboardMergeQueueCoordinatorAssignmentFromQueue(
+      assignment,
+      codexAssignmentsByJobId.get(assignment.jobId),
+      collectOnly,
+      terminalJobIds,
+      blockedJobIds,
+      resolvedQueueKeys
+    ));
+  const activeAssignments = coordinatorAssignments.filter((assignment) => assignment.open);
+  const activeLeaseIds = new Set(activeAssignments.map((assignment) => assignment.leaseId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0));
+  const activeLeaseKeys = new Set(activeAssignments.flatMap((assignment) => [assignment.leaseKey, assignment.leaseScope]).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0));
+  const activeQueueIds = new Set(activeAssignments.map((assignment) => assignment.queueId));
+  const activeLeases = (latestDrainWork?.leases ?? [])
+    .filter((lease) => activeLeaseIds.has(lease.id) || activeLeaseKeys.has(lease.leaseKey) || activeQueueIds.has(lease.queueId))
+    .map(createDashboardMergeQueueLease);
+  const activeLeaseQueueIds = new Set(activeLeases.map((lease) => lease.queueId));
+  const activeLeaseScopeIds = new Set(activeLeases.map((lease) => lease.scopeId));
+  const queueScopes = (latestQueue?.scopes ?? []).map((scope) => createDashboardMergeQueueScope(scope, coordinatorAssignments, activeLeaseQueueIds, activeLeaseScopeIds, activeLeaseKeys));
+  const drainAssignmentByJobId = new Map(drainAssignments.map((assignment) => [assignment.jobId, assignment]));
+  const terminalDecisions = [
+    ...(latestDrainWork?.terminalDecisions ?? []).map((decision) => createDashboardMergeQueueTerminalDecisionFromDrain(decision, drainAssignmentByJobId.get(decision.jobId))),
+    ...decisions
+      .filter((decision) => autonomousDecisionIsTerminal(decision.status))
+      .map(createDashboardMergeQueueTerminalDecisionFromAutonomous)
+  ].sort((left, right) => `${left.jobId}:${left.source}:${left.id}`.localeCompare(`${right.jobId}:${right.source}:${right.id}`));
+  const blockedHumanQuestions = decisions
+    .filter(dashboardAutonomousDecisionIsExplicitHumanQuestion)
+    .filter((decision) => !dashboardHumanQuestionHasRoutedAnswer(decision, autoDrain?.humanAnswers))
+    .map((decision) => createDashboardMergeQueueHumanQuestion(decision, humanQuestions))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const realConflicts = createDashboardMergeQueueConflicts(latestIteration, latestQueue, decisions);
+  const rerunCandidates = createDashboardMergeQueueRerunCandidates({
+    latestCollection,
+    latestQueue,
+    decisions,
+    terminalJobIds,
+    blockedJobIds,
+    resolvedQueueKeys
+  });
+  const appliedDecisions = decisions
+    .filter((decision): decision is FrontierCodexAutonomousMergeDecision & { status: Extract<FrontierCodexAutonomousDecisionStatus, 'applied' | 'committed'> } => (
+      decision.status === 'applied' || decision.status === 'committed'
+    ))
+    .map(createDashboardMergeQueueAppliedDecision)
+    .sort((left, right) => left.finishedAt - right.finishedAt || left.id.localeCompare(right.id));
+  return {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_MERGE_QUEUE_HEALTH_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_MERGE_QUEUE_HEALTH_VERSION,
+    source: autoDrain ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND : 'not-collected',
+    available: !!autoDrain || !!artifacts,
+    activeLeases,
+    queueScopes,
+    coordinatorAssignments,
+    terminalDecisions,
+    blockedHumanQuestions,
+    realConflicts,
+    rerunCandidates,
+    appliedDecisions,
+    counts: {
+      activeLeaseCount: activeLeases.length,
+      queueScopeCount: queueScopes.length,
+      coordinatorAssignmentCount: coordinatorAssignments.length,
+      openCoordinatorAssignmentCount: activeAssignments.length,
+      terminalDecisionCount: terminalDecisions.length,
+      blockedHumanQuestionCount: blockedHumanQuestions.length,
+      realConflictCount: realConflicts.length,
+      rerunCandidateCount: rerunCandidates.length,
+      appliedDecisionCount: appliedDecisions.length,
+      committedDecisionCount: appliedDecisions.filter((decision) => decision.status === 'committed').length
+    }
+  };
+}
+
+function createDashboardMergeQueueLease(
+  lease: FrontierSwarmCoordinatorAgentDrainWork['leases'][number]
+): FrontierCodexDashboardMergeQueueLease {
+  return {
+    id: lease.id,
+    queueId: lease.queueId,
+    scopeId: lease.scopeId,
+    scopeKind: lease.scopeKind,
+    title: lease.title,
+    leaseScope: lease.leaseScope,
+    leaseKey: lease.leaseKey,
+    ...(lease.parentQueueId ? { parentQueueId: lease.parentQueueId } : {}),
+    ...(lease.lane ? { lane: lease.lane } : {}),
+    changedPaths: [...lease.changedPaths],
+    changedRegions: [...lease.changedRegions],
+    jobIds: [...lease.jobIds],
+    actions: Object.fromEntries(Object.entries(lease.actions).map(([action, jobIds]) => [action, [...jobIds].sort()]))
+  };
+}
+
+function createDashboardMergeQueueScope(
+  scope: FrontierSwarmHierarchicalMergeQueue['scopes'][number],
+  assignments: readonly FrontierCodexDashboardMergeQueueCoordinatorAssignment[],
+  activeLeaseQueueIds: ReadonlySet<string>,
+  activeLeaseScopeIds: ReadonlySet<string>,
+  activeLeaseKeys: ReadonlySet<string>
+): FrontierCodexDashboardMergeQueueScope {
+  const scopedAssignments = assignments.filter((assignment) => assignment.queueId === scope.id || assignment.promoteToQueueId === scope.id);
+  return {
+    id: scope.id,
+    kind: scope.kind,
+    ...(scope.parentId ? { parentId: scope.parentId } : {}),
+    title: scope.title,
+    ...(scope.lane ? { lane: scope.lane } : {}),
+    leaseKey: scope.leaseKey,
+    changedPaths: [...scope.changedPaths],
+    changedRegions: [...scope.changedRegions],
+    jobIds: [...scope.jobIds],
+    assignmentCount: scopedAssignments.length,
+    openAssignmentCount: scopedAssignments.filter((assignment) => assignment.open).length,
+    activeLease: activeLeaseQueueIds.has(scope.id) || activeLeaseScopeIds.has(scope.id) || activeLeaseKeys.has(scope.leaseKey)
+  };
+}
+
+function createDashboardMergeQueueCoordinatorAssignmentFromDrain(
+  assignment: FrontierSwarmCoordinatorAgentDrainWork['assignments'][number],
+  codexAssignment: FrontierCodexCoordinatorAgentDrainAssignment | undefined,
+  collectOnly: FrontierCodexDashboardCollectOnlyMetadata | undefined,
+  terminalJobIds: ReadonlySet<string>,
+  blockedJobIds: ReadonlySet<string>,
+  resolvedQueueKeys: ReadonlySet<string>
+): FrontierCodexDashboardMergeQueueCoordinatorAssignment {
+  const subject = { jobId: assignment.jobId, taskId: assignment.taskId, queueItemIds: assignment.queueItemIds };
+  const subjectOpen = dashboardQueueSubjectIsOpen(subject, terminalJobIds, blockedJobIds, resolvedQueueKeys);
+  const open = collectOnly ? subjectOpen : !assignment.terminal && subjectOpen;
+  return {
+    id: assignment.id,
+    jobId: assignment.jobId,
+    ...(assignment.taskId ? { taskId: assignment.taskId } : {}),
+    ...(assignment.lane ? { lane: assignment.lane } : {}),
+    ...(assignment.title ? { title: assignment.title } : {}),
+    queueItemIds: [...assignment.queueItemIds],
+    queueKeys: dashboardQueueSubjectAliasKeys(subject),
+    queueId: assignment.queueId,
+    queueKind: assignment.queueKind,
+    rootQueueId: assignment.rootQueueId,
+    parentQueueIds: [...assignment.parentQueueIds],
+    ...(assignment.promoteToQueueId ? { promoteToQueueId: assignment.promoteToQueueId } : {}),
+    leaseId: assignment.leaseId,
+    leaseScope: assignment.leaseScope,
+    leaseKey: assignment.leaseScope,
+    assignedAction: assignment.assignedAction,
+    decision: assignment.decision,
+    classification: assignment.classification,
+    terminal: assignment.terminal,
+    open,
+    ...(codexAssignment ? {
+      selected: codexAssignment.selected,
+      coordinatorDecision: codexAssignment.decision,
+      selectionReason: codexAssignment.selectionReason
+    } : {}),
+    reasons: [...assignment.reasons],
+    admitted: assignment.admitted,
+    changedPaths: [...assignment.changedPaths],
+    changedRegions: [...assignment.changedRegions],
+    conflictingJobIds: [...assignment.conflictingJobIds]
+  };
+}
+
+function createDashboardMergeQueueCoordinatorAssignmentFromQueue(
+  assignment: FrontierSwarmHierarchicalMergeQueue['assignments'][number],
+  codexAssignment: FrontierCodexCoordinatorAgentDrainAssignment | undefined,
+  collectOnly: FrontierCodexDashboardCollectOnlyMetadata | undefined,
+  terminalJobIds: ReadonlySet<string>,
+  blockedJobIds: ReadonlySet<string>,
+  resolvedQueueKeys: ReadonlySet<string>
+): FrontierCodexDashboardMergeQueueCoordinatorAssignment {
+  const parentScopeIds = dashboardStringArray((assignment as { parentScopeIds?: unknown }).parentScopeIds);
+  const queueItemIds = dashboardStringArray((assignment as { queueItemIds?: unknown }).queueItemIds);
+  const reasons = dashboardStringArray((assignment as { reasons?: unknown }).reasons);
+  const changedPaths = dashboardStringArray((assignment as { changedPaths?: unknown }).changedPaths);
+  const changedRegions = dashboardStringArray((assignment as { changedRegions?: unknown }).changedRegions);
+  const conflictingJobIds = dashboardStringArray((assignment as { conflictingJobIds?: unknown }).conflictingJobIds);
+  const scopeId = typeof (assignment as { scopeId?: unknown }).scopeId === 'string' && (assignment as { scopeId: string }).scopeId.length
+    ? (assignment as { scopeId: string }).scopeId
+    : 'unknown';
+  const leaseKey = typeof (assignment as { leaseKey?: unknown }).leaseKey === 'string' && (assignment as { leaseKey: string }).leaseKey.length
+    ? (assignment as { leaseKey: string }).leaseKey
+    : scopeId;
+  const subject = { jobId: assignment.jobId, taskId: assignment.taskId, queueItemIds };
+  const terminal = AUTO_DRAIN_TERMINAL_QUEUE_ACTIONS.has(assignment.action);
+  const subjectOpen = dashboardQueueSubjectIsOpen(subject, terminalJobIds, blockedJobIds, resolvedQueueKeys);
+  const open = collectOnly ? subjectOpen : !terminal && subjectOpen;
+  return {
+    jobId: assignment.jobId,
+    ...(assignment.taskId ? { taskId: assignment.taskId } : {}),
+    ...(assignment.lane ? { lane: assignment.lane } : {}),
+    ...(assignment.title ? { title: assignment.title } : {}),
+    queueItemIds,
+    queueKeys: dashboardQueueSubjectAliasKeys(subject),
+    queueId: scopeId,
+    parentQueueIds: parentScopeIds,
+    ...(assignment.promoteToScopeId ? { promoteToQueueId: assignment.promoteToScopeId } : {}),
+    leaseKey,
+    assignedAction: assignment.action,
+    decision: dashboardMergeQueueDecisionForAction(assignment.action),
+    classification: terminal ? 'terminal' : 'non-terminal',
+    terminal,
+    open,
+    ...(codexAssignment ? {
+      selected: codexAssignment.selected,
+      coordinatorDecision: codexAssignment.decision,
+      selectionReason: codexAssignment.selectionReason
+    } : {}),
+    reasons,
+    admitted: assignment.admitted,
+    changedPaths,
+    changedRegions,
+    conflictingJobIds
+  };
+}
+
+function dashboardStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => String(entry).trim()).filter((entry) => entry.length > 0)
+    : [];
+}
+
+function dashboardMergeQueueDecisionForAction(action: FrontierSwarmMergeQueueAssignmentAction): string {
+  if (action === 'apply-local') return 'applied';
+  if (action === 'queue-local') return 'queued';
+  if (action === 'promote') return 'escalated';
+  if (action === 'rerun') return 'rerun';
+  if (action === 'reject') return 'rejected';
+  if (action === 'record-only') return 'recorded';
+  if (action === 'block') return 'blocked';
+  return action;
+}
+
+function createDashboardMergeQueueTerminalDecisionFromDrain(
+  decision: FrontierSwarmCoordinatorAgentDrainWork['terminalDecisions'][number],
+  assignment: FrontierSwarmCoordinatorAgentDrainWork['assignments'][number] | undefined
+): FrontierCodexDashboardMergeQueueTerminalDecision {
+  const subject = { jobId: decision.jobId, taskId: assignment?.taskId, queueItemIds: decision.queueItemIds };
+  return {
+    source: 'coordinator-agent-drain-work',
+    id: decision.id,
+    jobId: decision.jobId,
+    ...(assignment?.taskId ? { taskId: assignment.taskId } : {}),
+    queueItemIds: [...decision.queueItemIds],
+    queueKeys: dashboardQueueSubjectAliasKeys(subject),
+    status: decision.decision,
+    assignedAction: decision.assignedAction,
+    queueId: decision.queueId,
+    leaseId: decision.leaseId,
+    leaseScope: decision.leaseScope,
+    reasons: [...decision.reasons],
+    changedPaths: assignment ? [...assignment.changedPaths] : [],
+    changedRegions: assignment ? [...assignment.changedRegions] : []
+  };
+}
+
+function createDashboardMergeQueueTerminalDecisionFromAutonomous(
+  decision: FrontierCodexAutonomousMergeDecision
+): FrontierCodexDashboardMergeQueueTerminalDecision {
+  return {
+    source: 'autonomous-apply',
+    id: decision.id,
+    jobId: decision.jobId,
+    ...(decision.taskId ? { taskId: decision.taskId } : {}),
+    queueItemIds: [...decision.queueItemIds],
+    queueKeys: dashboardAutonomousDecisionAliasKeys(decision),
+    status: decision.status,
+    lockScope: decision.lockScope,
+    lockKeys: [...decision.lockKeys],
+    reasons: [decision.reason],
+    bundlePath: decision.bundlePath,
+    ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+    changedPaths: [...decision.changedPaths],
+    changedRegions: [...decision.changedRegions],
+    finishedAt: decision.finishedAt,
+    ...(decision.commit ? { commit: decision.commit } : {})
+  };
+}
+
+function createDashboardMergeQueueHumanQuestion(
+  decision: FrontierCodexAutonomousMergeDecision,
+  humanQuestions: FrontierCodexDashboardHumanQuestions
+): FrontierCodexDashboardMergeQueueHumanQuestion {
+  return {
+    id: decision.id,
+    jobId: decision.jobId,
+    ...(decision.taskId ? { taskId: decision.taskId } : {}),
+    queueItemIds: [...decision.queueItemIds],
+    queueKeys: dashboardAutonomousDecisionAliasKeys(decision),
+    questionIds: dashboardHumanQuestionIds(decision),
+    questionCodes: dashboardHumanQuestionCodes(decision),
+    reason: decision.reason,
+    answered: humanQuestions.answeredDecisionIds.includes(decision.id),
+    answerIds: humanQuestions.answerIds,
+    answerRoutes: humanQuestions.answerRoutes,
+    answerEvidencePaths: humanQuestions.answerEvidencePaths,
+    bundlePath: decision.bundlePath,
+    ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+    changedPaths: [...decision.changedPaths],
+    changedRegions: [...decision.changedRegions],
+    finishedAt: decision.finishedAt
+  };
+}
+
+function createDashboardMergeQueueConflicts(
+  latestIteration: FrontierCodexSwarmAutoDrainIteration | undefined,
+  latestQueue: FrontierSwarmHierarchicalMergeQueue | undefined,
+  decisions: readonly FrontierCodexAutonomousMergeDecision[]
+): FrontierCodexDashboardMergeQueueConflict[] {
+  const conflicts = new Map<string, FrontierCodexDashboardMergeQueueConflict>();
+  for (const conflict of latestIteration?.grouping?.conflicts ?? []) {
+    const key = `grouping:${conflict.kind}:${conflict.key}:${conflict.jobIds.join(':')}`;
+    conflicts.set(key, {
+      source: 'auto-drain-grouping',
+      kind: conflict.kind,
+      key: conflict.key,
+      jobIds: [...conflict.jobIds],
+      queueItemIds: [],
+      queueKeys: conflict.jobIds.map((jobId) => `job:${jobId}`).sort(),
+      changedPaths: [],
+      changedRegions: [],
+      reasons: ['auto-drain-grouping-conflict'],
+      ...(conflict.value ? { value: conflict.value } : {})
+    });
+  }
+  for (const assignment of latestQueue?.assignments ?? []) {
+    const conflictingJobIds = dashboardStringArray((assignment as { conflictingJobIds?: unknown }).conflictingJobIds);
+    if (!conflictingJobIds.length) continue;
+    const queueItemIds = dashboardStringArray((assignment as { queueItemIds?: unknown }).queueItemIds);
+    const changedPaths = dashboardStringArray((assignment as { changedPaths?: unknown }).changedPaths);
+    const changedRegions = dashboardStringArray((assignment as { changedRegions?: unknown }).changedRegions);
+    const reasons = dashboardStringArray((assignment as { reasons?: unknown }).reasons);
+    const scopeId = typeof (assignment as { scopeId?: unknown }).scopeId === 'string' && (assignment as { scopeId: string }).scopeId.length
+      ? (assignment as { scopeId: string }).scopeId
+      : 'unknown';
+    const leaseKey = typeof (assignment as { leaseKey?: unknown }).leaseKey === 'string' && (assignment as { leaseKey: string }).leaseKey.length
+      ? (assignment as { leaseKey: string }).leaseKey
+      : scopeId;
+    const subject = { jobId: assignment.jobId, taskId: assignment.taskId, queueItemIds };
+    const key = `queue:${scopeId}:${assignment.jobId}:${conflictingJobIds.join(':')}`;
+    conflicts.set(key, {
+      source: 'hierarchical-merge-queue',
+      kind: 'queue-conflict',
+      key,
+      jobIds: uniqueStrings([assignment.jobId, ...conflictingJobIds]).sort(),
+      ...(assignment.taskId ? { taskId: assignment.taskId } : {}),
+      queueItemIds,
+      queueKeys: dashboardQueueSubjectAliasKeys(subject),
+      scopeId,
+      leaseKey,
+      changedPaths,
+      changedRegions,
+      reasons
+    });
+  }
+  for (const decision of decisions.filter((entry) => entry.status === 'conflict-blocked')) {
+    const key = `autonomous:${decision.id}`;
+    conflicts.set(key, {
+      source: 'autonomous-apply',
+      kind: 'current-head-conflict',
+      key,
+      jobIds: [decision.jobId],
+      ...(decision.taskId ? { taskId: decision.taskId } : {}),
+      queueItemIds: [...decision.queueItemIds],
+      queueKeys: dashboardAutonomousDecisionAliasKeys(decision),
+      ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+      bundlePath: decision.bundlePath,
+      changedPaths: [...decision.changedPaths],
+      changedRegions: [...decision.changedRegions],
+      reasons: [decision.reason],
+      ...(decision.headBefore ? { headBefore: decision.headBefore } : {}),
+      ...(decision.headAfter ? { headAfter: decision.headAfter } : {})
+    });
+  }
+  return Array.from(conflicts.values()).sort((left, right) => `${left.source}:${left.key}`.localeCompare(`${right.source}:${right.key}`));
+}
+
+function createDashboardMergeQueueRerunCandidates(input: {
+  latestCollection: FrontierCodexCollectResult | undefined;
+  latestQueue: FrontierSwarmHierarchicalMergeQueue | undefined;
+  decisions: readonly FrontierCodexAutonomousMergeDecision[];
+  terminalJobIds: ReadonlySet<string>;
+  blockedJobIds: ReadonlySet<string>;
+  resolvedQueueKeys: ReadonlySet<string>;
+}): FrontierCodexDashboardMergeQueueRerunCandidate[] {
+  const candidates = new Map<string, FrontierCodexDashboardMergeQueueRerunCandidate>();
+  const latestCollectionPath = dashboardCollectionArtifactPath(input.latestCollection, 'collectionPath', 'collection.json');
+  const latestMergeQueuePath = dashboardCollectionArtifactPath(input.latestCollection, 'hierarchicalMergeQueuePath', 'hierarchical-merge-queue.json');
+  const assignments = input.latestQueue?.assignments ?? [];
+  const assignmentsByJobId = new Map(assignments.map((assignment) => [assignment.jobId, assignment]));
+  const entriesByJobId = input.latestCollection ? collectionEntriesByJobId(input.latestCollection) : new Map<string, FrontierCodexCollectedBundle>();
+  for (const entry of input.latestCollection?.buckets['stale-against-head'] ?? []) {
+    const record = dashboardAutoDrainGroupingRecord(entry);
+    if (!record) continue;
+    const subject = { jobId: record.jobId, taskId: record.taskId, queueItemIds: record.queueItemIds };
+    if (!record.changedPaths.length) continue;
+    if (!dashboardQueueSubjectIsOpen(subject, input.terminalJobIds, input.blockedJobIds, input.resolvedQueueKeys)) continue;
+    const assignment = assignmentsByJobId.get(record.jobId);
+    mergeDashboardMergeQueueRerunCandidate(candidates, subject, {
+      jobId: record.jobId,
+      taskId: record.taskId,
+      queueItemIds: record.queueItemIds,
+      sourceKinds: assignment?.action === 'rerun' ? ['stale-against-head', 'queue-rerun'] : ['stale-against-head'],
+      reasons: uniqueStrings(['stale-against-head', ...entry.bundle.reasons, ...(assignment?.reasons ?? [])]),
+      sourcePatchPaths: autoDrainRerunPatchPathsForEntry(entry, record),
+      sourceBundlePaths: autoDrainRerunBundlePathsForEntry(entry),
+      sourceCollectionPaths: compactArtifactPaths([latestCollectionPath]),
+      sourceMergeQueuePaths: compactArtifactPaths([latestMergeQueuePath]),
+      targetRefs: record.changedPaths,
+      changedRegions: record.changedRegions,
+      queueActions: assignment ? [assignment.action] : [],
+      conflictingJobIds: assignment?.conflictingJobIds ?? [],
+      scopeIds: assignment ? [assignment.scopeId] : [],
+      leaseKeys: assignment ? [assignment.leaseKey] : []
+    });
+  }
+  for (const assignment of assignments.filter((entry) => entry.action === 'rerun')) {
+    if (!dashboardQueueSubjectIsOpen(assignment, input.terminalJobIds, input.blockedJobIds, input.resolvedQueueKeys)) continue;
+    const entry = entriesByJobId.get(assignment.jobId);
+    if (!entry) continue;
+    const record = dashboardAutoDrainGroupingRecord(entry);
+    if (!record) continue;
+    const assignmentChangedPaths = dashboardStringArray((assignment as { changedPaths?: unknown }).changedPaths);
+    const assignmentChangedRegions = dashboardStringArray((assignment as { changedRegions?: unknown }).changedRegions);
+    const assignmentQueueItemIds = dashboardStringArray((assignment as { queueItemIds?: unknown }).queueItemIds);
+    const assignmentReasons = dashboardStringArray((assignment as { reasons?: unknown }).reasons);
+    const assignmentConflictingJobIds = dashboardStringArray((assignment as { conflictingJobIds?: unknown }).conflictingJobIds);
+    const assignmentScopeId = typeof (assignment as { scopeId?: unknown }).scopeId === 'string' && (assignment as { scopeId: string }).scopeId.length
+      ? (assignment as { scopeId: string }).scopeId
+      : 'unknown';
+    const assignmentLeaseKey = typeof (assignment as { leaseKey?: unknown }).leaseKey === 'string' && (assignment as { leaseKey: string }).leaseKey.length
+      ? (assignment as { leaseKey: string }).leaseKey
+      : assignmentScopeId;
+    if (!assignmentChangedPaths.length) continue;
+    mergeDashboardMergeQueueRerunCandidate(candidates, assignment, {
+      jobId: assignment.jobId,
+      taskId: assignment.taskId ?? record.taskId,
+      queueItemIds: assignmentQueueItemIds.length ? assignmentQueueItemIds : record.queueItemIds,
+      sourceKinds: ['queue-rerun'],
+      reasons: uniqueStrings(['queue-rerun', ...assignmentReasons]),
+      sourcePatchPaths: autoDrainRerunPatchPathsForEntry(entry, record),
+      sourceBundlePaths: autoDrainRerunBundlePathsForEntry(entry),
+      sourceCollectionPaths: compactArtifactPaths([latestCollectionPath]),
+      sourceMergeQueuePaths: compactArtifactPaths([latestMergeQueuePath]),
+      targetRefs: assignmentChangedPaths,
+      changedRegions: assignmentChangedRegions,
+      queueActions: [assignment.action],
+      conflictingJobIds: assignmentConflictingJobIds,
+      scopeIds: [assignmentScopeId],
+      leaseKeys: [assignmentLeaseKey]
+    });
+  }
+  for (const decision of input.decisions.filter((entry) => entry.status === 'conflict-blocked' || entry.status === 'rerun')) {
+    if (!decision.patchPath || !decision.changedPaths.length) continue;
+    mergeDashboardMergeQueueRerunCandidate(candidates, decision, {
+      jobId: decision.jobId,
+      taskId: decision.taskId,
+      queueItemIds: decision.queueItemIds.length ? decision.queueItemIds : [decision.taskId ?? decision.jobId],
+      sourceKinds: [decision.status === 'conflict-blocked' ? 'conflict-blocked' : 'decision-rerun'],
+      reasons: uniqueStrings([decision.status, decision.reason]),
+      sourceHeads: compactArtifactPaths([sourceHeadForAutonomousDecision(decision)]),
+      sourcePatchPaths: [decision.patchPath],
+      sourceBundlePaths: [decision.bundlePath],
+      decisionStatuses: [decision.status],
+      targetRefs: decision.changedPaths,
+      changedRegions: decision.changedRegions
+    });
+  }
+  return Array.from(candidates.values()).sort((left, right) => dashboardMergeQueueRerunCandidateSubject(left).localeCompare(dashboardMergeQueueRerunCandidateSubject(right)));
+}
+
+function dashboardAutoDrainGroupingRecord(entry: FrontierCodexCollectedBundle): AutoDrainGroupingRecord | undefined {
+  const bundle = entry.bundle as Partial<FrontierSwarmMergeBundle>;
+  if (!Array.isArray(bundle.changedPaths) || !Array.isArray(bundle.changedRegions)) return undefined;
+  return autoDrainGroupingRecord(entry);
+}
+
+function dashboardCollectionArtifactPath(
+  collection: FrontierCodexCollectResult | undefined,
+  key: keyof FrontierCodexCollectArtifacts,
+  filename: string
+): string | undefined {
+  const artifactPath = collection?.artifacts?.[key];
+  if (typeof artifactPath === 'string' && artifactPath.length > 0) return artifactPath;
+  const outDir = collection && typeof (collection as { outDir?: unknown }).outDir === 'string'
+    ? (collection as { outDir: string }).outDir
+    : undefined;
+  return outDir ? path.join(outDir, filename) : undefined;
+}
+
+function mergeDashboardMergeQueueRerunCandidate(
+  candidates: Map<string, FrontierCodexDashboardMergeQueueRerunCandidate>,
+  subject: { jobId: string; taskId?: string; queueItemIds?: readonly string[] },
+  input: Partial<FrontierCodexDashboardMergeQueueRerunCandidate> & { jobId: string }
+): void {
+  const key = dashboardQueueSubjectKeys(subject)[0] ?? `job:${input.jobId}`;
+  const existing = candidates.get(key);
+  const base: FrontierCodexDashboardMergeQueueRerunCandidate = existing ?? {
+    jobId: input.jobId,
+    taskId: input.taskId,
+    queueItemIds: [],
+    queueKeys: [],
+    sourceKinds: [],
+    reasons: [],
+    sourceHeads: [],
+    sourcePatchPaths: [],
+    sourceBundlePaths: [],
+    sourceCollectionPaths: [],
+    sourceMergeQueuePaths: [],
+    sourceDecisionLogPaths: [],
+    targetRefs: [],
+    changedRegions: [],
+    queueActions: [],
+    decisionStatuses: [],
+    conflictingJobIds: [],
+    scopeIds: [],
+    leaseKeys: []
+  };
+  const queueItemIds = uniqueStrings([...base.queueItemIds, ...(input.queueItemIds ?? [])]).sort();
+  const mergedSubject = { jobId: base.jobId, taskId: base.taskId ?? input.taskId, queueItemIds };
+  candidates.set(key, {
+    ...base,
+    taskId: base.taskId ?? input.taskId,
+    queueItemIds,
+    queueKeys: dashboardQueueSubjectAliasKeys(mergedSubject),
+    sourceKinds: uniqueStrings([...base.sourceKinds, ...(input.sourceKinds ?? [])]) as FrontierCodexDashboardMergeQueueRerunSourceKind[],
+    reasons: uniqueStrings([...base.reasons, ...(input.reasons ?? [])]).sort(),
+    sourceHeads: compactArtifactPaths([...base.sourceHeads, ...(input.sourceHeads ?? [])]).sort(),
+    sourcePatchPaths: compactArtifactPaths([...base.sourcePatchPaths, ...(input.sourcePatchPaths ?? [])]).sort(),
+    sourceBundlePaths: compactArtifactPaths([...base.sourceBundlePaths, ...(input.sourceBundlePaths ?? [])]).sort(),
+    sourceCollectionPaths: compactArtifactPaths([...base.sourceCollectionPaths, ...(input.sourceCollectionPaths ?? [])]).sort(),
+    sourceMergeQueuePaths: compactArtifactPaths([...base.sourceMergeQueuePaths, ...(input.sourceMergeQueuePaths ?? [])]).sort(),
+    sourceDecisionLogPaths: compactArtifactPaths([...base.sourceDecisionLogPaths, ...(input.sourceDecisionLogPaths ?? [])]).sort(),
+    targetRefs: uniqueWorkspacePaths([...base.targetRefs, ...(input.targetRefs ?? [])]).sort(),
+    changedRegions: uniqueStrings([...base.changedRegions, ...(input.changedRegions ?? [])]).sort(),
+    queueActions: uniqueStrings([...base.queueActions, ...(input.queueActions ?? [])]) as FrontierSwarmMergeQueueAssignmentAction[],
+    decisionStatuses: uniqueStrings([...base.decisionStatuses, ...(input.decisionStatuses ?? [])]) as FrontierCodexAutonomousDecisionStatus[],
+    conflictingJobIds: uniqueStrings([...base.conflictingJobIds, ...(input.conflictingJobIds ?? [])]).sort(),
+    scopeIds: uniqueStrings([...base.scopeIds, ...(input.scopeIds ?? [])]).sort(),
+    leaseKeys: uniqueStrings([...base.leaseKeys, ...(input.leaseKeys ?? [])]).sort()
+  });
+}
+
+function dashboardMergeQueueRerunCandidateSubject(candidate: FrontierCodexDashboardMergeQueueRerunCandidate): string {
+  return candidate.taskId ?? candidate.queueItemIds[0] ?? candidate.jobId;
+}
+
+function createDashboardMergeQueueAppliedDecision(
+  decision: FrontierCodexAutonomousMergeDecision & { status: Extract<FrontierCodexAutonomousDecisionStatus, 'applied' | 'committed'> }
+): FrontierCodexDashboardMergeQueueAppliedDecision {
+  return {
+    id: decision.id,
+    jobId: decision.jobId,
+    ...(decision.taskId ? { taskId: decision.taskId } : {}),
+    queueItemIds: [...decision.queueItemIds],
+    queueKeys: dashboardAutonomousDecisionAliasKeys(decision),
+    status: decision.status,
+    reason: decision.reason,
+    bundlePath: decision.bundlePath,
+    ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+    changedPaths: [...decision.changedPaths],
+    changedRegions: [...decision.changedRegions],
+    lockScope: decision.lockScope,
+    lockKeys: [...decision.lockKeys],
+    finishedAt: decision.finishedAt,
+    ...(decision.commit ? { commit: decision.commit } : {}),
+    verification: decision.verification
   };
 }
 

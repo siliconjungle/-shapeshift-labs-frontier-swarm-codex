@@ -1280,9 +1280,20 @@ assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.deferredCoordin
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.deferredPromoteCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.recordOnlyCount, 0);
 assert.deepStrictEqual(autoDrainDashboard.queueHealth, autoDrainDashboard.queueMetadata.queueHealth);
+assert.deepStrictEqual(autoDrainDashboard.mergeQueueHealth, autoDrainDashboard.queueMetadata.mergeQueueHealth);
 assert.deepStrictEqual(autoDrainDashboard.humanQuestions, autoDrainDashboard.queueMetadata.humanQuestions);
 assert.deepStrictEqual(autoDrainDashboard.operatorSummary, autoDrainDashboard.queueMetadata.operatorSummary);
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.kind, 'frontier.swarm-codex.dashboard-queue-health');
+assert.strictEqual(autoDrainDashboard.queueMetadata.mergeQueueHealth.kind, 'frontier.swarm-codex.dashboard-merge-queue-health');
+assert.strictEqual(autoDrainDashboard.queueMetadata.mergeQueueHealth.available, true);
+assert.strictEqual(autoDrainDashboard.queueMetadata.mergeQueueHealth.counts.activeLeaseCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.mergeQueueHealth.counts.appliedDecisionCount, 1);
+assert.strictEqual(autoDrainDashboard.queueMetadata.mergeQueueHealth.counts.committedDecisionCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.mergeQueueHealth.appliedDecisions[0].status, 'applied');
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.mergeQueueHealth.appliedDecisions[0].queueItemIds, ['apply-task']);
+assert.ok(autoDrainDashboard.queueMetadata.mergeQueueHealth.queueScopes.length > 0);
+assert.ok(autoDrainDashboard.queueMetadata.mergeQueueHealth.coordinatorAssignments.some((assignment) => assignment.assignedAction === 'apply-local'));
+assert.ok(autoDrainDashboard.queueMetadata.mergeQueueHealth.terminalDecisions.some((decision) => decision.source === 'autonomous-apply' && decision.status === 'applied'));
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.available, true);
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.leaseCount, 0);
@@ -2104,6 +2115,7 @@ const autoDrainDirtyDashboard = JSON.parse(await fs.readFile(path.join(autoDrain
 assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.available, true);
 assert.strictEqual(autoDrainDirtyDashboard.autoDrain.skippedReason, 'dirty-worktree');
 assert.deepStrictEqual(autoDrainDirtyDashboard.queueHealth, autoDrainDirtyDashboard.queueMetadata.queueHealth);
+assert.deepStrictEqual(autoDrainDirtyDashboard.mergeQueueHealth, autoDrainDirtyDashboard.queueMetadata.mergeQueueHealth);
 assert.deepStrictEqual(autoDrainDirtyDashboard.humanQuestions, autoDrainDirtyDashboard.queueMetadata.humanQuestions);
 assert.deepStrictEqual(autoDrainDirtyDashboard.operatorSummary, autoDrainDirtyDashboard.queueMetadata.operatorSummary);
 assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.collectOnly.reason, 'dirty-worktree');
@@ -2123,6 +2135,10 @@ assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.operatorSummary.counts.
 assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
 const autoDrainDirtyOperatorCards = new Map(autoDrainDirtyDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
 assert.match(autoDrainDirtyOperatorCards.get('coordinator-queues').action, /Clean or isolate dirty paths/);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.mergeQueueHealth.counts.activeLeaseCount, 1);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.mergeQueueHealth.counts.openCoordinatorAssignmentCount, 1);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.mergeQueueHealth.activeLeases.length, 1);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.mergeQueueHealth.coordinatorAssignments.some((assignment) => assignment.open && assignment.assignedAction === 'apply-local'), true);
 
 const autoDrainBudgetRepo = path.join(tmp, 'auto-drain-budget-repo');
 await fs.mkdir(path.join(autoDrainBudgetRepo, 'src'), { recursive: true });
@@ -2352,6 +2368,7 @@ assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.deferredCoordinatorCount, 0);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.actionCounts.deferredPromoteCount, 0);
 assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueHealth, autoDrainConflictBlockedDashboard.queueMetadata.queueHealth);
+assert.deepStrictEqual(autoDrainConflictBlockedDashboard.mergeQueueHealth, autoDrainConflictBlockedDashboard.queueMetadata.mergeQueueHealth);
 assert.deepStrictEqual(autoDrainConflictBlockedDashboard.humanQuestions, autoDrainConflictBlockedDashboard.queueMetadata.humanQuestions);
 assert.deepStrictEqual(autoDrainConflictBlockedDashboard.operatorSummary, autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.queueHealth.staleCount, 0);
@@ -2373,6 +2390,10 @@ assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictR
 ]);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].patchPath, autoDrainConflictBlockedDecision.patchPath);
 assert.ok(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].patchPath.endsWith('changes.patch'));
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.mergeQueueHealth.counts.realConflictCount >= 1, true);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.mergeQueueHealth.counts.rerunCandidateCount, 1);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.mergeQueueHealth.realConflicts.some((conflict) => conflict.kind === 'current-head-conflict'), true);
+assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.mergeQueueHealth.rerunCandidates.some((candidate) => candidate.sourceKinds.includes('conflict-blocked')), true);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.status, 'warning');
 assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /1 current-head conflict/);
 assert.match(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.headline, /coordinator retry work/);
@@ -2619,8 +2640,12 @@ await writeSwarmCoordinatorSnapshot(collapsedDecisionDashboardPath, {
 });
 const collapsedDecisionDashboard = JSON.parse(await fs.readFile(collapsedDecisionDashboardPath, 'utf8'));
 assert.deepStrictEqual(collapsedDecisionDashboard.operatorSummary, collapsedDecisionDashboard.queueMetadata.operatorSummary);
+assert.deepStrictEqual(collapsedDecisionDashboard.mergeQueueHealth, collapsedDecisionDashboard.queueMetadata.mergeQueueHealth);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.appliedDecisionCount, 3);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committedDecisionCount, 2);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.appliedDecisionCount, 3);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.committedDecisionCount, 2);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.rerunCandidateCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.rerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
@@ -2845,6 +2870,7 @@ await writeSwarmCoordinatorSnapshot(explicitHumanQuestionDashboardPath, {
 });
 const explicitHumanQuestionDashboard = JSON.parse(await fs.readFile(explicitHumanQuestionDashboardPath, 'utf8'));
 assert.strictEqual(explicitHumanQuestionDashboard.autoDrain.summary.humanBlockedCount, 3);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.mergeQueueHealth, explicitHumanQuestionDashboard.queueMetadata.mergeQueueHealth);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.humanAnswers, explicitHumanQuestionDashboard.queueMetadata.humanAnswers);
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.kind, 'frontier.swarm-codex.dashboard-human-answers');
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers.routingKind, 'frontier.swarm-codex.human-answer-routing');
@@ -2891,6 +2917,10 @@ assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestio
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.reasons, [
   'Can the parent coordinator assign this cross-lane surface?'
+]);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.mergeQueueHealth.counts.blockedHumanQuestionCount, 1);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.mergeQueueHealth.blockedHumanQuestions.map((question) => question.id), [
+  'question-mark-human-question'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedDecisionIds, ['prefixed-human-question']);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedJobIds, ['prefixed-human-question-job']);
@@ -3006,6 +3036,7 @@ assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.b
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.trueBlockerCount, 1);
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.conflictBlockedDecisionCount, 0);
 assert.deepStrictEqual(autoDrainClassificationDashboard.queueHealth, autoDrainClassificationDashboard.queueMetadata.queueHealth);
+assert.deepStrictEqual(autoDrainClassificationDashboard.mergeQueueHealth, autoDrainClassificationDashboard.queueMetadata.mergeQueueHealth);
 assert.deepStrictEqual(autoDrainClassificationDashboard.humanQuestions, autoDrainClassificationDashboard.queueMetadata.humanQuestions);
 assert.deepStrictEqual(autoDrainClassificationDashboard.operatorSummary, autoDrainClassificationDashboard.queueMetadata.operatorSummary);
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.queueHealth.staleOrRerunCount, 1);
@@ -3025,6 +3056,10 @@ assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.r
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.needsHumanPortCount, 3);
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.failedEvidenceCount, 2);
 assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 1);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.mergeQueueHealth.counts.rerunCandidateCount, 1);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.mergeQueueHealth.rerunCandidates[0].sourceKinds.includes('stale-against-head'), true);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.mergeQueueHealth.coordinatorAssignments.some((assignment) => assignment.assignedAction === 'block' && assignment.terminal), true);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.mergeQueueHealth.terminalDecisions.some((decision) => decision.status === 'blocked'), true);
 const autoDrainClassificationQueue = JSON.parse(await fs.readFile(autoDrainClassificationDashboard.queueMetadata.paths.mergeQueues[0], 'utf8'));
 const autoDrainClassificationAssignments = new Map(autoDrainClassificationQueue.assignments.map((assignment) => [assignment.jobId, assignment]));
 assert.strictEqual(autoDrainClassificationAssignments.get('classification-coordinator-review').action, 'promote');
