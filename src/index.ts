@@ -967,6 +967,7 @@ export interface FrontierCodexDashboardQueueMetadata {
   version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION;
   source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND | 'not-collected';
   available: boolean;
+  collectOnly?: FrontierCodexDashboardCollectOnlyMetadata;
   paths: {
     autoDrain: string[];
     collections: string[];
@@ -993,6 +994,12 @@ export interface FrontierCodexDashboardQueueMetadata {
   queueHealth: FrontierCodexDashboardQueueHealth;
   humanQuestions: FrontierCodexDashboardHumanQuestions;
   operatorSummary: FrontierCodexDashboardOperatorQueueSummary;
+}
+
+export interface FrontierCodexDashboardCollectOnlyMetadata {
+  reason: string;
+  dirtyPaths: string[];
+  dirtyPathCount: number;
 }
 
 export interface FrontierCodexDashboardQueueHealth {
@@ -1050,6 +1057,7 @@ export interface FrontierCodexDashboardOperatorQueueSummary {
   version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION;
   source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND | 'not-collected';
   available: boolean;
+  collectOnly?: FrontierCodexDashboardCollectOnlyMetadata;
   status: FrontierCodexDashboardOperatorQueueStatus;
   headline: string;
   cards: FrontierCodexDashboardOperatorQueueCard[];
@@ -1286,44 +1294,7 @@ async function runCodexSwarmAutoDrain(input: {
   const autoDrainPath = path.join(outDir, 'auto-drain.json');
   await fs.mkdir(outDir, { recursive: true });
   const dirtyPaths = normalized.allowDirty ? [] : await gitDirtyExcluding(input.cwd, [input.outDir, outDir]);
-  if (dirtyPaths.length) {
-    const artifacts = createAutoDrainArtifactMetadata({ outDir, autoDrainPath, generatedAt, iterations: [] });
-    const result: FrontierCodexSwarmAutoDrainResult = {
-      kind: FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND,
-      version: FRONTIER_SWARM_CODEX_AUTO_DRAIN_VERSION,
-      ok: false,
-      enabled: true,
-      cwd: input.cwd,
-      runDir: input.outDir,
-      outDir,
-      generatedAt,
-      skippedReason: 'dirty-worktree',
-      dirtyPaths,
-      iterations: [],
-      lockKeys: [],
-      lockScopeCounts: emptyAutonomousLockScopeCounts(),
-      terminalJobIds: [],
-      blockedJobIds: [],
-      artifacts,
-      summary: {
-        iterationCount: 0,
-        collectionCount: 0,
-        applyCount: 0,
-        terminalCount: 0,
-        blockedCount: 0,
-        conflictBlockedCount: 0,
-        humanBlockedCount: 0,
-        remainingReadyCount: 0,
-        admittedCount: 0,
-        deferredCount: 0,
-        reviewerAssignmentCount: 0,
-        reviewerTaskCount: 0,
-        patchStackCount: 0
-      }
-    };
-    await writeJsonAtomic(autoDrainPath, result);
-    return result;
-  }
+  const collectOnlyReason = dirtyPaths.length ? 'dirty-worktree' : undefined;
 
   const iterations: FrontierCodexSwarmAutoDrainIteration[] = [];
   const terminalJobIds = new Set<string>();
@@ -1385,7 +1356,7 @@ async function runCodexSwarmAutoDrain(input: {
       coordinatorAgentDrain: coordinatorAgentDrain.artifact
     });
     remainingReadyCount = allReadyJobIds.length;
-    if (!allReadyJobIds.length || !drainAdmittedJobIds.length) {
+    if (collectOnlyReason || !allReadyJobIds.length || !drainAdmittedJobIds.length) {
       iterations.push({
         index: index + 1,
         collection,
@@ -1472,12 +1443,14 @@ async function runCodexSwarmAutoDrain(input: {
   const result: FrontierCodexSwarmAutoDrainResult = {
     kind: FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND,
     version: FRONTIER_SWARM_CODEX_AUTO_DRAIN_VERSION,
-    ok: [...blockedJobIds].length === 0,
+    ok: dirtyPaths.length === 0 && [...blockedJobIds].length === 0,
     enabled: true,
     cwd: input.cwd,
     runDir: input.outDir,
     outDir,
     generatedAt,
+    ...(collectOnlyReason ? { skippedReason: collectOnlyReason } : {}),
+    ...(dirtyPaths.length ? { dirtyPaths } : {}),
     iterations,
     lockKeys: lockSummary.lockKeys,
     lockScopeCounts: lockSummary.lockScopeCounts,
@@ -2944,6 +2917,7 @@ function createDashboardQueueMetadata(
 ): FrontierCodexDashboardQueueMetadata {
   const iterations = artifacts?.iterations ?? [];
   const decisionSummary = summarizeDashboardAutonomousDecisions(autoDrain);
+  const collectOnly = createDashboardCollectOnlyMetadata(autoDrain);
   const staleCount = artifacts?.grouping.staleAgainstHeadCount ?? 0;
   const queueRerunCount = artifacts?.mergeQueue.rerunCount ?? 0;
   const rerunCount = queueRerunCount + decisionSummary.rerunDecisionCount;
@@ -2986,12 +2960,13 @@ function createDashboardQueueMetadata(
     coordinatorReviewTaskCount: artifacts?.reviewer.taskCount ?? 0,
     humanQuestionCount: humanQuestions.count
   };
-  const operatorSummary = createDashboardOperatorQueueSummary(queueHealth, humanQuestions);
+  const operatorSummary = createDashboardOperatorQueueSummary(queueHealth, humanQuestions, collectOnly);
   return {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION,
     source: artifacts ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND : 'not-collected',
     available: !!artifacts,
+    ...(collectOnly ? { collectOnly } : {}),
     paths: {
       autoDrain: artifacts ? [artifacts.autoDrainPath] : [],
       collections: compactArtifactPaths(iterations.map((iteration) => iteration.collectionPath)),
@@ -3021,9 +2996,20 @@ function createDashboardQueueMetadata(
   };
 }
 
+function createDashboardCollectOnlyMetadata(autoDrain: FrontierCodexSwarmAutoDrainResult | null): FrontierCodexDashboardCollectOnlyMetadata | undefined {
+  if (!autoDrain?.skippedReason) return undefined;
+  const dirtyPaths = autoDrain.skippedReason === 'dirty-worktree' ? [...(autoDrain.dirtyPaths ?? [])].sort() : [];
+  return {
+    reason: autoDrain.skippedReason,
+    dirtyPaths,
+    dirtyPathCount: dirtyPaths.length
+  };
+}
+
 function createDashboardOperatorQueueSummary(
   queueHealth: FrontierCodexDashboardQueueHealth,
-  humanQuestions: FrontierCodexDashboardHumanQuestions
+  humanQuestions: FrontierCodexDashboardHumanQuestions,
+  collectOnly?: FrontierCodexDashboardCollectOnlyMetadata
 ): FrontierCodexDashboardOperatorQueueSummary {
   const available = queueHealth.available;
   const queueBlockActionCount = Math.max(0, queueHealth.trueBlockerCount);
@@ -3040,12 +3026,16 @@ function createDashboardOperatorQueueSummary(
           : queueHealth.activeCoordinatorQueueCount > 0 || queueHealth.localQueueCount > 0 || queueHealth.promotedCount > 0
             ? 'info'
             : 'ok';
-  const headline = createDashboardOperatorQueueHeadline(status, queueHealth, humanQuestions, trueBlockerCount, queueBlockActionCount);
+  const headline = createDashboardOperatorQueueHeadline(status, queueHealth, humanQuestions, trueBlockerCount, queueBlockActionCount, collectOnly);
+  const coordinatorQueueAction = collectOnly?.reason === 'dirty-worktree'
+    ? 'Clean or isolate dirty paths, then rerun auto-drain apply for queued coordinator work.'
+    : 'Inspect queue artifacts when work is waiting for autonomous coordination.';
   return {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION,
     source: queueHealth.source,
     available,
+    ...(collectOnly ? { collectOnly } : {}),
     status,
     headline,
     cards: [
@@ -3055,7 +3045,7 @@ function createDashboardOperatorQueueSummary(
         value: queueHealth.activeCoordinatorQueueCount,
         detail: `${queueHealth.leaseCount} leases, ${queueHealth.lockKeyCount} locks`,
         status: queueHealth.activeCoordinatorQueueCount > 0 ? 'info' : 'ok',
-        action: 'Inspect queue artifacts when work is waiting for autonomous coordination.',
+        action: coordinatorQueueAction,
         sourceFields: ['queueHealth.activeCoordinatorQueueCount', 'queueHealth.leaseCount', 'queueHealth.lockKeyCount']
       },
       {
@@ -3112,12 +3102,16 @@ function createDashboardOperatorQueueHeadline(
   queueHealth: FrontierCodexDashboardQueueHealth,
   humanQuestions: FrontierCodexDashboardHumanQuestions,
   trueBlockerCount: number,
-  queueBlockActionCount: number
+  queueBlockActionCount: number,
+  collectOnly?: FrontierCodexDashboardCollectOnlyMetadata
 ): string {
   if (status === 'unavailable') return 'Queue data has not been collected yet.';
   if (status === 'blocked') {
     const sources = formatDashboardOperatorQueueBlockerSources(queueBlockActionCount, humanQuestions.count);
     return `${formatDashboardOperatorQueueCount(trueBlockerCount, 'true blocker')} (${sources}) ${trueBlockerCount === 1 ? 'needs' : 'need'} coordinator action.`;
+  }
+  if (collectOnly?.reason === 'dirty-worktree' && queueHealth.activeCoordinatorQueueCount > 0) {
+    return `${formatDashboardOperatorQueueCount(queueHealth.activeCoordinatorQueueCount, 'coordinator queue item')} collected; apply is waiting for a clean worktree (${formatDashboardOperatorQueueCount(collectOnly.dirtyPathCount, 'dirty path')}).`;
   }
   if (status === 'warning') {
     return `${queueHealth.staleOrRerunCount} stale or rerun item${queueHealth.staleOrRerunCount === 1 ? '' : 's'} should be collapsed or retried.`;

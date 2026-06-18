@@ -24,6 +24,8 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 
 The top-level files under `auto-drain/` are summary or latest-snapshot reads. They are useful for dashboards that only need the current state after the run finishes. Use the numbered iteration directories when historical iteration state matters.
 
+When the coordinator checkout is dirty, auto-drain is collect-only. It still writes `swarm-results.json`, `coordinator-dashboard.json`, `auto-drain/auto-drain.json`, collection artifacts, merge admission, grouping, reviewer, patch-stack, queue metadata, and operator-summary artifacts. It intentionally skips `auto-drain/apply-NN/*` and reports `autoDrain.ok: false`, `autoDrain.skippedReason: "dirty-worktree"`, `autoDrain.dirtyPaths[]`, `autoDrain.summary.applyCount: 0`, and any remaining ready count. Dashboards should show this as queued coordinator work waiting for a clean apply window, not as missing data or a worker failure.
+
 ## Path Index
 
 `autoDrainArtifacts` has kind `frontier.swarm-codex.auto-drain-artifacts` and is embedded in:
@@ -123,6 +125,8 @@ When an iteration admits jobs, auto-drain writes an apply directory at `auto-dra
 | `auto-drain/apply-NN/autonomous-merge-decisions.jsonl` | One apply attempt unless a custom decision log path is configured | Audit and replay tooling | Append-only decision records for each autonomous merge decision. |
 
 Apply artifacts are per-iteration. Top-level summaries report aggregate decision and apply counts, but a UI should open `autonomous-apply.json` or the decision log to explain a specific job outcome.
+
+In dirty collect-only runs, no `apply-NN` directory is written. The matching `autoDrainArtifacts.iterations[]` row has no `applyPath`, `autonomousQueueOverlayPath`, or `decisionLogPath`, and `decisionCount` is `0`.
 
 ## Consumer Guide
 

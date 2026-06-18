@@ -656,6 +656,87 @@ assert.strictEqual(autoDrainArtifactIteration.mergeQueueApplyLocalCount, autoDra
 assert.strictEqual(autoDrainArtifactIteration.mergeQueuePromoteCount, autoDrainRun.autoDrainArtifacts.mergeQueue.promoteCount);
 assert.ok(await exists(autoDrainArtifactIteration.hierarchicalMergeQueuePath));
 
+const autoDrainDirtyRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dirty-run-repo');
+await fs.writeFile(path.join(autoDrainDirtyRepo, 'src', 'dirty.ts'), 'dirty\n');
+const autoDrainDirtyOutDir = path.join(autoDrainDirtyRepo, 'agent-runs', 'auto-drain-dirty-run');
+const autoDrainDirtyRun = await runCodexSwarm(autoDrainPlan, {
+  outDir: autoDrainDirtyOutDir,
+  cwd: autoDrainDirtyRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainDirtyOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    maxIterations: 2,
+    focusedCommands: [{ name: 'coordinator-sees-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'dirty auto-drain collected\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'dirty auto-drain collected' };
+  }
+});
+assert.strictEqual(autoDrainDirtyRun.ok, false);
+assert.strictEqual(autoDrainDirtyRun.autoDrain.ok, false);
+assert.strictEqual(autoDrainDirtyRun.autoDrain.skippedReason, 'dirty-worktree');
+assert.ok(autoDrainDirtyRun.autoDrain.dirtyPaths.includes('src/dirty.ts'));
+assert.strictEqual(autoDrainDirtyRun.autoDrain.summary.collectionCount, 1);
+assert.strictEqual(autoDrainDirtyRun.autoDrain.summary.applyCount, 0);
+assert.strictEqual(autoDrainDirtyRun.autoDrain.summary.remainingReadyCount, 1);
+assert.strictEqual(autoDrainDirtyRun.autoDrain.summary.terminalCount, 0);
+assert.strictEqual(autoDrainDirtyRun.autoDrain.summary.admittedCount, 1);
+assert.strictEqual(autoDrainDirtyRun.autoDrain.iterations.length, 1);
+const autoDrainDirtyIteration = autoDrainDirtyRun.autoDrain.iterations[0];
+assert.strictEqual(autoDrainDirtyIteration.readyJobIds.length, 1);
+assert.strictEqual(autoDrainDirtyIteration.admittedJobIds.length, 1);
+assert.strictEqual(autoDrainDirtyIteration.deferredJobIds.length, 0);
+assert.strictEqual(autoDrainDirtyIteration.apply, undefined);
+assert.strictEqual(autoDrainDirtyRun.autoDrainArtifacts.grouping.readyToApplyCount, 1);
+assert.strictEqual(autoDrainDirtyRun.autoDrainArtifacts.admission.admittedCount, 1);
+assert.strictEqual(autoDrainDirtyRun.autoDrainArtifacts.mergeQueue.applyLocalCount, 1);
+assert.strictEqual(autoDrainDirtyRun.autoDrainArtifacts.summary.applyCount, 0);
+assert.strictEqual(autoDrainDirtyRun.autoDrainArtifacts.summary.decisionCount, 0);
+assert.strictEqual(autoDrainDirtyRun.autoDrainArtifacts.patchStack.patchCount, 0);
+assert.ok(autoDrainDirtyRun.autoDrainArtifacts.grouping.paths.length > 0);
+assert.ok(autoDrainDirtyRun.autoDrainArtifacts.mergeQueue.paths.length > 0);
+assert.ok(await exists(autoDrainDirtyRun.autoDrainArtifacts.mergeQueue.paths[0]));
+const autoDrainDirtyArtifactIteration = autoDrainDirtyRun.autoDrainArtifacts.iterations[0];
+assert.ok(await exists(autoDrainDirtyArtifactIteration.collectionPath));
+assert.ok(await exists(autoDrainDirtyArtifactIteration.mergeIndexPath));
+assert.ok(await exists(autoDrainDirtyArtifactIteration.hierarchicalMergeQueuePath));
+assert.ok(await exists(autoDrainDirtyArtifactIteration.queueOverlayPath));
+assert.ok(await exists(autoDrainDirtyArtifactIteration.groupingPath));
+assert.ok(!Object.hasOwn(autoDrainDirtyArtifactIteration, 'applyPath'));
+assert.ok(!Object.hasOwn(autoDrainDirtyArtifactIteration, 'autonomousQueueOverlayPath'));
+assert.ok(!Object.hasOwn(autoDrainDirtyArtifactIteration, 'decisionLogPath'));
+assert.ok(await exists(path.join(autoDrainDirtyIteration.collection.buckets['ready-to-apply'][0].outputDir, 'merge.json')));
+assert.strictEqual(await exists(path.join(autoDrainDirtyOutDir, 'auto-drain', 'apply-01', 'autonomous-apply.json')), false);
+assert.strictEqual(await fs.readFile(path.join(autoDrainDirtyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+const autoDrainDirtyDashboard = JSON.parse(await fs.readFile(path.join(autoDrainDirtyOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.available, true);
+assert.strictEqual(autoDrainDirtyDashboard.autoDrain.skippedReason, 'dirty-worktree');
+assert.deepStrictEqual(autoDrainDirtyDashboard.queueHealth, autoDrainDirtyDashboard.queueMetadata.queueHealth);
+assert.deepStrictEqual(autoDrainDirtyDashboard.humanQuestions, autoDrainDirtyDashboard.queueMetadata.humanQuestions);
+assert.deepStrictEqual(autoDrainDirtyDashboard.operatorSummary, autoDrainDirtyDashboard.queueMetadata.operatorSummary);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.collectOnly.reason, 'dirty-worktree');
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.collectOnly.dirtyPathCount, 1);
+assert.deepStrictEqual(autoDrainDirtyDashboard.queueMetadata.collectOnly.dirtyPaths, ['src/dirty.ts']);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount, 1);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.queueHealth.appliedDecisionCount, 0);
+assert.deepStrictEqual(autoDrainDirtyDashboard.queueMetadata.operatorSummary.collectOnly, autoDrainDirtyDashboard.queueMetadata.collectOnly);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.operatorSummary.status, 'info');
+assert.match(autoDrainDirtyDashboard.queueMetadata.operatorSummary.headline, /waiting for a clean worktree/);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.operatorSummary.counts.coordinatorQueues, 1);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 0);
+assert.strictEqual(autoDrainDirtyDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
+const autoDrainDirtyOperatorCards = new Map(autoDrainDirtyDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
+assert.match(autoDrainDirtyOperatorCards.get('coordinator-queues').action, /Clean or isolate dirty paths/);
+
 const autoDrainBudgetRepo = path.join(tmp, 'auto-drain-budget-repo');
 await fs.mkdir(path.join(autoDrainBudgetRepo, 'src'), { recursive: true });
 await execFileP('git', ['init'], { cwd: autoDrainBudgetRepo });

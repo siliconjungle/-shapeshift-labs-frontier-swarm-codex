@@ -21,6 +21,8 @@ frontier-swarm-codex run \
 
 `run` starts the workers, records event streams, writes job evidence, and then enables auto-drain by default. Auto-drain collects worker merge bundles, admits ready auto-mergeable patches, runs the autonomous apply loop, and writes `auto-drain/auto-drain.json` plus summaries in `swarm-results.json` and `coordinator-dashboard.json`.
 
+If the coordinator checkout is dirty when auto-drain starts, auto-drain still collects worker bundles and writes queue, admission, grouping, reviewer, dashboard, and operator-summary artifacts. It does not apply patches into the dirty checkout. The run records `autoDrain.ok: false`, `autoDrain.skippedReason: "dirty-worktree"`, and `autoDrain.dirtyPaths[]`; `operatorSummary.status` remains `info` when work is only queued for a clean apply window. Clean, commit, or intentionally stash those paths, then run `frontier-swarm-codex drain --run agent-runs/my-run` with the same focused/global gates when the coordinator is ready to apply.
+
 Use `--no-auto-drain` only when you want a raw diagnostic run, for example to inspect worker output without any coordinator apply attempt:
 
 ```sh
