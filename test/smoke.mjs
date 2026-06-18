@@ -935,6 +935,43 @@ assert.deepStrictEqual(autonomousDecisionLogEntry.lockKeys, ['path:src/apply.ts'
 const autonomousApplyArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'autonomous-apply-out', 'autonomous-apply.json'), 'utf8'));
 assert.deepStrictEqual(autonomousApplyArtifact.lockKeys, ['path:src/apply.ts']);
 
+const dependencyGateRepo = await createApplyFixtureRepo(tmp, 'autonomous-gate-order-repo');
+await fs.mkdir(path.join(dependencyGateRepo, 'packages', 'frontier-swarm'), { recursive: true });
+await fs.mkdir(path.join(dependencyGateRepo, 'packages', 'frontier-swarm-codex'), { recursive: true });
+const dependencyGateLog = path.join(tmp, 'autonomous-gate-order.log');
+const dependencyGateScript = (label, requiredPrevious) => [
+  "const fs = require('fs');",
+  `const logPath = ${JSON.stringify(dependencyGateLog)};`,
+  "const current = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';",
+  requiredPrevious ? `if (!current.includes(${JSON.stringify(`${requiredPrevious}\n`)})) process.exit(1);` : '',
+  `fs.appendFileSync(logPath, ${JSON.stringify(`${label}\n`)});`
+].filter(Boolean).join('\n');
+const dependencyGateResult = await autonomousApplyCodexSwarmRun({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: dependencyGateRepo,
+  outDir: path.join(tmp, 'autonomous-gate-order-out'),
+  focusedCommands: [
+    {
+      name: 'frontier-swarm-codex-test',
+      command: process.execPath,
+      args: ['-e', dependencyGateScript('frontier-swarm-codex', 'frontier-swarm')],
+      cwd: 'packages/frontier-swarm-codex',
+      metadata: { packageName: '@shapeshift-labs/frontier-swarm-codex' }
+    },
+    {
+      name: 'frontier-swarm-test',
+      command: process.execPath,
+      args: ['-e', dependencyGateScript('frontier-swarm')],
+      cwd: 'packages/frontier-swarm',
+      metadata: { packageName: '@shapeshift-labs/frontier-swarm' }
+    }
+  ]
+});
+assert.strictEqual(dependencyGateResult.ok, true);
+assert.strictEqual(dependencyGateResult.summary.applied, 1);
+assert.deepStrictEqual(dependencyGateResult.decisions[0].verification.names, ['frontier-swarm-test', 'frontier-swarm-codex-test']);
+assert.strictEqual(await fs.readFile(dependencyGateLog, 'utf8'), 'frontier-swarm\nfrontier-swarm-codex\n');
+
 const autonomousHumanQuestionRepo = await createApplyFixtureRepo(tmp, 'autonomous-human-question-repo');
 const autonomousHumanQuestionCollection = path.join(tmp, 'autonomous-human-question-collection');
 const autonomousHumanQuestionDir = path.join(autonomousHumanQuestionCollection, 'ready-to-apply', 'human-question-job');

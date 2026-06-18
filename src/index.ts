@@ -67,6 +67,10 @@ export const FRONTIER_SWARM_CODEX_SUPPORTED_MODELS = [
   'o4-mini',
   'gpt-4.1-mini'
 ] as const;
+const FRONTIER_SWARM_CODEX_FALLBACK_PACKAGE_GATE_ORDER = [
+  'frontier-swarm',
+  'frontier-swarm-codex'
+] as const;
 export const FRONTIER_SWARM_CODEX_WORKSPACE_MANIFEST_KIND = 'frontier.swarm-codex.workspace-manifest';
 export const FRONTIER_SWARM_CODEX_WORKSPACE_MANIFEST_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_WORKSPACE_PROOF_KIND = 'frontier.swarm-codex.workspace-proof';
@@ -7388,6 +7392,7 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
   const lockPath = input.lockPath
     ? path.resolve(cwd, input.lockPath)
     : await defaultAutonomousApplyLockPath(cwd, outDir);
+  const packageGateOrder = await loadFrontierPackageGateOrder(cwd);
   await fs.mkdir(outDir, { recursive: true });
   await fs.mkdir(path.dirname(decisionLogPath), { recursive: true });
   await fs.appendFile(decisionLogPath, '');
@@ -7418,7 +7423,8 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
         commit: input.commit ?? false,
         branchPrefix: input.branchPrefix,
         input,
-        lock
+        lock,
+        packageGateOrder
       });
       decisions.push(decision);
       await appendAutonomousDecision(decisionLogPath, decision);
@@ -7589,13 +7595,14 @@ async function applyCodexMergeBundleAutonomously(input: {
   branchPrefix?: string;
   input: FrontierCodexAutonomousApplyInput;
   lock: FrontierCodexAutonomousApplyLock;
+  packageGateOrder: FrontierPackageGateOrder;
 }): Promise<FrontierCodexAutonomousMergeDecision> {
   const startedAt = Date.now();
   const commands: FrontierCodexAutonomousMergeDecision['commands'] = [];
   const patchPath = await resolveApplyPatchPath(input.bundle, input.mergePath);
   const queueItemIds = input.bundle.queueItemIds.length ? [...input.bundle.queueItemIds] : [input.bundle.taskId ?? input.bundle.jobId];
   const lockKeys = deriveCodexAutonomousApplyLockKeys(input.bundle);
-  const plannedVerificationCommands = autonomousVerificationCommands(input.bundle, input.input);
+  const plannedVerificationCommands = autonomousVerificationCommands(input.bundle, input.input, input.packageGateOrder);
   const verificationRuns: AutonomousVerificationRun[] = [];
   const finish = (
     status: FrontierCodexAutonomousDecisionStatus,
@@ -7823,12 +7830,188 @@ function formatCommitMessageValue(value: string | undefined): string {
   return normalized || '(none)';
 }
 
-function autonomousVerificationCommands(bundle: FrontierSwarmMergeBundle, input: FrontierCodexAutonomousApplyInput): FrontierSwarmCommand[] {
+interface FrontierPackageGateCatalogEntry {
+  id: string;
+  name?: string;
+  deps: string[];
+  candidates: string[];
+}
+
+interface FrontierPackageGateAlias {
+  id: string;
+  alias: string;
+  rank: number;
+}
+
+interface FrontierPackageGateOrder {
+  rankById: Map<string, number>;
+  aliases: FrontierPackageGateAlias[];
+}
+
+async function loadFrontierPackageGateOrder(cwd: string): Promise<FrontierPackageGateOrder> {
+  const catalog = await readFrontierPackageGateCatalog(cwd);
+  if (catalog.length) return createFrontierPackageGateOrder(catalog);
+  return createFrontierPackageGateOrder(FRONTIER_SWARM_CODEX_FALLBACK_PACKAGE_GATE_ORDER.map((id) => ({
+    id,
+    name: `@shapeshift-labs/${id}`,
+    deps: id === 'frontier-swarm-codex' ? ['frontier-swarm'] : [],
+    candidates: [`packages/${id}`]
+  })));
+}
+
+async function readFrontierPackageGateCatalog(cwd: string): Promise<FrontierPackageGateCatalogEntry[]> {
+  const catalogPath = path.join(cwd, 'config', 'release-train.json');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(catalogPath, 'utf8'));
+  } catch {
+    return [];
+  }
+  const packages = isObject(parsed) && Array.isArray(parsed.packages) ? parsed.packages : [];
+  return packages.filter(isObject).map((entry) => ({
+    id: typeof entry.id === 'string' ? entry.id : '',
+    name: typeof entry.name === 'string' ? entry.name : undefined,
+    deps: readStringArray(entry.deps),
+    candidates: readStringArray(entry.candidates)
+  })).filter((entry) => entry.id.length > 0);
+}
+
+function createFrontierPackageGateOrder(catalog: readonly FrontierPackageGateCatalogEntry[]): FrontierPackageGateOrder {
+  const entryById = new Map(catalog.map((entry) => [entry.id, entry]));
+  const orderedIds = dependencyOrderedFrontierPackageIds(catalog);
+  const rankById = new Map(orderedIds.map((id, index) => [id, index]));
+  const aliases: FrontierPackageGateAlias[] = [];
+  for (const id of orderedIds) {
+    const entry = entryById.get(id);
+    if (!entry) continue;
+    const rank = rankById.get(id) ?? Number.MAX_SAFE_INTEGER;
+    const candidates = uniqueStrings([
+      id,
+      entry.name,
+      `@shapeshift-labs/${id}`,
+      `packages/${id}`,
+      ...entry.candidates
+    ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0));
+    for (const candidate of candidates) {
+      const alias = normalizePackageGateAlias(candidate);
+      if (alias) aliases.push({ id, alias, rank });
+    }
+  }
+  aliases.sort((left, right) => right.alias.length - left.alias.length || left.alias.localeCompare(right.alias));
+  return { rankById, aliases };
+}
+
+function dependencyOrderedFrontierPackageIds(catalog: readonly FrontierPackageGateCatalogEntry[]): string[] {
+  const entryById = new Map(catalog.map((entry) => [entry.id, entry]));
+  const inputOrder = new Map(catalog.map((entry, index) => [entry.id, index]));
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const ordered: string[] = [];
+  let cycle = false;
+  const visit = (id: string) => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) {
+      cycle = true;
+      return;
+    }
+    const entry = entryById.get(id);
+    if (!entry) return;
+    visiting.add(id);
+    for (const dep of entry.deps.filter((candidate) => entryById.has(candidate)).sort((left, right) => (inputOrder.get(left) ?? 0) - (inputOrder.get(right) ?? 0))) {
+      visit(dep);
+    }
+    visiting.delete(id);
+    visited.add(id);
+    ordered.push(id);
+  };
+  for (const entry of catalog) visit(entry.id);
+  return cycle ? catalog.map((entry) => entry.id) : ordered;
+}
+
+function autonomousVerificationCommands(
+  bundle: FrontierSwarmMergeBundle,
+  input: FrontierCodexAutonomousApplyInput,
+  packageGateOrder: FrontierPackageGateOrder
+): FrontierSwarmCommand[] {
   const focused = normalizeScoreCommands(input.focusedCommands ?? []);
   const global = bundle.changedPaths.some((file) => (input.globalGlobs ?? []).some((glob) => matchesGlob(file, glob)))
     ? normalizeScoreCommands(input.globalCommands ?? [])
     : [];
-  return [...focused, ...global];
+  return dependencyOrderPackageVerificationCommands([...focused, ...global], packageGateOrder);
+}
+
+function dependencyOrderPackageVerificationCommands(commands: readonly FrontierSwarmCommand[], packageGateOrder: FrontierPackageGateOrder): FrontierSwarmCommand[] {
+  const annotated = commands.map((command, index) => ({
+    command,
+    index,
+    packageId: inferFrontierPackageGateId(command, packageGateOrder)
+  }));
+  const packageCommands = annotated
+    .filter((entry) => typeof entry.packageId === 'string')
+    .sort((left, right) => (
+      (packageGateOrder.rankById.get(left.packageId ?? '') ?? Number.MAX_SAFE_INTEGER)
+      - (packageGateOrder.rankById.get(right.packageId ?? '') ?? Number.MAX_SAFE_INTEGER)
+      || left.index - right.index
+    ));
+  let nextPackageCommand = 0;
+  return annotated.map((entry) => {
+    if (!entry.packageId) return entry.command;
+    return packageCommands[nextPackageCommand++].command;
+  });
+}
+
+function inferFrontierPackageGateId(command: FrontierSwarmCommand, packageGateOrder: FrontierPackageGateOrder): string | undefined {
+  const metadataCandidates = frontierPackageGateMetadataCandidates(command.metadata);
+  for (const candidate of metadataCandidates) {
+    const fromMetadata = inferFrontierPackageGateIdFromText(candidate, packageGateOrder);
+    if (fromMetadata) return fromMetadata;
+  }
+  return inferFrontierPackageGateIdFromText([
+    command.cwd,
+    command.name,
+    command.command,
+    ...command.args
+  ].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0).join(' '), packageGateOrder);
+}
+
+function frontierPackageGateMetadataCandidates(metadata: unknown): string[] {
+  if (!isObject(metadata)) return [];
+  return [
+    metadata.package,
+    metadata.packageId,
+    metadata.packageName,
+    metadata.packagePath,
+    metadata.frontierPackage,
+    metadata.frontierPackageId,
+    metadata.frontierPackageName
+  ].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+}
+
+function inferFrontierPackageGateIdFromText(value: string, packageGateOrder: FrontierPackageGateOrder): string | undefined {
+  const normalized = normalizePackageGateAlias(value);
+  if (!normalized) return undefined;
+  for (const alias of packageGateOrder.aliases) {
+    if (packageGateAliasMatches(normalized, alias.alias)) return alias.id;
+  }
+  return undefined;
+}
+
+function normalizePackageGateAlias(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\.\//, '').replace(/\/$/, '').trim().toLowerCase();
+}
+
+function packageGateAliasMatches(text: string, alias: string): boolean {
+  let start = text.indexOf(alias);
+  while (start >= 0) {
+    const end = start + alias.length;
+    if (packageGateAliasBoundary(text[start - 1]) && packageGateAliasBoundary(text[end])) return true;
+    start = text.indexOf(alias, start + 1);
+  }
+  return false;
+}
+
+function packageGateAliasBoundary(value: string | undefined): boolean {
+  return value === undefined || !/[a-z0-9@/_]/i.test(value);
 }
 
 type AutonomousVerificationRun = { index: number; name: string; required: boolean; status: number };

@@ -198,6 +198,8 @@ When an iteration admits jobs, auto-drain writes an apply directory at `auto-dra
 
 Apply artifacts are per-iteration. Top-level summaries report aggregate decision and apply counts, but a UI should open `autonomous-apply.json` or the decision log to explain a specific job outcome.
 
+Autonomous apply runs all configured focused gates plus matching global gates for each admitted bundle. Gates that target known Frontier packages are executed in package dependency order, using `config/release-train.json` when present and a built-in `frontier-swarm` before `frontier-swarm-codex` fallback otherwise. The ordered gate names are recorded in each decision's `verification.names`, so dashboards should display that list as the actual final-gate order.
+
 Collected bundles can include `metadata.frontierSwarmCodex.collection.head`, the Git head used for collection-time stale checking. Autonomous apply re-reads the current head after taking the repo-local lock and compares it with that collected head before mutation. A mismatch records `rerun` when the patch still checks cleanly or `conflict-blocked` when the patch no longer checks; both outcomes map to `stale-against-head` queue overlay entries and should feed rerun or conflict-resolution work, not human blocker badges.
 
 In dirty collect-only runs, no `apply-NN` directory is written. The matching `autoDrainArtifacts.iterations[]` row has no `applyPath`, `autonomousQueueOverlayPath`, or `decisionLogPath`, and `decisionCount` is `0`.
