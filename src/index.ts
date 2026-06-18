@@ -2947,8 +2947,9 @@ function createDashboardQueueMetadata(
   const iterations = artifacts?.iterations ?? [];
   const decisionSummary = summarizeDashboardAutonomousDecisions(autoDrain);
   const collectOnly = createDashboardCollectOnlyMetadata(autoDrain);
-  const staleCount = artifacts?.grouping.staleAgainstHeadCount ?? 0;
-  const queueRerunCount = artifacts?.mergeQueue.rerunCount ?? 0;
+  const unresolvedPressure = summarizeDashboardUnresolvedQueuePressure(autoDrain, artifacts);
+  const staleCount = unresolvedPressure.staleCount;
+  const queueRerunCount = unresolvedPressure.queueRerunCount;
   const rerunCount = queueRerunCount + decisionSummary.rerunDecisionCount;
   const staleOrRerunCount = Math.max(staleCount, queueRerunCount)
     + decisionSummary.rerunDecisionCount
@@ -3023,6 +3024,38 @@ function createDashboardQueueMetadata(
     queueHealth,
     humanQuestions,
     operatorSummary
+  };
+}
+
+function summarizeDashboardUnresolvedQueuePressure(
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null,
+  artifacts: FrontierCodexAutoDrainArtifactMetadata | null
+): { staleCount: number; queueRerunCount: number } {
+  const latestIteration = autoDrain?.iterations.at(-1);
+  const latestCollection = latestIteration?.postApplyCollection ?? latestIteration?.collection;
+  if (!latestCollection) {
+    return {
+      staleCount: artifacts?.grouping.staleAgainstHeadCount ?? 0,
+      queueRerunCount: artifacts?.mergeQueue.rerunCount ?? 0
+    };
+  }
+  const terminalJobIds = new Set(autoDrain?.terminalJobIds ?? []);
+  const blockedJobIds = new Set(autoDrain?.blockedJobIds ?? []);
+  const activeJobId = (jobId: string) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId);
+  const staleJobIds = uniqueStrings(
+    latestCollection.buckets['stale-against-head']
+      .map((entry) => entry.jobId)
+      .filter(activeJobId)
+  );
+  const queueRerunJobIds = uniqueStrings(
+    (latestCollection.hierarchicalMergeQueue?.assignments ?? [])
+      .filter((assignment) => assignment.action === 'rerun')
+      .map((assignment) => assignment.jobId)
+      .filter(activeJobId)
+  );
+  return {
+    staleCount: staleJobIds.length,
+    queueRerunCount: queueRerunJobIds.length
   };
 }
 
@@ -5185,7 +5218,7 @@ function hasCollectBundleCoordinatorVerification(
 }
 
 function hasAutoDrainVerificationCommands(commands: readonly (string | FrontierSwarmCommand)[] | undefined): boolean {
-  return normalizeScoreCommands(commands ?? []).length > 0;
+  return normalizeScoreCommands(commands ?? []).some((command) => command.required !== false);
 }
 
 async function readOptionalText(file: string): Promise<string | undefined> {

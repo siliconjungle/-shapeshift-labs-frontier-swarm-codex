@@ -32,6 +32,10 @@ try {
   } else if (command === 'run') {
     const plan = args.plan ? JSON.parse(await fs.readFile(String(args.plan), 'utf8')) : await loadPlan(args);
     const outDir = path.resolve(String(args.outDir ?? args.out ?? `agent-runs/frontier-swarm-codex/${stamp()}`));
+    const disableAutoDrainPatchCandidatePromotion = boolArg(
+      args.noAutoDrainPromotePatchCandidates ?? args['no-auto-drain-promote-patch-candidates'],
+      false
+    );
     const result = await runCodexSwarm(plan, {
       outDir,
       codexPath: stringArg(args.codex),
@@ -60,7 +64,7 @@ try {
         maxChangedRegions: numberArg(args.autoDrainMaxChangedRegions ?? args['auto-drain-max-changed-regions'], undefined),
         maxHighRisk: numberArg(args.autoDrainMaxHighRisk ?? args['auto-drain-max-high-risk'], undefined),
         allowRisks: listArg(args.autoDrainAllowRisk ?? args['auto-drain-allow-risk']),
-        promotePatchCandidates: optionalBoolArg(args.autoDrainPromotePatchCandidates ?? args['auto-drain-promote-patch-candidates']),
+        promotePatchCandidates: disableAutoDrainPatchCandidatePromotion ? false : optionalBoolArg(args.autoDrainPromotePatchCandidates ?? args['auto-drain-promote-patch-candidates']),
         checkStale: boolArg(args.autoDrainCheckStale ?? args['auto-drain-check-stale'], true),
         focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
         globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
@@ -203,7 +207,8 @@ function printHelp() {
     '  --auto-drain-max-ready <n> --auto-drain-max-changed-paths <n>',
     '  --auto-drain-max-changed-regions <n> --auto-drain-max-high-risk <n>',
     '  --auto-drain-allow-risk <risk>',
-    '  --auto-drain-promote-patch-candidates',
+    '  --auto-drain-promote-patch-candidates[=true|false]',
+    '  --no-auto-drain-promote-patch-candidates',
     '  --auto-drain-decision-log <path> --auto-drain-lock-path <path>',
     '  --auto-drain-lock-timeout-ms <n> --auto-drain-lock-stale-ms <n>',
     '  --focused-command <cmd> --global-command <cmd>',
