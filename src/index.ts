@@ -86,6 +86,8 @@ export const FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND = 'frontier.swarm-codex.
 export const FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND = 'frontier.swarm-codex.autonomous-merge-decision';
 export const FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY_KIND = 'frontier.swarm-codex.autonomous-decision-collapse-policy';
+export const FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND = 'frontier.swarm-codex.auto-drain';
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_KIND = 'frontier.swarm-codex.auto-drain-grouping';
@@ -593,6 +595,218 @@ export type FrontierCodexAutonomousDecisionStatus =
   | 'human-blocked'
   | 'skipped'
   | 'failed';
+
+export type FrontierCodexAutonomousDecisionDashboardCategory =
+  | 'ready-to-apply'
+  | 'satisfied'
+  | 'rejected'
+  | 'rerun-work'
+  | 'automation-blocker'
+  | 'human-needed';
+
+export type FrontierCodexAutonomousDecisionHumanNeedPolicy = 'never' | 'explicit-question-only';
+
+export interface FrontierCodexAutonomousDecisionCollapsePolicyEntry {
+  status: FrontierCodexAutonomousDecisionStatus;
+  ledgerTerminal: boolean;
+  autoDrainTerminal: boolean;
+  queueResolved: boolean;
+  createsRerunWork: boolean;
+  blocksAutoDrain: boolean;
+  dashboardCategory: FrontierCodexAutonomousDecisionDashboardCategory;
+  explicitHumanQuestionDashboardCategory?: FrontierCodexAutonomousDecisionDashboardCategory;
+  humanNeed: FrontierCodexAutonomousDecisionHumanNeedPolicy;
+  queueStatus: string;
+  mergeReadiness: string;
+  disposition: string;
+  riskLevel: FrontierSwarmRiskLevel;
+}
+
+export interface FrontierCodexAutonomousDecisionCollapsePolicy {
+  kind: typeof FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY_VERSION;
+  latestDecisionWinsByQueueSubject: boolean;
+  explicitHumanQuestionsOnly: boolean;
+  statuses: Record<FrontierCodexAutonomousDecisionStatus, FrontierCodexAutonomousDecisionCollapsePolicyEntry>;
+}
+
+export interface FrontierCodexAutonomousDecisionCollapse extends Omit<FrontierCodexAutonomousDecisionCollapsePolicyEntry, 'dashboardCategory' | 'explicitHumanQuestionDashboardCategory'> {
+  dashboardCategory: FrontierCodexAutonomousDecisionDashboardCategory;
+  explicitHumanQuestion: boolean;
+  humanNeeded: boolean;
+}
+
+const AUTONOMOUS_DECISION_COLLAPSE_STATUS_ORDER: FrontierCodexAutonomousDecisionStatus[] = [
+  'checked',
+  'applied',
+  'committed',
+  'rejected',
+  'rerun',
+  'conflict-blocked',
+  'human-blocked',
+  'skipped',
+  'failed'
+];
+
+const AUTONOMOUS_DECISION_COLLAPSE_POLICY_BY_STATUS: Record<
+  FrontierCodexAutonomousDecisionStatus,
+  Omit<FrontierCodexAutonomousDecisionCollapsePolicyEntry, 'status'>
+> = {
+  checked: {
+    ledgerTerminal: true,
+    autoDrainTerminal: true,
+    queueResolved: false,
+    createsRerunWork: false,
+    blocksAutoDrain: false,
+    dashboardCategory: 'ready-to-apply',
+    humanNeed: 'never',
+    queueStatus: 'ready-to-apply',
+    mergeReadiness: 'verified-patch',
+    disposition: 'auto-mergeable',
+    riskLevel: 'low'
+  },
+  applied: {
+    ledgerTerminal: true,
+    autoDrainTerminal: true,
+    queueResolved: true,
+    createsRerunWork: false,
+    blocksAutoDrain: false,
+    dashboardCategory: 'satisfied',
+    humanNeed: 'never',
+    queueStatus: 'satisfied',
+    mergeReadiness: 'verified-patch',
+    disposition: 'auto-mergeable',
+    riskLevel: 'low'
+  },
+  committed: {
+    ledgerTerminal: true,
+    autoDrainTerminal: true,
+    queueResolved: true,
+    createsRerunWork: false,
+    blocksAutoDrain: false,
+    dashboardCategory: 'satisfied',
+    humanNeed: 'never',
+    queueStatus: 'satisfied',
+    mergeReadiness: 'verified-patch',
+    disposition: 'auto-mergeable',
+    riskLevel: 'low'
+  },
+  rejected: {
+    ledgerTerminal: true,
+    autoDrainTerminal: true,
+    queueResolved: true,
+    createsRerunWork: false,
+    blocksAutoDrain: false,
+    dashboardCategory: 'rejected',
+    humanNeed: 'never',
+    queueStatus: 'satisfied',
+    mergeReadiness: 'verified-patch',
+    disposition: 'rejected',
+    riskLevel: 'low'
+  },
+  rerun: {
+    ledgerTerminal: true,
+    autoDrainTerminal: true,
+    queueResolved: false,
+    createsRerunWork: true,
+    blocksAutoDrain: false,
+    dashboardCategory: 'rerun-work',
+    humanNeed: 'never',
+    queueStatus: 'stale-against-head',
+    mergeReadiness: 'stale-against-head',
+    disposition: 'stale-against-head',
+    riskLevel: 'low'
+  },
+  'conflict-blocked': {
+    ledgerTerminal: true,
+    autoDrainTerminal: true,
+    queueResolved: false,
+    createsRerunWork: true,
+    blocksAutoDrain: false,
+    dashboardCategory: 'rerun-work',
+    humanNeed: 'never',
+    queueStatus: 'stale-against-head',
+    mergeReadiness: 'stale-against-head',
+    disposition: 'stale-against-head',
+    riskLevel: 'high'
+  },
+  'human-blocked': {
+    ledgerTerminal: true,
+    autoDrainTerminal: false,
+    queueResolved: false,
+    createsRerunWork: false,
+    blocksAutoDrain: true,
+    dashboardCategory: 'automation-blocker',
+    explicitHumanQuestionDashboardCategory: 'human-needed',
+    humanNeed: 'explicit-question-only',
+    queueStatus: 'blocked',
+    mergeReadiness: 'blocked',
+    disposition: 'blocked',
+    riskLevel: 'high'
+  },
+  skipped: {
+    ledgerTerminal: true,
+    autoDrainTerminal: true,
+    queueResolved: true,
+    createsRerunWork: false,
+    blocksAutoDrain: false,
+    dashboardCategory: 'satisfied',
+    humanNeed: 'never',
+    queueStatus: 'satisfied',
+    mergeReadiness: 'verified-patch',
+    disposition: 'auto-mergeable',
+    riskLevel: 'low'
+  },
+  failed: {
+    ledgerTerminal: true,
+    autoDrainTerminal: false,
+    queueResolved: false,
+    createsRerunWork: false,
+    blocksAutoDrain: false,
+    dashboardCategory: 'automation-blocker',
+    humanNeed: 'never',
+    queueStatus: 'failed-evidence',
+    mergeReadiness: 'rejected',
+    disposition: 'blocked',
+    riskLevel: 'high'
+  }
+};
+
+export const FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY: FrontierCodexAutonomousDecisionCollapsePolicy = {
+  kind: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY_KIND,
+  version: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY_VERSION,
+  latestDecisionWinsByQueueSubject: true,
+  explicitHumanQuestionsOnly: true,
+  statuses: Object.fromEntries(AUTONOMOUS_DECISION_COLLAPSE_STATUS_ORDER.map((status) => [
+    status,
+    { status, ...AUTONOMOUS_DECISION_COLLAPSE_POLICY_BY_STATUS[status] }
+  ])) as Record<FrontierCodexAutonomousDecisionStatus, FrontierCodexAutonomousDecisionCollapsePolicyEntry>
+};
+
+export function classifyCodexAutonomousDecisionCollapse(
+  input: FrontierCodexAutonomousDecisionStatus | { status: FrontierCodexAutonomousDecisionStatus; reason?: string }
+): FrontierCodexAutonomousDecisionCollapse {
+  const status = typeof input === 'string' ? input : input.status;
+  const reason = typeof input === 'string' ? undefined : input.reason;
+  const policy = FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY.statuses[status];
+  const {
+    dashboardCategory: defaultDashboardCategory,
+    explicitHumanQuestionDashboardCategory,
+    ...rest
+  } = policy;
+  const explicitHumanQuestion = status === 'human-blocked'
+    && typeof reason === 'string'
+    && dashboardTextIsExplicitHumanQuestion(reason);
+  const humanNeeded = policy.humanNeed === 'explicit-question-only' && explicitHumanQuestion;
+  return {
+    ...rest,
+    dashboardCategory: humanNeeded && explicitHumanQuestionDashboardCategory
+      ? explicitHumanQuestionDashboardCategory
+      : defaultDashboardCategory,
+    explicitHumanQuestion,
+    humanNeeded
+  };
+}
 
 export type FrontierCodexAutonomousLockScope = 'semantic' | 'path' | 'repo';
 
@@ -1751,6 +1965,7 @@ export interface FrontierCodexDashboardQueueMetadata {
   source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND | 'not-collected';
   available: boolean;
   collectOnly?: FrontierCodexDashboardCollectOnlyMetadata;
+  decisionCollapsePolicy: FrontierCodexAutonomousDecisionCollapsePolicy;
   humanAnswers: FrontierCodexDashboardHumanAnswers;
   paths: {
     autoDrain: string[];
@@ -3562,21 +3777,15 @@ export function deriveCodexAutonomousApplyLockKeys(input: {
 }
 
 function autonomousDecisionIsTerminal(status: FrontierCodexAutonomousDecisionStatus): boolean {
-  return status === 'checked'
-    || status === 'applied'
-    || status === 'committed'
-    || status === 'conflict-blocked'
-    || status === 'rejected'
-    || status === 'rerun'
-    || status === 'skipped';
+  return classifyCodexAutonomousDecisionCollapse(status).autoDrainTerminal;
 }
 
 function autonomousDecisionBlocksAutoDrain(status: FrontierCodexAutonomousDecisionStatus): boolean {
-  return status === 'human-blocked';
+  return classifyCodexAutonomousDecisionCollapse(status).blocksAutoDrain;
 }
 
 function autonomousDecisionResolvesPriorQueueDebt(status: FrontierCodexAutonomousDecisionStatus): boolean {
-  return autonomousDecisionIsTerminal(status) || status === 'failed' || status === 'human-blocked';
+  return classifyCodexAutonomousDecisionCollapse(status).ledgerTerminal;
 }
 
 function createCodexAutonomousDecisionLeaseReadback(
@@ -5382,6 +5591,7 @@ function createDashboardQueueMetadata(
     source: artifacts ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND : 'not-collected',
     available: !!artifacts,
     ...(collectOnly ? { collectOnly } : {}),
+    decisionCollapsePolicy: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY,
     humanAnswers,
     paths: {
       autoDrain: artifacts ? [artifacts.autoDrainPath] : [],
@@ -5915,7 +6125,7 @@ function createDashboardMergeQueueRerunCandidates(input: {
       leaseKeys: [assignmentLeaseKey]
     });
   }
-  for (const decision of input.decisions.filter((entry) => entry.status === 'conflict-blocked' || entry.status === 'rerun')) {
+  for (const decision of input.decisions.filter((entry) => classifyCodexAutonomousDecisionCollapse(entry).createsRerunWork)) {
     if (!decision.patchPath || !decision.changedPaths.length) continue;
     mergeDashboardMergeQueueRerunCandidate(candidates, decision, {
       jobId: decision.jobId,
@@ -6644,8 +6854,7 @@ function createDashboardHumanAnswers(autoDrain: FrontierCodexSwarmAutoDrainResul
 }
 
 function dashboardAutonomousDecisionIsExplicitHumanQuestion(decision: FrontierCodexAutonomousMergeDecision): boolean {
-  if (decision.status !== 'human-blocked') return false;
-  return dashboardTextIsExplicitHumanQuestion(decision.reason);
+  return classifyCodexAutonomousDecisionCollapse(decision).humanNeeded;
 }
 
 function dashboardTextIsExplicitHumanQuestion(text: string): boolean {
@@ -7957,7 +8166,7 @@ export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainR
     }
   }
 
-  for (const decision of decisions.filter((entry) => entry.status === 'conflict-blocked' || entry.status === 'rerun')) {
+  for (const decision of decisions.filter((entry) => classifyCodexAutonomousDecisionCollapse(entry).createsRerunWork)) {
     if (!decision.patchPath || !decision.changedPaths.length) continue;
     const sourceKind: FrontierCodexAutoDrainRerunSourceKind = decision.status === 'conflict-blocked' ? 'conflict-blocked' : 'decision-rerun';
     const sourceEntry = collectedEntriesByJobId.get(decision.jobId);
@@ -9356,16 +9565,17 @@ function createAutonomousQueueOverlay(input: {
   const entryRows: Array<{ entry: FrontierSwarmQueueOverlay['entries'][number]; decision: FrontierCodexAutonomousMergeDecision }> = [];
   for (const decision of currentDecisions) {
     const queueItemIds = decision.queueItemIds.length ? decision.queueItemIds : [decision.taskId ?? decision.jobId];
+    const collapse = classifyCodexAutonomousDecisionCollapse(decision);
     for (const queueItemId of queueItemIds) {
       entryRows.push({
         decision,
         entry: {
           queueItemId,
           jobId: decision.jobId,
-          status: queueStatusFromAutonomousDecision(decision.status),
-          mergeReadiness: mergeReadinessFromAutonomousDecision(decision.status),
-          disposition: dispositionFromAutonomousDecision(decision.status),
-          riskLevel: decision.status === 'conflict-blocked' || decision.status === 'human-blocked' || decision.status === 'failed' ? 'high' : 'low',
+          status: collapse.queueStatus,
+          mergeReadiness: collapse.mergeReadiness,
+          disposition: collapse.disposition,
+          riskLevel: collapse.riskLevel,
           ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
           evidencePaths: [decision.bundlePath],
           changedPaths: [...decision.changedPaths],
@@ -9379,11 +9589,11 @@ function createAutonomousQueueOverlay(input: {
   const entries = entryRows.map((row) => row.entry);
   const byQueueItemId = groupAutonomousQueueOverlayEntries(entries);
   const lockSummary = summarizeAutonomousDecisionLockScopes(input.decisions);
-  const activeReviewCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'active-review').length;
-  const terminalCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'terminal').length;
-  const conflictRetryCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'conflict-retry').length;
-  const humanNeededCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'human-needed').length;
-  const failedTriageCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'failed-triage').length;
+  const activeReviewCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision) === 'active-review').length;
+  const terminalCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision) === 'terminal').length;
+  const conflictRetryCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision) === 'conflict-retry').length;
+  const humanNeededCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision) === 'human-needed').length;
+  const failedTriageCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision) === 'failed-triage').length;
   return {
     kind: FRONTIER_SWARM_QUEUE_OVERLAY_KIND,
     version: FRONTIER_SWARM_QUEUE_OVERLAY_VERSION,
@@ -9438,7 +9648,7 @@ function createAutonomousQueueOverlay(input: {
         failedTriage: {
           label: 'Failed triage',
           count: failedTriageCount,
-          description: 'Latest operational failures need coordinator triage before they become rerun, rejected, conflict-blocked, or human-blocked.'
+          description: 'Latest failed or non-question human-blocked decisions need coordinator triage before they become rerun, rejected, conflict-blocked, or explicit human questions.'
         },
         supersededHistory: {
           label: 'Superseded history',
@@ -9457,27 +9667,15 @@ function createAutonomousQueueOverlay(input: {
 }
 
 function queueStatusFromAutonomousDecision(status: FrontierCodexAutonomousDecisionStatus): string {
-  if (status === 'checked') return 'ready-to-apply';
-  if (status === 'rerun' || status === 'conflict-blocked') return 'stale-against-head';
-  if (status === 'human-blocked') return 'blocked';
-  if (status === 'failed') return 'failed-evidence';
-  if (status === 'rejected') return 'rejected';
-  return 'satisfied';
+  return classifyCodexAutonomousDecisionCollapse(status).queueStatus;
 }
 
 function mergeReadinessFromAutonomousDecision(status: FrontierCodexAutonomousDecisionStatus): string {
-  if (status === 'conflict-blocked' || status === 'rerun') return 'stale-against-head';
-  if (status === 'human-blocked') return 'blocked';
-  if (status === 'failed') return 'rejected';
-  return 'verified-patch';
+  return classifyCodexAutonomousDecisionCollapse(status).mergeReadiness;
 }
 
 function dispositionFromAutonomousDecision(status: FrontierCodexAutonomousDecisionStatus): string {
-  if (status === 'checked') return 'auto-mergeable';
-  if (status === 'rerun' || status === 'conflict-blocked') return 'stale-against-head';
-  if (status === 'human-blocked' || status === 'failed') return 'blocked';
-  if (status === 'rejected') return 'rejected';
-  return 'auto-mergeable';
+  return classifyCodexAutonomousDecisionCollapse(status).disposition;
 }
 
 function groupAutonomousQueueOverlayEntries(entries: readonly FrontierSwarmQueueOverlay['entries'][number][]): Record<string, FrontierSwarmQueueOverlay['entries'][number][]> {
@@ -9486,11 +9684,12 @@ function groupAutonomousQueueOverlayEntries(entries: readonly FrontierSwarmQueue
   return out;
 }
 
-function autonomousQueueOverlayDecisionBucket(status: FrontierCodexAutonomousDecisionStatus): 'active-review' | 'terminal' | 'conflict-retry' | 'human-needed' | 'failed-triage' {
-  if (status === 'checked') return 'active-review';
-  if (status === 'rerun' || status === 'conflict-blocked') return 'conflict-retry';
-  if (status === 'human-blocked') return 'human-needed';
-  if (status === 'failed') return 'failed-triage';
+function autonomousQueueOverlayDecisionBucket(decision: FrontierCodexAutonomousMergeDecision): 'active-review' | 'terminal' | 'conflict-retry' | 'human-needed' | 'failed-triage' {
+  const collapse = classifyCodexAutonomousDecisionCollapse(decision);
+  if (collapse.dashboardCategory === 'ready-to-apply') return 'active-review';
+  if (collapse.dashboardCategory === 'rerun-work') return 'conflict-retry';
+  if (collapse.dashboardCategory === 'human-needed') return 'human-needed';
+  if (collapse.dashboardCategory === 'automation-blocker') return 'failed-triage';
   return 'terminal';
 }
 

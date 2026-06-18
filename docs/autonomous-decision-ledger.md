@@ -165,6 +165,45 @@ Every status except `human-blocked` is an automation instruction. Only
 | `failed` | The runner or git workflow failed operationally, such as failing to read HEAD, apply a patch, create a commit, or roll back cleanly. | Inspect command tails, fix the transient/tooling problem or rerun, then replace the queue state with `rerun`, `rejected`, `conflict-blocked`, or `human-blocked` when the cause is known. |
 | `human-blocked` | Automation is not authorized to decide. Use this for ownership violations, bundles that are not marked auto-mergeable, missing parent assignment, or policy/risk conditions that require a human decision. | Pause automation for that queue item and ask the exact human question needed to unblock it. |
 
+## Collapse Policy
+
+Dashboard and queue consumers must use the machine-readable
+`frontier.swarm-codex.autonomous-decision-collapse-policy` contract emitted under
+`queueMetadata.decisionCollapsePolicy`. The policy is versioned, names every
+autonomous decision status, and records whether the status is ledger-terminal,
+auto-drain terminal, queue-resolving, rerun-producing, auto-drain-blocking, or
+eligible to appear as human-needed.
+
+The collapse policy has two global rules:
+
+- Latest decision wins by connected queue subject. Group ledger records by the
+  alias set formed from `queueItemIds`, `taskId`, and `jobId`, then use the latest
+  record in that connected component. Older stale, conflict-blocked, rejected, or
+  human-blocked records are superseded once a later queue-equivalent decision lands.
+- Human-needed dashboards require explicit questions. A `human-blocked` status is
+  not enough by itself; the reason must use an explicit question marker such as
+  `human-question:` or contain a concrete question. Ownership, stale patch, failed
+  apply, classification, and routine review wording must not populate
+  `humanQuestions`.
+
+| Status | Auto-drain terminal | Queue-resolving | Rerun work | Human-needed |
+| --- | --- | --- | --- | --- |
+| `checked` | Yes | No | No | No |
+| `applied` | Yes | Yes | No | No |
+| `committed` | Yes | Yes | No | No |
+| `rejected` | Yes | Yes | No | No |
+| `rerun` | Yes | No | Yes | No |
+| `conflict-blocked` | Yes | No | Yes | No |
+| `skipped` | Yes | Yes | No | No |
+| `failed` | No | No | No | No |
+| `human-blocked` | No | No | No | Only when the reason is an explicit question |
+
+This means rejected and skipped outcomes close their current queue aliases instead
+of becoming stale review debt, while `rerun` and `conflict-blocked` become
+rerun-manifest work. `failed` stays visible as automation repair evidence, not as a
+human-needed question. `human-blocked` without an explicit question remains a
+blocker for auto-drain, but dashboards should not count it in `humanQuestions`.
+
 ## Dashboard Conflict Retry Work
 
 Dashboards must treat latest `conflict-blocked` decisions as coordinator retry

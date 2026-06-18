@@ -79,11 +79,14 @@ const {
   applyCodexSwarmCollection,
   autonomousApplyCodexSwarmRun,
   buildCodexArgs,
+  classifyCodexAutonomousDecisionCollapse,
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
   createCodexAutoDrainRerunManifest,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
+  FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY,
+  FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY_KIND,
   FRONTIER_SWARM_CODEX_MODEL_PRICING,
   FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
   FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
@@ -159,6 +162,46 @@ assert.deepStrictEqual(
 assert.deepStrictEqual(
   deriveCodexAutonomousApplyLockKeys({ changedRegions: [], changedPaths: [] }),
   { scope: 'repo', keys: ['repo:*'] }
+);
+assert.strictEqual(FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY.kind, FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY_KIND);
+assert.strictEqual(FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY.latestDecisionWinsByQueueSubject, true);
+assert.strictEqual(FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY.explicitHumanQuestionsOnly, true);
+assert.deepStrictEqual(
+  Object.keys(FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY.statuses).sort(),
+  [
+    'applied',
+    'checked',
+    'committed',
+    'conflict-blocked',
+    'failed',
+    'human-blocked',
+    'rejected',
+    'rerun',
+    'skipped'
+  ]
+);
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('conflict-blocked').autoDrainTerminal, true);
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('conflict-blocked').createsRerunWork, true);
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('conflict-blocked').humanNeeded, false);
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('rerun').createsRerunWork, true);
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('rejected').queueResolved, true);
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('rejected').humanNeeded, false);
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('skipped').queueResolved, true);
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('failed').dashboardCategory, 'automation-blocker');
+assert.strictEqual(classifyCodexAutonomousDecisionCollapse('failed').humanNeeded, false);
+assert.strictEqual(
+  classifyCodexAutonomousDecisionCollapse({
+    status: 'human-blocked',
+    reason: 'ownership violations: packages/frontier-swarm-codex/src/index.ts'
+  }).humanNeeded,
+  false
+);
+assert.strictEqual(
+  classifyCodexAutonomousDecisionCollapse({
+    status: 'human-blocked',
+    reason: 'human-question: owner=release; surface=packages/frontier-swarm-codex; missing-authority=approval; question=Approve release?; answer-code=approve|reject'
+  }).dashboardCategory,
+  'human-needed'
 );
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'frontier-swarm-codex-'));
@@ -1531,7 +1574,8 @@ assert.strictEqual(rollbackResult.finalGateSummary.ok, false);
 assert.strictEqual(rollbackResult.finalGateSummary.state, 'failed');
 assert.deepStrictEqual(rollbackResult.finalGateSummary.failedRequiredGateNames, ['reject-new']);
 assert.deepStrictEqual(rollbackResult.finalGateSummary.skippedRequiredGateNames, ['must-not-be-marked-passed']);
-assert.strictEqual(rollbackResult.queueOverlay.entries[0].status, 'rejected');
+assert.strictEqual(rollbackResult.queueOverlay.entries[0].status, 'satisfied');
+assert.strictEqual(rollbackResult.queueOverlay.entries[0].disposition, 'rejected');
 assert.strictEqual(rollbackResult.queueOverlay.metadata.terminalCount, 1);
 assert.strictEqual(rollbackResult.queueOverlay.metadata.activeReviewCount, 0);
 assert.strictEqual(rollbackResult.queueOverlay.metadata.statusBuckets.terminal.count, 1);
@@ -3746,6 +3790,7 @@ await writeSwarmCoordinatorSnapshot(collapsedDecisionDashboardPath, {
 const collapsedDecisionDashboard = JSON.parse(await fs.readFile(collapsedDecisionDashboardPath, 'utf8'));
 assert.deepStrictEqual(collapsedDecisionDashboard.operatorSummary, collapsedDecisionDashboard.queueMetadata.operatorSummary);
 assert.deepStrictEqual(collapsedDecisionDashboard.mergeQueueHealth, collapsedDecisionDashboard.queueMetadata.mergeQueueHealth);
+assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.decisionCollapsePolicy, FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.appliedDecisionCount, 3);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committedDecisionCount, 2);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.appliedDecisionCount, 3);
@@ -3822,6 +3867,12 @@ const closedStaleEntry = createSyntheticCollectedRerunEntry(collapsedDecisionOut
   queueItemIds: ['closed-stale-task'],
   changedPaths: ['src/closed-stale.ts']
 });
+const closedRejectedEntry = createSyntheticCollectedRerunEntry(collapsedDecisionOutDir, {
+  jobId: 'closed-rejected-old-job',
+  taskId: 'closed-rejected-task',
+  queueItemIds: ['closed-rejected-task'],
+  changedPaths: ['src/closed-rejected.ts']
+});
 const openRerunEntry = createSyntheticCollectedRerunEntry(collapsedDecisionOutDir, {
   jobId: 'open-rerun-old-job',
   taskId: 'open-rerun-task',
@@ -3836,7 +3887,7 @@ const collapsedDecisionManifest = createCodexAutoDrainRerunManifest({
   manifestPath: path.join(collapsedDecisionOutDir, 'rerun-manifest.json'),
   generatedAt: collapsedDecisionArtifacts.generatedAt,
   currentHead: collapsedManifestHead,
-  terminalJobIds: ['closed-stale-fresh-job', 'closed-conflict-fresh-job'],
+  terminalJobIds: ['closed-stale-fresh-job', 'closed-conflict-fresh-job', 'closed-rejected-fresh-job'],
   blockedJobIds: [],
   iterations: [{
     index: 1,
@@ -3852,7 +3903,7 @@ const collapsedDecisionManifest = createCodexAutoDrainRerunManifest({
         'ready-to-apply': [],
         'needs-human-port': [],
         'failed-evidence': [],
-        'stale-against-head': [closedStaleEntry, openRerunEntry]
+        'stale-against-head': [closedStaleEntry, closedRejectedEntry, openRerunEntry]
       },
       hierarchicalMergeQueue: {
         assignments: [{
@@ -3866,6 +3917,18 @@ const collapsedDecisionManifest = createCodexAutoDrainRerunManifest({
           conflictingJobIds: [],
           scopeId: 'path:src/closed-stale.ts',
           leaseKey: 'path:src/closed-stale.ts',
+          reasons: ['stale-against-head']
+        }, {
+          jobId: 'closed-rejected-old-job',
+          taskId: 'closed-rejected-task',
+          lane: 'rerun-lifecycle',
+          queueItemIds: ['closed-rejected-task'],
+          action: 'rerun',
+          changedPaths: ['src/closed-rejected.ts'],
+          changedRegions: [],
+          conflictingJobIds: [],
+          scopeId: 'path:src/closed-rejected.ts',
+          leaseKey: 'path:src/closed-rejected.ts',
           reasons: ['stale-against-head']
         }, {
           jobId: 'open-rerun-old-job',
@@ -3924,6 +3987,15 @@ const collapsedDecisionManifest = createCodexAutoDrainRerunManifest({
           changedPaths: ['src/closed-conflict.ts'],
           finishedAt: collapsedDecisionArtifacts.generatedAt + 4
         }),
+        createSyntheticAutonomousDecision('rejected', {
+          id: 'closed-rejected-fresh-decision',
+          jobId: 'closed-rejected-fresh-job',
+          taskId: 'closed-rejected-task',
+          queueItemIds: ['closed-rejected-task'],
+          changedPaths: ['src/closed-rejected.ts'],
+          reason: 'verification failed: closed-rejected-gate',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 5
+        }),
         createSyntheticAutonomousDecision('rerun', {
           id: 'open-rerun-decision',
           jobId: 'open-rerun-new-job',
@@ -3934,7 +4006,7 @@ const collapsedDecisionManifest = createCodexAutoDrainRerunManifest({
           changedPaths: ['src/open-rerun.ts'],
           changedRegions: ['src/open-rerun.ts#open'],
           headAfter: 'c'.repeat(40),
-          finishedAt: collapsedDecisionArtifacts.generatedAt + 5
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 6
         })
       ]
     }
@@ -3958,6 +4030,7 @@ assert.ok(!collapsedDecisionManifestTask.sourceRefs.includes(openRerunEntry.bund
 assert.ok(collapsedDecisionManifestTask.sourceRefs.includes(openDecisionBundlePath));
 assert.ok(!collapsedDecisionManifest.taskIds.includes('closed-stale-task'));
 assert.ok(!collapsedDecisionManifest.taskIds.includes('closed-conflict-task'));
+assert.ok(!collapsedDecisionManifest.taskIds.includes('closed-rejected-task'));
 
 const explicitHumanQuestionOutDir = path.join(tmp, 'explicit-human-question-dashboard');
 const explicitHumanQuestionArtifacts = createSyntheticAutoDrainArtifacts(explicitHumanQuestionOutDir);
