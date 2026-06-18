@@ -422,6 +422,87 @@ assert.strictEqual(compactLogRun.lastMessage, 'compact done\n');
 assert.ok((await fs.stat(compactLogPaths.eventsPath)).size > 1024 * 1024);
 assert.strictEqual(await fs.readFile(compactLogPaths.stderrPath, 'utf8'), 'stderr log retained\n');
 
+const completedTurnLingerCodexPath = path.join(tmp, 'fake-codex-completed-turn-linger.mjs');
+await fs.writeFile(completedTurnLingerCodexPath, `#!/usr/bin/env node
+import fs from 'node:fs';
+
+const lastMessageIndex = process.argv.indexOf('--output-last-message');
+const lastMessagePath = lastMessageIndex >= 0 ? process.argv[lastMessageIndex + 1] : '';
+process.stdin.resume();
+process.stdin.on('end', () => {
+  if (lastMessagePath) fs.writeFileSync(lastMessagePath, 'completed turn linger done\\n');
+  process.stdout.write(JSON.stringify({ type: 'turn.completed', turn: { status: 'completed' } }) + '\\n');
+  setInterval(() => {}, 1000);
+});
+`);
+await fs.chmod(completedTurnLingerCodexPath, 0o755);
+const completedTurnLingerPaths = {
+  ...paths,
+  eventsPath: path.join(tmp, 'completed-turn-linger-events.jsonl'),
+  stderrPath: path.join(tmp, 'completed-turn-linger-stderr.log'),
+  lastMessagePath: path.join(tmp, 'completed-turn-linger-last.md'),
+  pidManifestPath: path.join(tmp, 'completed-turn-linger-pids.json')
+};
+const completedTurnLingerStartedAt = Date.now();
+const completedTurnLingerRun = await spawnCodexExecutor({
+  job: plan.jobs[0],
+  prompt: 'completed turn linger prompt',
+  args: buildCodexArgs(plan.jobs[0], { outDir: tmp, workspacePath: tmp, paths: completedTurnLingerPaths }),
+  cwd: tmp,
+  workspacePath: tmp,
+  codexPath: completedTurnLingerCodexPath,
+  paths: completedTurnLingerPaths,
+  resourceAllocation: createCodexResourceAllocation(plan.jobs[0], { cwd: tmp, outDir: tmp, workspacePath: tmp }),
+  env: {},
+  timeoutMs: 10000,
+  completedTurnSettleMs: 50,
+  completedTurnSettlePollMs: 25,
+  completedTurnKillGraceMs: 500
+});
+assert.strictEqual(completedTurnLingerRun.exitCode, 0);
+assert.strictEqual(completedTurnLingerRun.lastMessage, 'completed turn linger done\n');
+assert.ok(Date.now() - completedTurnLingerStartedAt < 5000);
+assert.match(await fs.readFile(completedTurnLingerPaths.eventsPath, 'utf8'), /turn\.completed/);
+
+const completedTurnFailureCodexPath = path.join(tmp, 'fake-codex-completed-turn-failure.mjs');
+await fs.writeFile(completedTurnFailureCodexPath, `#!/usr/bin/env node
+import fs from 'node:fs';
+
+const lastMessageIndex = process.argv.indexOf('--output-last-message');
+const lastMessagePath = lastMessageIndex >= 0 ? process.argv[lastMessageIndex + 1] : '';
+process.stdin.resume();
+process.stdin.on('end', () => {
+  if (lastMessagePath) fs.writeFileSync(lastMessagePath, 'completed turn failed\\n');
+  process.stdout.write(JSON.stringify({ type: 'turn.completed', turn: { status: 'completed' } }) + '\\n');
+  setTimeout(() => process.exit(7), 50);
+});
+`);
+await fs.chmod(completedTurnFailureCodexPath, 0o755);
+const completedTurnFailurePaths = {
+  ...paths,
+  eventsPath: path.join(tmp, 'completed-turn-failure-events.jsonl'),
+  stderrPath: path.join(tmp, 'completed-turn-failure-stderr.log'),
+  lastMessagePath: path.join(tmp, 'completed-turn-failure-last.md'),
+  pidManifestPath: path.join(tmp, 'completed-turn-failure-pids.json')
+};
+const completedTurnFailureRun = await spawnCodexExecutor({
+  job: plan.jobs[0],
+  prompt: 'completed turn failure prompt',
+  args: buildCodexArgs(plan.jobs[0], { outDir: tmp, workspacePath: tmp, paths: completedTurnFailurePaths }),
+  cwd: tmp,
+  workspacePath: tmp,
+  codexPath: completedTurnFailureCodexPath,
+  paths: completedTurnFailurePaths,
+  resourceAllocation: createCodexResourceAllocation(plan.jobs[0], { cwd: tmp, outDir: tmp, workspacePath: tmp }),
+  env: {},
+  timeoutMs: 10000,
+  completedTurnSettleMs: 500,
+  completedTurnSettlePollMs: 25,
+  completedTurnKillGraceMs: 500
+});
+assert.strictEqual(completedTurnFailureRun.exitCode, 7);
+assert.strictEqual(completedTurnFailureRun.lastMessage, 'completed turn failed\n');
+
 const prompt = renderCodexPrompt(plan.jobs[0], { workspacePath: tmp, paths });
 assert.ok(prompt.includes('Allowed write globs'));
 assert.ok(prompt.includes('Resource allocation'));

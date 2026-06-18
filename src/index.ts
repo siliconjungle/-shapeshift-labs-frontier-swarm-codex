@@ -200,6 +200,9 @@ const SEMANTIC_IMPORT_MAX_STRING_CHARS = 2048;
 const SEMANTIC_IMPORT_MAX_OBJECT_KEYS = 24;
 const SEMANTIC_IMPORT_MAX_ARRAY_ITEMS = 50;
 const CODEX_EVENT_METRICS_MAX_LINE_CHARS = 1024 * 1024;
+const CODEX_COMPLETED_TURN_SETTLE_MS = 15_000;
+const CODEX_COMPLETED_TURN_SETTLE_POLL_MS = 250;
+const CODEX_COMPLETED_TURN_KILL_GRACE_MS = 2_000;
 const AUTONOMOUS_APPLY_REPO_LOCK_KEY = 'repo:*';
 const SUPPORTED_CODEX_MODEL_BY_NORMALIZED = new Map(
   FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.map((model) => [model.toLowerCase(), model])
@@ -1501,6 +1504,9 @@ export interface FrontierCodexExecutorInput {
   resourceAllocation: FrontierCodexResourceAllocation;
   env: Record<string, string>;
   timeoutMs: number;
+  completedTurnSettleMs?: number;
+  completedTurnSettlePollMs?: number;
+  completedTurnKillGraceMs?: number;
 }
 
 export interface FrontierCodexExecutorResult {
@@ -5005,11 +5011,16 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
   await fs.mkdir(path.dirname(input.paths.eventsPath), { recursive: true });
   await fs.mkdir(path.dirname(input.paths.stderrPath), { recursive: true });
   const eventMetrics = codexEventMetrics();
+  const completedTurn = codexTurnCompletionDetector();
   const eventsStream = createWriteStream(input.paths.eventsPath, { flags: 'w' });
   const stderrStream = createWriteStream(input.paths.stderrPath, { flags: 'w' });
   return new Promise((resolve) => {
     let settled = false;
     let streamError: Error | undefined;
+    let completedTurnSettleTimer: NodeJS.Timeout | undefined;
+    let completedTurnKillTimer: NodeJS.Timeout | undefined;
+    let completedTurnReadyAt: number | undefined;
+    let completedTurnTerminated = false;
     const child = spawn(input.codexPath, input.args, {
       cwd: input.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -5017,10 +5028,20 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
     });
     const childPid = child.pid;
     let timer: NodeJS.Timeout;
+    const completedTurnSettleMs = Math.max(0, input.completedTurnSettleMs ?? CODEX_COMPLETED_TURN_SETTLE_MS);
+    const completedTurnSettlePollMs = Math.max(25, input.completedTurnSettlePollMs ?? CODEX_COMPLETED_TURN_SETTLE_POLL_MS);
+    const completedTurnKillGraceMs = Math.max(0, input.completedTurnKillGraceMs ?? CODEX_COMPLETED_TURN_KILL_GRACE_MS);
+    const clearCompletedTurnTimers = () => {
+      if (completedTurnSettleTimer) clearTimeout(completedTurnSettleTimer);
+      if (completedTurnKillTimer) clearTimeout(completedTurnKillTimer);
+      completedTurnSettleTimer = undefined;
+      completedTurnKillTimer = undefined;
+    };
     const settle = async (result: FrontierCodexExecutorResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearCompletedTurnTimers();
       await Promise.all([finishWriteStream(eventsStream), finishWriteStream(stderrStream)]);
       if (childPid) {
         await finishCodexPidManifestEntry(input.paths.pidManifestPath, {
@@ -5041,6 +5062,34 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
         ...(metrics ? { metrics } : {})
       });
     };
+    const settleCompletedTurnIfReady = async () => {
+      if (settled || completedTurnTerminated || streamError || !completedTurn.completed || !childPid) return;
+      const lastMessage = await readOptionalText(input.paths.lastMessagePath);
+      const descendantPids = await listLiveProcessDescendantPids(childPid, input.cwd);
+      const ready = !!lastMessage && descendantPids !== undefined && descendantPids.length === 0;
+      if (!ready) {
+        completedTurnReadyAt = undefined;
+        if (!settled && !completedTurnTerminated) {
+          completedTurnSettleTimer = setTimeout(() => {
+            settleCompletedTurnIfReady().catch(() => {});
+          }, completedTurnSettlePollMs);
+        }
+        return;
+      }
+      completedTurnReadyAt = completedTurnReadyAt ?? Date.now();
+      const waitMs = completedTurnReadyAt + completedTurnSettleMs - Date.now();
+      if (waitMs > 0) {
+        completedTurnSettleTimer = setTimeout(() => {
+          settleCompletedTurnIfReady().catch(() => {});
+        }, Math.min(waitMs, completedTurnSettlePollMs));
+        return;
+      }
+      completedTurnTerminated = true;
+      child.kill('SIGTERM');
+      completedTurnKillTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+      }, completedTurnKillGraceMs);
+    };
     const onStreamError = (error: Error) => {
       streamError = streamError ?? error;
       child.kill('SIGTERM');
@@ -5060,13 +5109,20 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
     timer = setTimeout(() => child.kill('SIGTERM'), input.timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => {
       eventMetrics.push(chunk);
+      completedTurn.push(chunk);
+      if (completedTurn.completed && !completedTurnSettleTimer && !completedTurnTerminated) {
+        completedTurnSettleTimer = setTimeout(() => {
+          settleCompletedTurnIfReady().catch(() => {});
+        }, 0);
+      }
       writeChildLogChunk(eventsStream, chunk, child.stdout);
     });
     child.stderr.on('data', (chunk: Buffer) => writeChildLogChunk(stderrStream, chunk, child.stderr));
     child.stdin.end(input.prompt);
     child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+      const completedTurnSignalExit = completedTurnTerminated && code === null && (signal === 'SIGTERM' || signal === 'SIGKILL');
       settle({
-        exitCode: streamError ? 1 : code ?? 1,
+        exitCode: streamError ? 1 : completedTurnSignalExit ? 0 : code ?? 1,
         ...(signal ? { signal } : {})
       }).catch(() => {});
     });
@@ -11002,6 +11058,11 @@ interface CodexEventMetricsAccumulator {
   finish(): FrontierCodexRunMetricsInput | undefined;
 }
 
+interface CodexTurnCompletionDetector {
+  readonly completed: boolean;
+  push(chunk: Buffer | string): void;
+}
+
 function codexEventMetrics(): CodexEventMetricsAccumulator {
   const decoder = new StringDecoder('utf8');
   let pending = '';
@@ -11057,6 +11118,62 @@ function codexEventMetrics(): CodexEventMetricsAccumulator {
   };
 }
 
+function codexTurnCompletionDetector(): CodexTurnCompletionDetector {
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  let droppingLongLine = false;
+  let completed = false;
+  const processLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.includes('turn.completed')) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return;
+    }
+    if (hasCodexTurnCompletedEvent(parsed)) completed = true;
+  };
+  const appendText = (text: string) => {
+    let start = 0;
+    while (start < text.length) {
+      const newline = text.indexOf('\n', start);
+      const end = newline === -1 ? text.length : newline;
+      const segment = text.slice(start, end);
+      if (!droppingLongLine) {
+        if (pending.length + segment.length <= CODEX_EVENT_METRICS_MAX_LINE_CHARS) {
+          pending += segment;
+        } else {
+          pending = '';
+          droppingLongLine = true;
+        }
+      }
+      if (newline === -1) break;
+      if (!droppingLongLine) processLine(pending);
+      pending = '';
+      droppingLongLine = false;
+      start = newline + 1;
+    }
+  };
+  return {
+    get completed() {
+      return completed;
+    },
+    push(chunk: Buffer | string) {
+      appendText(typeof chunk === 'string' ? chunk : decoder.write(chunk));
+    }
+  };
+}
+
+function hasCodexTurnCompletedEvent(value: unknown, depth = 0): boolean {
+  if (!isObject(value) || depth > 5) return false;
+  if (value.type === 'turn.completed') return true;
+  for (const key of ['event', 'message', 'data', 'payload', 'result']) {
+    if (hasCodexTurnCompletedEvent(value[key], depth + 1)) return true;
+  }
+  return false;
+}
+
 function mightContainCodexMetric(line: string): boolean {
   return /token|usage|metrics|run_metrics/i.test(line);
 }
@@ -11071,6 +11188,38 @@ function writeChildLogChunk(stream: WriteStream, chunk: Buffer, source: NodeJS.R
 async function finishWriteStream(stream: WriteStream): Promise<void> {
   if (stream.destroyed) return;
   await new Promise<void>((resolve) => stream.end(resolve));
+}
+
+async function listLiveProcessDescendantPids(rootPid: number, cwd: string): Promise<number[] | undefined> {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0) return undefined;
+  const result = await runProcess('ps', ['-eo', 'pid=,ppid='], { cwd, allowFailure: true }).catch(() => undefined);
+  // Some sandboxed workers cannot inspect the process table. In that case there
+  // are no known descendants, so the completed-turn settle path still stays
+  // bounded after the normal nonzero-exit settle window.
+  if (!result || result.status !== 0) return [];
+  const childrenByParent = new Map<number, number[]>();
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const [pidText, ppidText] = line.trim().split(/\s+/, 2);
+    const pid = Number(pidText);
+    const ppid = Number(ppidText);
+    if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(ppid) || pid <= 0 || ppid <= 0) continue;
+    const children = childrenByParent.get(ppid) ?? [];
+    children.push(pid);
+    childrenByParent.set(ppid, children);
+  }
+  const descendants: number[] = [];
+  const seen = new Set<number>([rootPid]);
+  const pending = [rootPid];
+  while (pending.length) {
+    const parentPid = pending.pop()!;
+    for (const childPid of childrenByParent.get(parentPid) ?? []) {
+      if (seen.has(childPid)) continue;
+      seen.add(childPid);
+      descendants.push(childPid);
+      pending.push(childPid);
+    }
+  }
+  return descendants;
 }
 
 function collectCodexRunMetricCandidates(value: unknown, depth = 0): FrontierCodexRunMetricsInput[] {
