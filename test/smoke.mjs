@@ -534,6 +534,78 @@ assert.deepStrictEqual(unknownPricingDashboard.costSummary.unknownPricing, [{
   model: 'future-codex-model',
   reason: 'unknown-model-pricing'
 }]);
+const activeCostDashboardPath = path.join(tmp, 'active-cost-dashboard.json');
+await writeSwarmCoordinatorSnapshot(activeCostDashboardPath, {
+  ok: true,
+  outDir: tmp,
+  plan,
+  run: {
+    id: 'active-cost-run',
+    jobs: [
+      {
+        ...plan.jobs[0],
+        id: 'active-priced',
+        taskId: 'active-priced-task',
+        status: 'running',
+        metadata: {
+          resourceAllocation: { model: 'gpt-5.5' },
+          codexRunMetrics: {
+            inputTokens: 1200,
+            cachedInputTokens: 200,
+            outputTokens: 300
+          }
+        }
+      },
+      {
+        ...plan.jobs[0],
+        id: 'active-unknown-pricing',
+        taskId: 'active-unknown-pricing-task',
+        status: 'running',
+        metadata: {
+          codexRunMetrics: {
+            model: 'future-codex-model',
+            inputTokens: 100,
+            outputTokens: 50
+          }
+        }
+      }
+    ],
+    results: [{
+      jobId: 'completed-priced',
+      status: 'completed',
+      metadata: {
+        codexRunMetrics: {
+          model: 'gpt-5.5',
+          inputTokens: 1000,
+          cachedInputTokens: 100,
+          outputTokens: 100
+        }
+      }
+    }],
+    summary: {}
+  },
+  proof: {}
+});
+const activeCostDashboard = JSON.parse(await fs.readFile(activeCostDashboardPath, 'utf8'));
+assert.strictEqual(activeCostDashboard.costSummary.source, 'run-results-and-jobs-metadata');
+assert.strictEqual(activeCostDashboard.costSummary.jobCount, 3);
+assert.strictEqual(activeCostDashboard.costSummary.jobsWithTokenUsage, 3);
+assert.strictEqual(activeCostDashboard.costSummary.estimatedJobCount, 2);
+assert.strictEqual(activeCostDashboard.costSummary.unknownPricingJobCount, 1);
+assert.strictEqual(activeCostDashboard.costSummary.estimatedCostUsd, 0.02165);
+assert.deepStrictEqual(activeCostDashboard.costSummary.missingUsageJobIds, []);
+assert.deepStrictEqual(
+  activeCostDashboard.costSummary.byModel.map((entry) => [entry.model, entry.jobCount, entry.estimatedJobCount, entry.estimatedCostUsd]),
+  [
+    ['future-codex-model', 1, 0, 0],
+    ['gpt-5.5', 2, 2, 0.02165]
+  ]
+);
+assert.deepStrictEqual(activeCostDashboard.costSummary.unknownPricing, [{
+  jobId: 'active-unknown-pricing',
+  model: 'future-codex-model',
+  reason: 'unknown-model-pricing'
+}]);
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);

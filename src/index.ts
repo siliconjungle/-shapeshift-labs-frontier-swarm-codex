@@ -1499,7 +1499,7 @@ export interface FrontierCodexDashboardCostUnknownPricing {
 export interface FrontierCodexDashboardCostSummary {
   kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_KIND;
   version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_VERSION;
-  source: 'run-results-metadata';
+  source: 'run-results-and-jobs-metadata';
   available: boolean;
   currency: 'USD';
   unitTokens: number;
@@ -1523,6 +1523,13 @@ export interface FrontierCodexDashboardCostSummary {
   byModel: FrontierCodexDashboardCostModelSummary[];
   unknownPricing: FrontierCodexDashboardCostUnknownPricing[];
   missingUsageJobIds: string[];
+}
+
+interface FrontierCodexDashboardCostItem {
+  jobId: string;
+  status?: string;
+  source: 'result' | 'job';
+  metadata?: unknown;
 }
 
 export type FrontierCodexDashboardOperatorQueueStatus = 'ok' | 'info' | 'warning' | 'blocked' | 'unavailable';
@@ -3867,7 +3874,7 @@ export async function writeSwarmCoordinatorSnapshot(
     return acc;
   }, {});
   const queueMetadata = createDashboardQueueMetadata(input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null, input.autoDrain ?? null);
-  const costSummary = createCodexDashboardCostSummary(input.run.results);
+  const costSummary = createCodexDashboardCostSummary(input.run);
   const dashboard = {
     kind: 'frontier.swarm-codex.coordinator-dashboard',
     version: 1,
@@ -3895,20 +3902,21 @@ export async function writeSwarmCoordinatorSnapshot(
   await fs.writeFile(file, JSON.stringify(dashboard, null, 2) + '\n');
 }
 
-function createCodexDashboardCostSummary(results: FrontierSwarmRun['results']): FrontierCodexDashboardCostSummary {
+function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDashboardCostSummary {
+  const costItems = collectCodexDashboardCostItems(run);
   const byModel = new Map<string, FrontierCodexDashboardCostModelSummary>();
   const unknownPricing: FrontierCodexDashboardCostUnknownPricing[] = [];
   const missingUsageJobIds: string[] = [];
   const summary: FrontierCodexDashboardCostSummary = {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_VERSION,
-    source: 'run-results-metadata',
+    source: 'run-results-and-jobs-metadata',
     available: false,
     currency: 'USD',
     unitTokens: FRONTIER_SWARM_CODEX_MODEL_PRICING_UNIT_TOKENS,
     pricingSource: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE,
     pricingSourceCheckedAt: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE_CHECKED_AT,
-    jobCount: results.length,
+    jobCount: costItems.length,
     jobsWithTokenUsage: 0,
     estimatedJobCount: 0,
     unknownPricingJobCount: 0,
@@ -3927,12 +3935,12 @@ function createCodexDashboardCostSummary(results: FrontierSwarmRun['results']): 
     unknownPricing,
     missingUsageJobIds
   };
-  for (const result of results) {
-    const metrics = readCodexRunMetrics(result.metadata);
-    const estimate = readCodexCostEstimate(result.metadata);
+  for (const item of costItems) {
+    const metrics = readCodexRunMetrics(item.metadata);
+    const estimate = metrics ? readCodexCostEstimate(item.metadata) ?? estimateCodexRunCost(metrics) : readCodexCostEstimate(item.metadata);
     if (!metrics?.hasTokenUsage) {
       summary.missingUsageJobCount += 1;
-      missingUsageJobIds.push(result.jobId);
+      missingUsageJobIds.push(item.jobId);
       continue;
     }
     summary.available = true;
@@ -3973,7 +3981,7 @@ function createCodexDashboardCostSummary(results: FrontierSwarmRun['results']): 
       const reason = estimate?.reason ?? 'unknown-model-pricing';
       if (reason === 'unknown-model-pricing' || reason === 'missing-model') summary.unknownPricingJobCount += 1;
       unknownPricing.push({
-        jobId: result.jobId,
+        jobId: item.jobId,
         ...(model !== 'unknown' ? { model } : {}),
         reason
       });
@@ -3984,6 +3992,29 @@ function createCodexDashboardCostSummary(results: FrontierSwarmRun['results']): 
   summary.unknownPricing = unknownPricing.sort((left, right) => left.jobId.localeCompare(right.jobId));
   summary.missingUsageJobIds = missingUsageJobIds.sort();
   return summary;
+}
+
+function collectCodexDashboardCostItems(run: FrontierSwarmRun): FrontierCodexDashboardCostItem[] {
+  const resultJobIds = new Set(run.results.map((result) => result.jobId));
+  const items: FrontierCodexDashboardCostItem[] = run.results.map((result) => ({
+    jobId: result.jobId,
+    status: result.status,
+    source: 'result',
+    metadata: result.metadata
+  }));
+  for (const job of run.jobs) {
+    if (resultJobIds.has(job.id)) continue;
+    const metrics = readCodexRunMetrics(job.metadata);
+    const estimate = readCodexCostEstimate(job.metadata);
+    if (!metrics?.hasTokenUsage && !estimate) continue;
+    items.push({
+      jobId: job.id,
+      status: job.status,
+      source: 'job',
+      metadata: job.metadata
+    });
+  }
+  return items;
 }
 
 function createDashboardQueueMetadata(
@@ -6992,7 +7023,15 @@ function roundUsd(value: number): number {
 
 function readCodexRunMetrics(metadata: unknown): FrontierCodexRunMetrics | undefined {
   if (!isObject(metadata) || !isObject(metadata.codexRunMetrics)) return undefined;
-  return normalizeCodexRunMetrics(metadata.codexRunMetrics as FrontierCodexRunMetricsInput);
+  const resourceAllocation = isObject(metadata.resourceAllocation) ? metadata.resourceAllocation : {};
+  const model = normalizeCodexMetricsModel(
+    (metadata.codexRunMetrics as FrontierCodexRunMetricsInput).model
+      ?? readStringField(resourceAllocation, ['model'])
+  );
+  return normalizeCodexRunMetrics({
+    ...(metadata.codexRunMetrics as FrontierCodexRunMetricsInput),
+    ...(model ? { model } : {})
+  });
 }
 
 function readCodexCostEstimate(metadata: unknown): FrontierCodexRunCostEstimate | undefined {
