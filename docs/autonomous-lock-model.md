@@ -96,6 +96,28 @@ operator repair evidence. Future finer-grained leases must preserve this commit 
 rollback serialization because Git index, worktree, and branch mutation are not safely
 parallel.
 
+## Current-Head Self-Merge Fixture
+
+The `frontier-swarm-codex` smoke test includes a current-head auto-drain fixture that
+uses a plain Git repository with `src/apply.ts`, copied worker workspaces, a normal
+worker-generated merge bundle, required coordinator gates, and `autoDrain.commit`.
+The proof intentionally avoids Frontier-specific source files so the same contract can
+apply to non-Frontier repositories.
+
+The positive fixture proves the full autonomous path: collection marks the bundle
+`ready-to-apply`, merge admission admits it, coordinator-agent drain work assigns an
+`apply-local` lease, autonomous apply checks and applies the patch under the repo lock,
+the required focused gate passes, Git commits the result, the decision ledger records
+`committed`, post-apply collection has no remaining ready bundle, and the dashboard
+reports zero coordinator queues, rerun debt, true blockers, or human questions.
+
+The paired negative fixture starts two worker bundles from the same current head that
+touch the same file. After the first bundle commits, the second bundle is no longer
+current-head clean. Auto-drain records it as terminal coordinator retry work and writes
+a `rerun-current-head` manifest with source patch, bundle, queue item, and head
+metadata. The dashboard status is warning, not blocked: stale/rerun pressure is
+coordinator work, while true blockers and human questions remain zero.
+
 ## Future Finer-Grained Leases
 
 A future finer-grained lease implementation can use the existing lock key metadata to allow compatible bundles to run concurrently, but it should preserve the current safety properties:

@@ -2161,6 +2161,47 @@ assert.strictEqual(autoDrainCommitCards.get('coordination-debt').value, 0);
 assert.strictEqual(autoDrainCommitCards.get('coordination-debt').status, 'ok');
 assert.strictEqual(autoDrainCommitCards.get('stale-rerun').value, 0);
 assert.strictEqual(autoDrainCommitCards.get('true-blockers').value, 0);
+const autoDrainCommitCurrentHeadProof = {
+  admittedJobIds: autoDrainCommitIteration.collection.mergeAdmission.admitted,
+  readyJobIds: autoDrainCommitIteration.readyJobIds,
+  drainLeaseScope: autoDrainCommitDrainAssignment.leaseScope,
+  drainTerminal: autoDrainCommitDrainAssignment.terminal,
+  decisionStatus: autoDrainCommitDecision.status,
+  gateNames: autoDrainCommitDecision.verification.passedNames,
+  commit: autoDrainCommitDecision.commit,
+  remainingReadyCount: autoDrainCommitRun.autoDrain.summary.remainingReadyCount,
+  postApplyReadyCount: autoDrainCommitIteration.postApplyCollection.buckets['ready-to-apply'].length,
+  reviewDebt: {
+    activeCoordinatorQueueCount: autoDrainCommitDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount,
+    localQueueCount: autoDrainCommitDashboard.queueMetadata.queueHealth.localQueueCount,
+    promotedCount: autoDrainCommitDashboard.queueMetadata.queueHealth.promotedCount,
+    staleOrRerunCount: autoDrainCommitDashboard.queueMetadata.queueHealth.staleOrRerunCount,
+    trueBlockerCount: autoDrainCommitDashboard.queueMetadata.queueHealth.trueBlockerCount,
+    humanQuestions: autoDrainCommitDashboard.humanQuestions.count
+  }
+};
+assert.deepStrictEqual(autoDrainCommitCurrentHeadProof.admittedJobIds, [autoDrainCommitJobId]);
+assert.deepStrictEqual(autoDrainCommitCurrentHeadProof.readyJobIds, [autoDrainCommitJobId]);
+assert.ok(autoDrainCommitCurrentHeadProof.drainLeaseScope.startsWith('merge:semantic:'));
+assert.strictEqual(autoDrainCommitCurrentHeadProof.drainTerminal, true);
+assert.strictEqual(autoDrainCommitCurrentHeadProof.decisionStatus, 'committed');
+assert.deepStrictEqual(autoDrainCommitCurrentHeadProof.gateNames, ['coordinator-sees-new']);
+assert.match(autoDrainCommitCurrentHeadProof.commit, /^[0-9a-f]{40}$/);
+assert.deepStrictEqual(autoDrainCommitCurrentHeadProof.reviewDebt, {
+  activeCoordinatorQueueCount: 0,
+  localQueueCount: 0,
+  promotedCount: 0,
+  staleOrRerunCount: 0,
+  trueBlockerCount: 0,
+  humanQuestions: 0
+});
+assert.deepStrictEqual({
+  remainingReadyCount: autoDrainCommitCurrentHeadProof.remainingReadyCount,
+  postApplyReadyCount: autoDrainCommitCurrentHeadProof.postApplyReadyCount
+}, {
+  remainingReadyCount: 0,
+  postApplyReadyCount: 0
+});
 
 const autoDrainCommitRerunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-commit-rerun-repo');
 const autoDrainCommitRerunPlan = createCodexSwarmPlan({
@@ -2294,6 +2335,25 @@ assert.ok(autoDrainCommitRerunTask.metadata.rerun.sourcePatchPaths.some((entry) 
 assert.ok(autoDrainCommitRerunTask.sourceRefs.some((entry) => entry.endsWith('changes.patch')));
 assert.ok(autoDrainCommitRerunTask.sourceRefs.includes(autoDrainCommitRerunSecondIteration.collection.artifacts.queueOverlayPath));
 assert.ok(autoDrainCommitRerunTask.sourceRefs.includes(autoDrainCommitRerunSecondIteration.collection.artifacts.hierarchicalMergeQueuePath));
+const autoDrainCommitRerunDashboard = JSON.parse(await fs.readFile(path.join(autoDrainCommitRerunOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainCommitRerunDashboard.queueMetadata.queueHealth.rerunCount, 1);
+assert.strictEqual(autoDrainCommitRerunDashboard.queueMetadata.queueHealth.staleOrRerunCount, 1);
+assert.strictEqual(autoDrainCommitRerunDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
+assert.strictEqual(autoDrainCommitRerunDashboard.humanQuestions.count, 0);
+assert.strictEqual(autoDrainCommitRerunDashboard.queueMetadata.operatorSummary.status, 'warning');
+assert.match(autoDrainCommitRerunDashboard.queueMetadata.operatorSummary.headline, /not a human blocker/);
+assert.strictEqual(autoDrainCommitRerunDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 1);
+assert.strictEqual(autoDrainCommitRerunDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
+assert.strictEqual(autoDrainCommitRerunDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
+assert.strictEqual(autoDrainCommitRerunDashboard.queueMetadata.mergeQueueHealth.counts.rerunCandidateCount, 1);
+assert.deepStrictEqual(autoDrainCommitRerunDashboard.queueMetadata.mergeQueueHealth.rerunCandidates[0].sourceKinds, ['stale-against-head', 'queue-rerun']);
+assert.deepStrictEqual(autoDrainCommitRerunDashboard.queueMetadata.mergeQueueHealth.rerunCandidates[0].queueItemIds, ['apply-second-commit-task']);
+const autoDrainCommitRerunCards = new Map(autoDrainCommitRerunDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
+assert.strictEqual(autoDrainCommitRerunCards.get('stale-rerun').value, 1);
+assert.strictEqual(autoDrainCommitRerunCards.get('stale-rerun').status, 'warning');
+assert.match(autoDrainCommitRerunCards.get('stale-rerun').action, /coordinator work/);
+assert.strictEqual(autoDrainCommitRerunCards.get('true-blockers').value, 0);
+assert.strictEqual(autoDrainCommitRerunCards.get('true-blockers').status, 'ok');
 
 const autoDrainApplyRerunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-apply-rerun-repo');
 await fs.writeFile(path.join(autoDrainApplyRerunRepo, 'src', 'other.ts'), 'old-other\n');
