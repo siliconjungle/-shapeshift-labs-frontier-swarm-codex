@@ -630,6 +630,40 @@ assert.strictEqual(patchOnlyStaleBundle.staleAgainstHead, true);
 assert.strictEqual(patchOnlyStaleBundle.disposition, 'stale-against-head');
 assert.deepStrictEqual(patchOnlyStaleBundle.queueItemIds, ['patch-only-stale-task']);
 
+const patchOnlyNormalizedRepo = await createApplyFixtureRepo(tmp, 'patch-only-normalized-repo');
+const patchOnlyNormalizedRunDir = path.join(tmp, 'patch-only-normalized-run');
+await writePatchOnlyJob(patchOnlyNormalizedRunDir, 'patch-only-normalized', [
+  'diff --git a/tmp/frontier-head/src/apply.ts b/Users/example/agent-worktrees/patch-only/packages/app/src/apply.ts',
+  '--- a/tmp/frontier-head/src/apply.ts',
+  '+++ b/Users/example/agent-worktrees/patch-only/packages/app/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'), {
+  taskId: 'patch-only-normalized-task',
+  changedFiles: ['src/apply.ts'],
+  changedRegions: ['src/apply.ts#apply']
+});
+const patchOnlyNormalizedCollection = await collectCodexSwarmRun({
+  run: patchOnlyNormalizedRunDir,
+  cwd: patchOnlyNormalizedRepo,
+  outDir: path.join(tmp, 'patch-only-normalized-collection'),
+  checkStale: true,
+  promotePatchCandidates: true,
+  promotionFocusedCommands: [{ name: 'coordinator-gate', command: process.execPath, args: ['-e', 'process.exit(0)'] }]
+});
+assert.strictEqual(patchOnlyNormalizedCollection.summary.total, 1);
+assert.strictEqual(patchOnlyNormalizedCollection.summary['ready-to-apply'], 1);
+assert.strictEqual(patchOnlyNormalizedCollection.summary['stale-against-head'], 0);
+const patchOnlyNormalizedBundle = JSON.parse(await fs.readFile(path.join(patchOnlyNormalizedCollection.outDir, 'ready-to-apply', 'patch-only-normalized', 'merge.json'), 'utf8'));
+assert.deepStrictEqual(patchOnlyNormalizedBundle.changedPaths, ['src/apply.ts']);
+assert.deepStrictEqual(patchOnlyNormalizedBundle.ownershipViolations, []);
+assert.strictEqual(patchOnlyNormalizedBundle.metadata.patchOnlyCollection.changedPathSource, 'normalized-patch');
+assert.ok(patchOnlyNormalizedBundle.metadata.patchOnlyCollection.normalizedPatchPath.endsWith('changes.normalized.patch'));
+const patchOnlyNormalizedPatch = await fs.readFile(path.join(patchOnlyNormalizedCollection.outDir, 'ready-to-apply', 'patch-only-normalized', 'changes.patch'), 'utf8');
+assert.match(patchOnlyNormalizedPatch, /diff --git a\/src\/apply\.ts b\/src\/apply\.ts/);
+
 const queueMetadataRunDir = path.join(tmp, 'queue-metadata-run');
 await writeSyntheticMergeBundle(queueMetadataRunDir, 'apply-local', {
   disposition: 'auto-mergeable',

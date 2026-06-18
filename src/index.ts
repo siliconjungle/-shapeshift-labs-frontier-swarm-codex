@@ -7858,7 +7858,7 @@ async function collectPatchOnlyMergeRecords(input: {
     });
     if (seenJobIds.has(bundle.jobId)) continue;
     seenJobIds.add(bundle.jobId);
-    records.push({ mergePath: patchPath, bundle, patchOnly: true, patchPath });
+    records.push({ mergePath: patchPath, bundle, patchOnly: true, patchPath: bundle.patchPath ?? patchPath });
   }
   return records;
 }
@@ -7870,7 +7870,6 @@ async function synthesizePatchOnlyMergeBundle(input: {
 }): Promise<FrontierSwarmMergeBundle> {
   const jobDir = inferPatchOnlyJobDir(input.runDir, input.patchPath);
   const patchText = await fs.readFile(input.patchPath, 'utf8').catch(() => '');
-  const patchChangedPaths = changedPathsFromPatchText(patchText);
   const evidencePath = await firstExistingPath([
     path.join(path.dirname(input.patchPath), 'evidence.json'),
     path.join(jobDir, 'evidence', 'evidence.json')
@@ -7883,15 +7882,23 @@ async function synthesizePatchOnlyMergeBundle(input: {
     ...stringArray(evidence.changedPaths),
     ...stringArray(evidence.changedFiles)
   ]).sort();
-  const changedPaths = uniqueStrings([
-    ...(patchChangedPaths.length ? patchChangedPaths : evidenceChangedPaths)
-  ]).sort();
   const allowedWriteCheck = isObject(evidence.allowedWriteCheck) ? evidence.allowedWriteCheck : {};
   const allowedWrites = uniqueStrings([
     ...stringArray(evidence.allowedWrites),
     ...stringArray(evidence.allowedWriteGlobs),
     ...stringArray(allowedWriteCheck.allowedGlobs),
     ...stringArray(promptTask.allowedWrites)
+  ]).sort();
+  const patchNormalization = await normalizePatchOnlyPatch({
+    patchPath: input.patchPath,
+    patchText,
+    cwd: input.cwd,
+    evidenceChangedPaths,
+    allowedWrites
+  });
+  const patchChangedPaths = patchNormalization.changedPaths;
+  const changedPaths = uniqueStrings([
+    ...(patchChangedPaths.length ? patchChangedPaths : evidenceChangedPaths)
   ]).sort();
   let ownershipViolations = allowedWrites.length
     ? changedPaths.filter((file) => !allowedWrites.some((glob) => matchesGlob(file, glob))).sort()
@@ -7955,8 +7962,8 @@ async function synthesizePatchOnlyMergeBundle(input: {
     ownedFilesTouched: allowedWriteOk === true && ownershipViolations.length === 0 ? [...changedPaths] : [],
     allowedWrites,
     ownershipViolations,
-    patchPath: input.patchPath,
-    patchHash: stableHash(patchText),
+    patchPath: patchNormalization.patchPath,
+    patchHash: stableHash(patchNormalization.patchText),
     evidencePaths,
     commandsPassed: [],
     commandsFailed: [],
@@ -7968,16 +7975,152 @@ async function synthesizePatchOnlyMergeBundle(input: {
         source: FRONTIER_SWARM_CODEX_COLLECTION_KIND,
         reason: 'changes.patch existed without merge.json',
         jobDir,
-        patchPath: input.patchPath,
+        patchPath: patchNormalization.patchPath,
+        originalPatchPath: input.patchPath,
         ...(evidencePath ? { evidencePath } : {}),
         ...(promptPath ? { promptPath } : {}),
         ...(statusText ? { evidenceStatus: statusText } : {}),
-        changedPathSource: patchChangedPaths.length ? 'patch' : evidenceChangedPaths.length ? 'evidence' : 'unknown',
+        changedPathSource: patchNormalization.changedPathSource,
+        ...(patchNormalization.normalized ? { normalizedPatchPath: patchNormalization.patchPath } : {}),
         allowedWriteEvidence: allowedWriteOk === undefined ? 'unknown' : allowedWriteOk,
         cwd: input.cwd
       }
     }
   };
+}
+
+async function normalizePatchOnlyPatch(input: {
+  patchPath: string;
+  patchText: string;
+  cwd: string;
+  evidenceChangedPaths: readonly string[];
+  allowedWrites: readonly string[];
+}): Promise<{
+  patchPath: string;
+  patchText: string;
+  changedPaths: string[];
+  changedPathSource: 'patch' | 'normalized-patch' | 'evidence' | 'unknown';
+  normalized: boolean;
+}> {
+  const patchChangedPaths = changedPathsFromPatchText(input.patchText);
+  const normalizedChangedPaths = uniqueStrings(patchChangedPaths
+    .map((file) => normalizePatchOnlyChangedPath(file, input))
+    .filter((file): file is string => !!file)).sort();
+  const patchViolations = input.allowedWrites.length
+    ? normalizedChangedPaths.filter((file) => !input.allowedWrites.some((glob) => matchesGlob(file, glob)))
+    : [];
+  const evidenceViolations = input.allowedWrites.length
+    ? input.evidenceChangedPaths.filter((file) => !input.allowedWrites.some((glob) => matchesGlob(file, glob)))
+    : [];
+  const useEvidencePaths = input.evidenceChangedPaths.length > 0
+    && evidenceViolations.length === 0
+    && (normalizedChangedPaths.length === 0 || patchViolations.length > 0);
+  const changedPaths = useEvidencePaths ? [...input.evidenceChangedPaths].sort() : normalizedChangedPaths;
+  if (!input.patchText.trim()) {
+    return {
+      patchPath: input.patchPath,
+      patchText: input.patchText,
+      changedPaths,
+      changedPathSource: changedPaths.length ? useEvidencePaths ? 'evidence' : 'patch' : 'unknown',
+      normalized: false
+    };
+  }
+  const normalizedText = rewritePatchOnlyPatchHeaders(input.patchText, input);
+  if (normalizedText === input.patchText) {
+    return {
+      patchPath: input.patchPath,
+      patchText: input.patchText,
+      changedPaths,
+      changedPathSource: changedPaths.length ? useEvidencePaths ? 'evidence' : 'patch' : 'unknown',
+      normalized: false
+    };
+  }
+  const normalizedPath = path.join(path.dirname(input.patchPath), 'changes.normalized.patch');
+  await fs.writeFile(normalizedPath, normalizedText);
+  const normalizedPaths = changedPathsFromPatchText(normalizedText);
+  return {
+    patchPath: normalizedPath,
+    patchText: normalizedText,
+    changedPaths: normalizedPaths.length ? normalizedPaths : changedPaths,
+    changedPathSource: 'normalized-patch',
+    normalized: true
+  };
+}
+
+function rewritePatchOnlyPatchHeaders(text: string, context: {
+  cwd: string;
+  evidenceChangedPaths: readonly string[];
+  allowedWrites: readonly string[];
+}): string {
+  let changed = false;
+  const lines = text.split(/\r?\n/).map((line) => {
+    const diffMatch = /^diff --git (.+?) (.+)$/.exec(line);
+    if (diffMatch) {
+      const left = normalizePatchOnlyChangedPath(diffMatch[1], context);
+      const right = normalizePatchOnlyChangedPath(diffMatch[2], context);
+      if (left && right && (`a/${left}` !== diffMatch[1] || `b/${right}` !== diffMatch[2])) {
+        changed = true;
+        return `diff --git a/${left} b/${right}`;
+      }
+      return line;
+    }
+    const fileMatch = /^(---|\+\+\+) (.+)$/.exec(line);
+    if (!fileMatch) return line;
+    const marker = fileMatch[1];
+    const value = fileMatch[2];
+    if (value === '/dev/null') return line;
+    const normalized = normalizePatchOnlyChangedPath(value, context);
+    if (!normalized) return line;
+    const next = `${marker} ${marker === '---' ? 'a' : 'b'}/${normalized}`;
+    if (next !== line) changed = true;
+    return next;
+  });
+  return changed ? lines.join('\n') : text;
+}
+
+function normalizePatchOnlyChangedPath(file: string, context: {
+  cwd: string;
+  evidenceChangedPaths: readonly string[];
+  allowedWrites: readonly string[];
+}): string | undefined {
+  const normalized = normalizePatchChangedPath(file);
+  if (!normalized) return undefined;
+  const candidates = uniqueStrings([
+    normalized,
+    ...patchOnlyRelativePathCandidates(normalized, context)
+  ]);
+  for (const candidate of candidates) {
+    if (context.evidenceChangedPaths.includes(candidate)) return candidate;
+    if (context.allowedWrites.some((glob) => matchesGlob(candidate, glob))) return candidate;
+  }
+  return normalized;
+}
+
+function patchOnlyRelativePathCandidates(file: string, context: {
+  cwd: string;
+  evidenceChangedPaths: readonly string[];
+  allowedWrites: readonly string[];
+}): string[] {
+  const candidates: string[] = [];
+  const absolute = file.startsWith('/') ? file : path.resolve('/', file);
+  if (absolute.startsWith(`${context.cwd}/`)) candidates.push(path.relative(context.cwd, absolute).replace(/\\/g, '/'));
+  for (const evidencePath of context.evidenceChangedPaths) {
+    if (file === evidencePath || file.endsWith(`/${evidencePath}`)) candidates.push(evidencePath);
+  }
+  for (const glob of context.allowedWrites) {
+    const prefix = globStaticPrefix(glob);
+    if (!prefix) continue;
+    const index = file.indexOf(prefix);
+    if (index >= 0) candidates.push(file.slice(index));
+  }
+  return candidates.filter(Boolean);
+}
+
+function globStaticPrefix(glob: string): string {
+  const firstGlob = glob.search(/[*?[\]{}]/);
+  const prefix = (firstGlob >= 0 ? glob.slice(0, firstGlob) : glob).replace(/\\/g, '/');
+  const slash = prefix.lastIndexOf('/');
+  return slash >= 0 ? prefix.slice(0, slash + 1) : prefix;
 }
 
 function patchOnlyBundleReasons(input: {
@@ -8091,10 +8234,17 @@ function readPromptHeader(prompt: string, name: string): string | undefined {
 function readPatchOnlyAllowedWriteOk(evidence: Record<string, unknown>, allowedWriteCheck: Record<string, unknown>): boolean | undefined {
   for (const value of [
     evidence.changedPathsWithinAllowedGlobs,
+    evidence.changedPathsInsideAllowedWrites,
+    evidence.changedPathsWithinAllowedWrites,
     evidence.stayedInsideAllowedGlobs,
+    evidence.stayedInsideAllowedWrites,
     evidence.withinAllowedGlobs,
+    evidence.withinAllowedWrites,
     allowedWriteCheck.stayedInsideAllowedGlobs,
-    allowedWriteCheck.changedPathsWithinAllowedGlobs
+    allowedWriteCheck.stayedInsideAllowedWrites,
+    allowedWriteCheck.changedPathsWithinAllowedGlobs,
+    allowedWriteCheck.changedPathsInsideAllowedWrites,
+    allowedWriteCheck.changedPathsWithinAllowedWrites
   ]) {
     if (typeof value === 'boolean') return value;
   }
