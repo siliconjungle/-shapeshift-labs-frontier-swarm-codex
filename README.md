@@ -6,15 +6,16 @@ Node Codex CLI runner adapter for Frontier swarm plans.
 
 The default swarm compute profile records `gpt-5.5` with `model_reasoning_effort="xhigh"` for planning. The Codex CLI invocation defaults to the local Codex config instead of forwarding planned model flags, because model availability and accepted flag values vary by Codex binary and account. Pass `--model ...`, `--model-policy plan`, or `modelPolicy: 'plan'` when a runner should force the planned profile. The pure `frontier-swarm` package stays runtime-neutral.
 
-By default, a swarm run is self-draining. After workers finish, coordinator-agent drain collects their merge bundles, builds scoped queues, and applies only admitted patches under the repo lock and configured gates. Dashboard queue counts are pending coordinator work, not landed code, until autonomous apply records an `applied` or `committed` decision. Human blockers are the narrow exception: `operatorSummary.status === "blocked"`, a true-blocker card, or explicit `humanQuestions`.
+By default, a swarm run is self-draining. After workers finish, coordinator-agent drain collects their merge bundles, builds scoped queues, and applies only admitted patches under the repo lock and configured gates. The scalable merge path is: workers produce bundles, coordinator agents lease semantic/path/repo queue scopes, same-scope work serializes locally, cross-scope work promotes upward, and repository mutation happens only through autonomous apply decisions. Dashboard queue counts are pending coordinator work, not landed code, until autonomous apply records an `applied` or `committed` decision. Human blockers are the narrow exception: `operatorSummary.status === "blocked"`, a true-blocker card, or explicit `humanQuestions`.
 
 ## Operator Docs
 
 - [Hierarchical merge queues](docs/hierarchical-merge-queues.md): local scoped apply, queue-local overflow, upward promotion, stale reruns, invalid evidence rejection, discovery recording, Loom semantic scopes, and rare true blocker states.
-- [Autonomous operator workflow](docs/autonomous-operator-workflow.md): run the default self-draining path, watch queue pressure, handle dirty collect-only runs, drain from a clean apply window, and interpret autonomous apply outcomes.
+- [Autonomous operator workflow](docs/autonomous-operator-workflow.md): run the default self-draining path, scale coordinator-agent drain work by queue scope, handle dirty collect-only runs, drain from a clean apply window, and interpret autonomous apply outcomes.
 - [Review debt drain policy](docs/review-debt-drain.md): convert coordinator-review items into terminal decisions instead of open-ended review buckets.
 - [Auto-drain artifact map](docs/auto-drain-artifacts.md): find the machine-readable files behind operator summary cards, queue pressure, promoted patch candidates, apply decisions, and explicit human questions.
 - [Autonomous decision ledger](docs/autonomous-decision-ledger.md): match coordinator-agent drain assignments to append-only apply decisions and distinguish terminal outcomes from queued or promoted coordinator work.
+- [Autonomous lock model](docs/autonomous-lock-model.md): understand the current repo-local mutation lock, recorded semantic/path/repo lock keys, stale-head checks, and the requirements for future finer-grained leases.
 
 
 ## Related Packages

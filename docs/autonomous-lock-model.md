@@ -6,6 +6,29 @@ The lock file records a token, process id, working directory, dry-run mode, acqu
 
 This physical repo-local lock is intentionally coarse today. It serializes all autonomous apply decisions for the repository, including dry-run checks, patch application, verification gates, rollback, and optional commit creation. The implementation does not yet acquire independent file leases or semantic leases for concurrent application.
 
+## Queue Leases Versus Mutation Locks
+
+Coordinator-agent queue leases and autonomous apply locks protect different resources:
+
+- Queue leases protect decision ownership for a scope. A lease key can represent a
+  semantic region, path, lane, parent queue, or repository fallback scope. It lets one
+  coordinator agent become the local leader while other agents drain independent scopes.
+- Mutation locks protect the repository checkout. Patch checking, patch application,
+  rollback, Git index updates, branch movement, and optional commit creation must not
+  race in the same checkout.
+
+The scalable path is therefore parallel classification with serialized mutation.
+Coordinator agents can lease different queue scopes, decide whether work should apply
+locally, queue locally, promote, rerun, reject, record only, or block, and write those
+artifacts independently. Once a patch is selected for repository mutation, it must pass
+through autonomous apply and record a ledger decision under the mutation lock.
+
+Same-scope work should serialize behind the local queue leader. Cross-scope work should
+promote to the nearest parent scope that can safely decide it. Neither state is a
+human blocker by itself; only explicit `block` or `human-blocked` records that name a
+missing authority, owner, surface, or policy/risk decision should stop automation for a
+person.
+
 ## Decision Lock Keys
 
 Each autonomous merge decision still records lock key metadata for the bundle it handled. The metadata is derived from the merge bundle before the patch is checked:

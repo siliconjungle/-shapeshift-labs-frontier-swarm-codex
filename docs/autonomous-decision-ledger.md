@@ -50,6 +50,28 @@ The same apply run also writes `autonomous-apply.json` and
 `autonomous-queue-overlay.json`. The JSONL ledger is the durable decision source; the
 overlay is a derived coordinator view.
 
+## Scaled Coordinator Queue Contract
+
+In a scaled drain, many coordinator agents may inspect bundles and classify queue work
+before any repository mutation happens. Keep the contract layered:
+
+- Worker bundles are proposals. They carry changed paths, changed regions, commands,
+  evidence, and patch references, but they do not close queue items by themselves.
+- Hierarchical queue assignments choose the local action for each proposal in its
+  narrowest useful scope. Semantic scopes should drain before broader path or repo
+  scopes when both are present.
+- Coordinator-agent leases serialize local queue work by `leaseKey`. Same-scope
+  assignments wait behind the selected leader; independent scopes can be inspected in
+  parallel.
+- Promotion moves unresolved work to a parent scope. It is useful pressure on the
+  coordinator queue, not a terminal ledger outcome and not a request for a person.
+- The autonomous decision ledger closes queue items only when apply, dry-run, rerun,
+  rejection, conflict, skip, failure, commit, or human-blocked evidence has been
+  recorded for the relevant `jobId` or `queueItemIds`.
+
+This lets a coordinator scale review and classification work without letting parallel
+agents race on the repository checkout or invent terminal outcomes for queued work.
+
 ## Relationship To Coordinator-Agent Drain
 
 Coordinator-agent drain artifacts describe queue work before or around apply. The

@@ -4,6 +4,20 @@ This workflow is for a human coordinator running Frontier swarm jobs in any repo
 
 The normal path is self-draining: `run` starts workers, then coordinator-agent drain collects their bundles, builds scoped queues, and applies only admitted patches under the repo lock and configured gates. Queue pressure is pending coordinator work, not landed code, until autonomous apply records `applied` or `committed`. Human blockers are rare explicit questions, not ordinary stale, queued, conflicted, or reviewable work.
 
+## Scalable Coordinator Merge Flow
+
+Use this flow when a run produces more merge candidates than one coordinator should inspect serially:
+
+1. Workers produce merge bundles. A worker's durable output is its `merge.json`, optional `changes.patch`, verification summaries, and evidence directory. Workers do not mutate the coordinator checkout.
+2. Collection builds a hierarchical merge queue from those bundles. Semantic regions are the narrowest scope when available, changed paths are the next scope, and `repo:*` is the fallback when a bundle has no narrower mutation surface. Lane or parent scopes provide promotion targets when local queues cannot settle the work.
+3. Coordinator agents consume `coordinator-agent-drain-work-NN.json`. Each agent leases a queue scope by `leaseKey`, works the selected assignment for that scope, and records whether it applied locally, queued locally, promoted upward, requested a rerun, rejected evidence, recorded discovery, or emitted a true blocker.
+4. Same-scope work serializes locally. Only one local leader should drain a semantic, path, lane, or repo scope at a time; other assignments in that scope remain queued behind the leader rather than turning into human work.
+5. Cross-scope work promotes upward. When a bundle touches multiple scopes or loses a local conflict election, the queue should promote it to the nearest parent scope that can make the decision. Promotion is still coordinator work, not a terminal outcome.
+6. Repository mutation happens under autonomous apply locks. Even when queue leases let many coordinator agents classify work in parallel, patch check, apply, rollback, and optional commit still run through the autonomous apply path and its repository mutation guard.
+7. Only true human questions block. Stale patches, failed evidence, conflicts, queued work, promoted work, and unreviewed candidates should become `rerun`, `rejected`, `conflict-blocked`, `queued`, `escalated`, `checked`, `applied`, `committed`, `skipped`, or `failed` records. Ask a person only when the record names missing authority, ownership, policy, risk approval, or parent assignment.
+
+This keeps the operator model repo-agnostic: queue scopes describe ownership and merge risk, coordinator agents drain those scopes, and the decision ledger records terminal outcomes.
+
 ## Start a Run
 
 Pick an output directory that names the run, then launch with the smallest workspace that still contains the files workers need:
@@ -99,6 +113,8 @@ When auto-drain is enabled, workers hand off evidence and the coordinator consum
 2. Open `auto-drain/coordinator-agent-drain-work-NN.json` for the generic coordinator-agent contract. Use `leases[]` to serialize work for a queue scope, `assignments[]` to know the assigned action, `terminalDecisions[]` to close terminal queue items, and `promotedWork[]` to route useful non-terminal work upward.
 3. Open `auto-drain/coordinator-agent-drain-NN.json` when using `frontier-swarm-codex` auto-drain. Its selected/deferred layer tells you which local queue leader is being attempted in that iteration.
 4. Open `auto-drain/apply-NN/autonomous-merge-decisions.jsonl` for the terminal source outcome of selected patch work.
+
+For scaled runs, assign coordinator agents by lease scope rather than by raw bundle count. Multiple agents can classify independent semantic/path scopes at the same time, but the same `leaseKey` should have one active local leader. If work outgrows a local scope, promote it upward and let the parent scope serialize the broader decision. Do not let two agents independently apply patches to the same checkout; apply remains centralized through autonomous apply and its lock records.
 
 Treat `queue-local` and `promote` as unresolved coordinator work, not human questions. `queue-local` stays in the same scope until capacity or the local leader changes. `promote` becomes parent-queue work and remains non-terminal until that parent queue applies, queues, reruns, rejects, records, or blocks it. Treat `rerun`, `reject`, `record-only`, and true `block` as terminal queue decisions; stale/rerun cleanup should close the old bundle and create a fresh narrow task only when the objective is still valuable. Ask a human only for an explicit `block` or `human-blocked` decision that names the missing authority, owner, surface, or policy/risk choice.
 
