@@ -84,8 +84,11 @@ For landed-code confidence, read `autoDrain.summary.finalGateOk` and
 decision, including `failed` gates and required gates skipped after an earlier
 required failure. A `rejected` decision is terminal queue evidence, not green
 code: required-gate failures keep `finalGateOk: false`, list the failed and
-skipped required gate names, and roll the patch back even when later rollback or
-repository commands succeeded.
+skipped required gate names, and write `rollbackEvidence` showing the reverse
+apply status, any cleanup commands, and whether the bundle's `changedPaths`
+were clean afterward. Autonomous apply only records a required-gate failure as
+`rejected` after that changed-path cleanliness proof passes; otherwise it records
+`failed` for coordinator triage.
 
 After a run, use `coordinator-dashboard.json.operatorSummary` for human-facing queue status. It is the display contract for the top-line status, headline, cards, and counts; use lower-level queue metadata only when drilling into diagnostics. Treat blocker UI as reserved for `operatorSummary.status === "blocked"`, the true-blockers card, or explicit `humanQuestions`.
 

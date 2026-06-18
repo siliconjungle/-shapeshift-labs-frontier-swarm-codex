@@ -1639,6 +1639,13 @@ assert.strictEqual(rollbackDecision.leaseReadback.terminal, true);
 assert.strictEqual(rollbackDecision.leaseReadback.head.leaseHead, rollbackDecision.headBefore);
 assert.strictEqual(rollbackDecision.leaseReadback.head.movedSinceCollection, false);
 assert.strictEqual(rollbackDecision.leaseReadback.head.movedDuringDecision, false);
+assert.strictEqual(rollbackDecision.rollbackEvidence.ok, true);
+assert.strictEqual(rollbackDecision.rollbackEvidence.cleanChangedPaths, true);
+assert.deepStrictEqual(rollbackDecision.rollbackEvidence.changedPaths, ['src/apply.ts']);
+assert.deepStrictEqual(rollbackDecision.rollbackEvidence.dirtyPaths, []);
+assert.strictEqual(rollbackDecision.rollbackEvidence.reverseApplyStatus, 0);
+assert.deepStrictEqual(rollbackDecision.rollbackEvidence.cleanupCommands, []);
+assert.deepStrictEqual(rollbackDecision.leaseReadback.rollbackEvidence, rollbackDecision.rollbackEvidence);
 assert.deepStrictEqual(rollbackResult.decisionReadbacks, [rollbackDecision.leaseReadback]);
 assert.deepStrictEqual(rollbackDecision.verification, {
   planned: 2,
@@ -1693,6 +1700,45 @@ assert.strictEqual(rollbackResult.queueOverlay.metadata.statusBuckets.terminal.c
 assert.match(rollbackResult.queueOverlay.metadata.statusBuckets.terminal.description, /rejected/);
 assert.strictEqual(await fs.readFile(path.join(rollbackRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: rollbackRepo })).stdout, '');
+
+const dirtyRollbackRepo = await createApplyFixtureRepo(tmp, 'autonomous-dirty-rollback-repo');
+const dirtyRollbackResult = await autonomousApplyCodexSwarmRun({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: dirtyRollbackRepo,
+  outDir: path.join(tmp, 'autonomous-dirty-rollback-out'),
+  focusedCommands: [{
+    name: 'dirty-then-fail',
+    command: process.execPath,
+    args: ['-e', "const fs = require('fs'); fs.writeFileSync('src/apply.ts', 'gate-dirty\\n'); process.exit(1);"]
+  }]
+});
+assert.strictEqual(dirtyRollbackResult.ok, false);
+assert.strictEqual(dirtyRollbackResult.summary.rejected, 1);
+assert.strictEqual(dirtyRollbackResult.summary.finalGateOk, false);
+const dirtyRollbackDecision = dirtyRollbackResult.decisions[0];
+assert.strictEqual(dirtyRollbackDecision.status, 'rejected');
+assert.match(dirtyRollbackDecision.reason, /verification failed: dirty-then-fail/);
+assert.strictEqual(dirtyRollbackDecision.rollbackEvidence.ok, true);
+assert.strictEqual(dirtyRollbackDecision.rollbackEvidence.cleanChangedPaths, true);
+assert.deepStrictEqual(dirtyRollbackDecision.rollbackEvidence.changedPaths, ['src/apply.ts']);
+assert.deepStrictEqual(dirtyRollbackDecision.rollbackEvidence.dirtyPaths, []);
+assert.notStrictEqual(dirtyRollbackDecision.rollbackEvidence.reverseApplyStatus, 0);
+assert.ok(dirtyRollbackDecision.rollbackEvidence.cleanupCommands.some((entry) => (
+  entry.command[0] === 'git'
+    && entry.command[1] === 'restore'
+    && entry.status === 0
+)));
+assert.deepStrictEqual(dirtyRollbackDecision.leaseReadback.rollbackEvidence, dirtyRollbackDecision.rollbackEvidence);
+const dirtyRollbackDecisionLines = (await fs.readFile(dirtyRollbackResult.decisionLogPath, 'utf8')).trim().split(/\r?\n/);
+assert.strictEqual(dirtyRollbackDecisionLines.length, 1);
+assert.strictEqual(JSON.parse(dirtyRollbackDecisionLines[0]).rollbackEvidence.cleanChangedPaths, true);
+const dirtyRollbackArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'autonomous-dirty-rollback-out', 'autonomous-apply.json'), 'utf8'));
+assert.strictEqual(dirtyRollbackArtifact.decisions[0].rollbackEvidence.cleanChangedPaths, true);
+assert.strictEqual(dirtyRollbackResult.queueOverlay.entries[0].status, 'satisfied');
+assert.strictEqual(dirtyRollbackResult.queueOverlay.entries[0].disposition, 'rejected');
+assert.strictEqual(dirtyRollbackResult.queueOverlay.metadata.activeReviewCount, 0);
+assert.strictEqual(await fs.readFile(path.join(dirtyRollbackRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: dirtyRollbackRepo })).stdout, '');
 
 const autonomousStaleCommitRepo = await createApplyFixtureRepo(tmp, 'autonomous-stale-commit-repo');
 const autonomousStaleCommitResult = await autonomousApplyCodexSwarmRun({

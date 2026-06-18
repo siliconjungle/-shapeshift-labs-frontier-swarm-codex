@@ -889,6 +889,7 @@ export interface FrontierCodexAutonomousDecisionLeaseReadback {
     movedSinceCollection: boolean;
     movedDuringDecision: boolean;
   };
+  rollbackEvidence?: FrontierCodexAutonomousRollbackEvidence;
   supersedesDecisionIds?: string[];
   supersededByDecisionId?: string;
 }
@@ -960,6 +961,18 @@ export interface FrontierCodexAutonomousDecisionFinalGateSummary {
   skippedNames: string[];
   skippedRequiredGateNames: string[];
   gates: FrontierCodexAutonomousFinalGateEntry[];
+}
+
+export interface FrontierCodexAutonomousRollbackEvidence {
+  attempted: boolean;
+  ok: boolean;
+  patchPath?: string;
+  changedPaths: string[];
+  reverseApplyStatus?: number;
+  cleanupCommands: Array<{ command: string[]; status: number }>;
+  dirtyPaths: string[];
+  cleanChangedPaths: boolean;
+  headAfter?: string;
 }
 
 export interface FrontierCodexAutonomousFinalGateDecisionSummary {
@@ -1052,6 +1065,7 @@ export interface FrontierCodexAutonomousMergeDecision {
   lockRecoveries?: FrontierCodexAutonomousApplyLockRecovery[];
   verification: FrontierCodexAutonomousDecisionVerification;
   finalGateSummary: FrontierCodexAutonomousDecisionFinalGateSummary;
+  rollbackEvidence?: FrontierCodexAutonomousRollbackEvidence;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
   leaseReadback: FrontierCodexAutonomousDecisionLeaseReadback;
   error?: string;
@@ -3881,6 +3895,7 @@ function createCodexAutonomousDecisionLeaseReadback(
       movedSinceCollection,
       movedDuringDecision
     },
+    ...(decision.rollbackEvidence ? { rollbackEvidence: cloneAutonomousRollbackEvidence(decision.rollbackEvidence) } : {}),
     ...(existing?.supersedesDecisionIds?.length ? { supersedesDecisionIds: [...existing.supersedesDecisionIds] } : {}),
     ...(existing?.supersededByDecisionId ? { supersededByDecisionId: existing.supersededByDecisionId } : {})
   };
@@ -3933,8 +3948,23 @@ function cloneCodexAutonomousDecisionLeaseReadback(
       keys: [...readback.lease.keys]
     },
     head: { ...readback.head },
+    ...(readback.rollbackEvidence ? { rollbackEvidence: cloneAutonomousRollbackEvidence(readback.rollbackEvidence) } : {}),
     ...(readback.supersedesDecisionIds?.length ? { supersedesDecisionIds: [...readback.supersedesDecisionIds] } : {}),
     ...(readback.supersededByDecisionId ? { supersededByDecisionId: readback.supersededByDecisionId } : {})
+  };
+}
+
+function cloneAutonomousRollbackEvidence(
+  evidence: FrontierCodexAutonomousRollbackEvidence
+): FrontierCodexAutonomousRollbackEvidence {
+  return {
+    ...evidence,
+    changedPaths: [...evidence.changedPaths],
+    cleanupCommands: evidence.cleanupCommands.map((command) => ({
+      command: [...command.command],
+      status: command.status
+    })),
+    dirtyPaths: [...evidence.dirtyPaths]
   };
 }
 
@@ -9049,6 +9079,7 @@ async function applyCodexMergeBundleAutonomously(input: {
       headAfter?: string;
       leaseHead?: string;
       commit?: string;
+      rollbackEvidence?: FrontierCodexAutonomousRollbackEvidence;
       error?: string;
     } = {}
   ): FrontierCodexAutonomousMergeDecision => {
@@ -9080,6 +9111,7 @@ async function applyCodexMergeBundleAutonomously(input: {
       ...(input.lock.recoveries.length ? { lockRecoveries: [...input.lock.recoveries] } : {}),
       verification: summarizeAutonomousDecisionVerification(plannedVerificationCommands, verificationRuns),
       finalGateSummary: summarizeAutonomousDecisionFinalGates(plannedVerificationCommands, verificationRuns),
+      ...(extra.rollbackEvidence ? { rollbackEvidence: cloneAutonomousRollbackEvidence(extra.rollbackEvidence) } : {}),
       commands,
       ...(extra.error ? { error: extra.error } : {})
     };
@@ -9168,21 +9200,27 @@ async function applyCodexMergeBundleAutonomously(input: {
     commands.push(run);
     verificationRuns.push({ index: gateIndex, name: autonomousVerificationCommandName(gate), required: gate.required !== false, status: run.status });
     if (run.status !== 0 && gate.required !== false) {
-      const rollback = await runLoggedProcess('git', ['apply', '-R', patchPath], input.cwd);
-      commands.push(rollback);
-      const headAfterRollback = await readGitHead(input.cwd, commands);
-      if (rollback.status !== 0) {
-        return finish('failed', `verification failed and rollback failed: ${gate.name}`, {
+      const rollbackEvidence = await rollbackAutonomousAppliedPatch({
+        cwd: input.cwd,
+        patchPath,
+        changedPaths: input.bundle.changedPaths,
+        commands,
+        forceCleanChangedPaths: !input.input.allowDirty
+      });
+      if (!rollbackEvidence.ok) {
+        return finish('failed', `verification failed and rollback left dirty changed paths: ${gate.name}`, {
           headBefore,
-          headAfter: headAfterRollback,
+          headAfter: rollbackEvidence.headAfter,
           leaseHead: headBefore,
+          rollbackEvidence,
           error: `required gate failed: ${gate.name}`
         });
       }
       return finish('rejected', `verification failed: ${gate.name}`, {
         headBefore,
-        headAfter: headAfterRollback,
+        headAfter: rollbackEvidence.headAfter,
         leaseHead: headBefore,
+        rollbackEvidence,
         error: `required gate failed: ${gate.name}`
       });
     }
@@ -9571,6 +9609,94 @@ async function readGitHead(cwd: string, commands: FrontierCodexAutonomousMergeDe
   commands.push(rev);
   if (rev.status !== 0) return undefined;
   return rev.stdoutTail[rev.stdoutTail.length - 1]?.trim();
+}
+
+async function rollbackAutonomousAppliedPatch(input: {
+  cwd: string;
+  patchPath: string;
+  changedPaths: readonly string[];
+  commands: FrontierCodexAutonomousMergeDecision['commands'];
+  forceCleanChangedPaths: boolean;
+}): Promise<FrontierCodexAutonomousRollbackEvidence> {
+  const changedPaths = uniqueWorkspacePaths(input.changedPaths);
+  const cleanupCommands: FrontierCodexAutonomousRollbackEvidence['cleanupCommands'] = [];
+  const rollback = await runLoggedProcess('git', ['apply', '-R', input.patchPath], input.cwd);
+  input.commands.push(rollback);
+  let dirtyProbe = await gitStatusForAutonomousChangedPaths(input.cwd, changedPaths, input.commands);
+  let dirtyPaths = dirtyProbe.dirtyPaths;
+  if (dirtyPaths.length && input.forceCleanChangedPaths) {
+    const restore = await runLoggedProcess('git', ['restore', '--staged', '--worktree', '--', ...changedPaths], input.cwd);
+    input.commands.push(restore);
+    cleanupCommands.push({ command: [...restore.command], status: restore.status });
+    dirtyProbe = await gitStatusForAutonomousChangedPaths(input.cwd, changedPaths, input.commands);
+    dirtyPaths = dirtyProbe.dirtyPaths;
+  }
+  if (dirtyPaths.length && input.forceCleanChangedPaths) {
+    const clean = await runLoggedProcess('git', ['clean', '-fd', '--', ...changedPaths], input.cwd);
+    input.commands.push(clean);
+    cleanupCommands.push({ command: [...clean.command], status: clean.status });
+    dirtyProbe = await gitStatusForAutonomousChangedPaths(input.cwd, changedPaths, input.commands);
+    dirtyPaths = dirtyProbe.dirtyPaths;
+  }
+  const headAfter = await readGitHead(input.cwd, input.commands);
+  return {
+    attempted: true,
+    ok: dirtyProbe.status === 0 && dirtyPaths.length === 0,
+    patchPath: input.patchPath,
+    changedPaths,
+    reverseApplyStatus: rollback.status,
+    cleanupCommands,
+    dirtyPaths,
+    cleanChangedPaths: dirtyProbe.status === 0 && dirtyPaths.length === 0,
+    ...(headAfter ? { headAfter } : {})
+  };
+}
+
+async function gitStatusForAutonomousChangedPaths(
+  cwd: string,
+  changedPaths: readonly string[],
+  commands: FrontierCodexAutonomousMergeDecision['commands']
+): Promise<{ status: number; dirtyPaths: string[] }> {
+  if (!changedPaths.length) return { status: 0, dirtyPaths: [] };
+  const args = ['status', '--porcelain', '--untracked-files=all', '--', ...changedPaths];
+  const result = await runProcess('git', args, { cwd, allowFailure: true });
+  commands.push({
+    command: ['git', ...args],
+    status: result.status,
+    stdoutTail: tail(result.stdout),
+    stderrTail: tail(result.stderr)
+  });
+  return {
+    status: result.status,
+    dirtyPaths: result.status === 0 ? parseGitStatusPorcelainPaths(result.stdout) : [...changedPaths]
+  };
+}
+
+function parseGitStatusPorcelainPaths(stdout: string): string[] {
+  const paths: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line) continue;
+    const pathText = line.slice(3).trim();
+    const renameIndex = pathText.indexOf(' -> ');
+    if (renameIndex >= 0) {
+      paths.push(unquoteGitStatusPath(pathText.slice(0, renameIndex)));
+      paths.push(unquoteGitStatusPath(pathText.slice(renameIndex + 4)));
+    } else {
+      paths.push(unquoteGitStatusPath(pathText));
+    }
+  }
+  return uniqueWorkspacePaths(paths);
+}
+
+function unquoteGitStatusPath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('"')) return trimmed;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return typeof parsed === 'string' ? parsed : trimmed;
+  } catch {
+    return trimmed;
+  }
 }
 
 async function defaultAutonomousApplyLockPath(cwd: string, outDir: string): Promise<string> {
