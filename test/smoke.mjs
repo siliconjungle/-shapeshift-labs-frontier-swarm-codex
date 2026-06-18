@@ -1225,6 +1225,16 @@ assert.deepStrictEqual(readbackLatestDecision.leaseReadback.supersedesDecisionId
 assert.strictEqual(readbackSupersedeResult.decisionReadbacks[0].supersededByDecisionId, readbackLatestDecision.id);
 assert.deepStrictEqual(readbackSupersedeResult.decisionReadbacks[1].supersedesDecisionIds, [readbackSupersededDecision.id]);
 assert.deepStrictEqual(readbackLatestDecision.leaseReadback.queueKeys, ['queue:shared-readback-task', 'task:shared-readback-task', 'job:readback-second-job']);
+assert.strictEqual(readbackSupersedeResult.queueOverlay.summary.entryCount, 1);
+assert.strictEqual(readbackSupersedeResult.queueOverlay.entries[0].jobId, readbackLatestDecision.jobId);
+assert.strictEqual(readbackSupersedeResult.queueOverlay.entries[0].queueItemId, 'shared-readback-task');
+assert.strictEqual(readbackSupersedeResult.queueOverlay.metadata.currentDecisionCount, 1);
+assert.strictEqual(readbackSupersedeResult.queueOverlay.metadata.supersededDecisionCount, 1);
+assert.strictEqual(readbackSupersedeResult.queueOverlay.metadata.decisionHistoryCount, 2);
+assert.strictEqual(readbackSupersedeResult.queueOverlay.metadata.activeReviewCount, 0);
+assert.strictEqual(readbackSupersedeResult.queueOverlay.metadata.statusBuckets.terminal.count, 1);
+assert.strictEqual(readbackSupersedeResult.queueOverlay.metadata.statusBuckets.supersededHistory.count, 1);
+assert.match(readbackSupersedeResult.queueOverlay.metadata.statusBuckets.supersededHistory.description, /hidden from active overlay entries/);
 
 const dependencyGateRepo = await createApplyFixtureRepo(tmp, 'autonomous-gate-order-repo');
 await fs.mkdir(path.join(dependencyGateRepo, 'packages', 'frontier-swarm'), { recursive: true });
@@ -1332,6 +1342,10 @@ assert.strictEqual(autonomousConflictResult.decisions[0].status, 'conflict-block
 assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].status, 'stale-against-head');
 assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].mergeReadiness, 'stale-against-head');
 assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].disposition, 'stale-against-head');
+assert.strictEqual(autonomousConflictResult.queueOverlay.metadata.conflictRetryCount, 1);
+assert.strictEqual(autonomousConflictResult.queueOverlay.metadata.humanNeededCount, 0);
+assert.strictEqual(autonomousConflictResult.queueOverlay.metadata.statusBuckets.conflictRetry.count, 1);
+assert.match(autonomousConflictResult.queueOverlay.metadata.statusBuckets.conflictRetry.description, /not human-needed blockers/);
 
 const staleBeforeApplyRepo = await createApplyFixtureRepo(tmp, 'autonomous-stale-before-apply-repo');
 const staleBeforeApplyRunDir = path.join(tmp, 'autonomous-stale-before-apply-run');
@@ -1517,7 +1531,11 @@ assert.strictEqual(rollbackResult.finalGateSummary.ok, false);
 assert.strictEqual(rollbackResult.finalGateSummary.state, 'failed');
 assert.deepStrictEqual(rollbackResult.finalGateSummary.failedRequiredGateNames, ['reject-new']);
 assert.deepStrictEqual(rollbackResult.finalGateSummary.skippedRequiredGateNames, ['must-not-be-marked-passed']);
-assert.strictEqual(rollbackResult.queueOverlay.entries[0].status, 'satisfied');
+assert.strictEqual(rollbackResult.queueOverlay.entries[0].status, 'rejected');
+assert.strictEqual(rollbackResult.queueOverlay.metadata.terminalCount, 1);
+assert.strictEqual(rollbackResult.queueOverlay.metadata.activeReviewCount, 0);
+assert.strictEqual(rollbackResult.queueOverlay.metadata.statusBuckets.terminal.count, 1);
+assert.match(rollbackResult.queueOverlay.metadata.statusBuckets.terminal.description, /rejected/);
 assert.strictEqual(await fs.readFile(path.join(rollbackRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: rollbackRepo })).stdout, '');
 
@@ -3332,7 +3350,7 @@ assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainConflictBlockedManife
 
 const collapsedDecisionOutDir = path.join(tmp, 'collapsed-decision-dashboard');
 const collapsedDecisionArtifacts = createSyntheticAutoDrainArtifacts(collapsedDecisionOutDir);
-Object.assign(collapsedDecisionArtifacts.grouping, { staleAgainstHeadCount: 2 });
+Object.assign(collapsedDecisionArtifacts.grouping, { staleAgainstHeadCount: 3 });
 Object.assign(collapsedDecisionArtifacts.coordinatorAgentDrainWork, {
   count: 1,
   leaseCount: 1,
@@ -3385,6 +3403,12 @@ const collapsedDecisionAutoDrain = {
             taskId: 'collapsed-committed-task',
             queueItemIds: ['collapsed-committed-stale-queue']
           }
+        }, {
+          jobId: 'collapsed-rejected-stale-job',
+          bundle: {
+            taskId: 'collapsed-rejected-task',
+            queueItemIds: ['collapsed-rejected-task']
+          }
         }]
       },
       hierarchicalMergeQueue: {
@@ -3397,6 +3421,11 @@ const collapsedDecisionAutoDrain = {
           jobId: 'collapsed-committed-stale-job',
           taskId: 'collapsed-committed-task',
           queueItemIds: ['collapsed-committed-stale-queue'],
+          action: 'rerun'
+        }, {
+          jobId: 'collapsed-rejected-stale-job',
+          taskId: 'collapsed-rejected-task',
+          queueItemIds: ['collapsed-rejected-task'],
           action: 'rerun'
         }]
       }
@@ -3451,13 +3480,21 @@ const collapsedDecisionAutoDrain = {
           reason: 'git apply --check failed',
           finishedAt: collapsedDecisionArtifacts.generatedAt + 2
         }),
+        createSyntheticAutonomousDecision('rerun', {
+          id: 'collapsed-rejected-old',
+          jobId: 'collapsed-rejected-old-job',
+          taskId: 'collapsed-rejected-task',
+          queueItemIds: ['collapsed-rejected-task'],
+          reason: 'older stale rejected candidate',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 3
+        }),
         createSyntheticAutonomousDecision('applied', {
           id: 'collapsed-rerun-fresh',
           jobId: 'collapsed-rerun-fresh-job',
           taskId: 'collapsed-rerun-task',
           queueItemIds: ['collapsed-rerun-task'],
           reason: 'fresh bundle applied',
-          finishedAt: collapsedDecisionArtifacts.generatedAt + 3
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 4
         }),
         createSyntheticAutonomousDecision('committed', {
           id: 'collapsed-conflict-fresh',
@@ -3465,7 +3502,15 @@ const collapsedDecisionAutoDrain = {
           taskId: 'collapsed-conflict-task',
           queueItemIds: ['collapsed-conflict-task'],
           reason: 'fresh conflict-resolution bundle committed',
-          finishedAt: collapsedDecisionArtifacts.generatedAt + 4
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 5
+        }),
+        createSyntheticAutonomousDecision('rejected', {
+          id: 'collapsed-rejected-fresh',
+          jobId: 'collapsed-rejected-fresh-job',
+          taskId: 'collapsed-rejected-task',
+          queueItemIds: ['collapsed-rejected-task'],
+          reason: 'fresh gate failed and rollback completed',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 6
         }),
         createSyntheticAutonomousDecision('committed', {
           id: 'collapsed-committed-fresh',
@@ -3473,7 +3518,7 @@ const collapsedDecisionAutoDrain = {
           taskId: 'collapsed-committed-task',
           queueItemIds: ['collapsed-committed-fresh-queue'],
           reason: 'fresh queue alias committed',
-          finishedAt: collapsedDecisionArtifacts.generatedAt + 5
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 7
         })
       ]
     }
@@ -3483,6 +3528,7 @@ const collapsedDecisionAutoDrain = {
   terminalJobIds: [
     'collapsed-conflict-fresh-job',
     'collapsed-committed-fresh-job',
+    'collapsed-rejected-fresh-job',
     'collapsed-rerun-fresh-job'
   ],
   blockedJobIds: [],
@@ -3491,12 +3537,12 @@ const collapsedDecisionAutoDrain = {
     iterationCount: 1,
     collectionCount: 1,
     applyCount: 1,
-    terminalCount: 3,
+    terminalCount: 4,
     blockedCount: 0,
     conflictBlockedCount: 1,
     humanBlockedCount: 0,
     remainingReadyCount: 0,
-    admittedCount: 5,
+    admittedCount: 7,
     deferredCount: 0,
     reviewerAssignmentCount: 0,
     reviewerTaskCount: 0,
@@ -3538,7 +3584,7 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.deferred
 assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictRetryWork, []);
 assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.conflictRetryWork, []);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 2);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 3);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.promoteCount, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.rerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.currentHeadConflictCount, 0);
@@ -3566,10 +3612,10 @@ assert.match(collapsedDecisionCards.get('stale-rerun').action, /escalate only ex
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').value, 0);
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').detail, '0 queue block actions, 0 explicit human questions');
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').status, 'ok');
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.autonomousDecisionCount, 5);
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.currentDecisionCount, 3);
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.supersededDecisionCount, 2);
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.completedHistoryCount, 5);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.autonomousDecisionCount, 7);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.currentDecisionCount, 4);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.supersededDecisionCount, 3);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.completedHistoryCount, 7);
 assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.committedDecisionCount, 2);
 assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.rerunWorkCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.realBlockerCount, 0);
@@ -3580,9 +3626,14 @@ assert.strictEqual(collapsedDecisionHistory.get('collapsed-rerun-old').supersede
 assert.strictEqual(collapsedDecisionHistory.get('collapsed-conflict-old').historyState, 'superseded');
 assert.strictEqual(collapsedDecisionHistory.get('collapsed-conflict-old').queueImpact, 'completed-history');
 assert.strictEqual(collapsedDecisionHistory.get('collapsed-conflict-old').supersededByDecisionId, 'collapsed-conflict-fresh');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-old').historyState, 'superseded');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-old').queueImpact, 'completed-history');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-old').supersededByDecisionId, 'collapsed-rejected-fresh');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-fresh').historyState, 'current');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-fresh').queueImpact, 'completed-history');
 const collapsedHealthSections = new Map(collapsedDecisionDashboard.autonomousQueueHealth.sections.map((section) => [section.id, section]));
-assert.strictEqual(collapsedHealthSections.get('completed-history').value, 5);
-assert.match(collapsedHealthSections.get('completed-history').detail, /2 superseded decisions/);
+assert.strictEqual(collapsedHealthSections.get('completed-history').value, 7);
+assert.match(collapsedHealthSections.get('completed-history').detail, /3 superseded decisions/);
 assert.strictEqual(collapsedHealthSections.get('rerun-work').value, 0);
 assert.strictEqual(collapsedHealthSections.get('real-blockers').value, 0);
 const collapsedManifestHead = 'f'.repeat(40);
@@ -3713,22 +3764,18 @@ const collapsedDecisionManifest = createCodexAutoDrainRerunManifest({
 assert.strictEqual(collapsedDecisionManifest.kind, FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND);
 assert.strictEqual(collapsedDecisionManifest.currentHead, collapsedManifestHead);
 assert.deepStrictEqual(collapsedDecisionManifest.taskIds, ['open-rerun-task']);
-assert.deepStrictEqual(collapsedDecisionManifest.jobIds, ['open-rerun-old-job']);
+assert.deepStrictEqual(collapsedDecisionManifest.jobIds, ['open-rerun-new-job']);
 assert.strictEqual(collapsedDecisionManifest.summary.taskCount, 1);
-assert.strictEqual(collapsedDecisionManifest.summary.staleAgainstHeadCount, 1);
-assert.strictEqual(collapsedDecisionManifest.summary.queueRerunCount, 1);
+assert.strictEqual(collapsedDecisionManifest.summary.staleAgainstHeadCount, 0);
+assert.strictEqual(collapsedDecisionManifest.summary.queueRerunCount, 0);
 assert.strictEqual(collapsedDecisionManifest.summary.decisionRerunCount, 1);
 assert.strictEqual(collapsedDecisionManifest.summary.conflictBlockedCount, 0);
 const collapsedDecisionManifestTask = collapsedDecisionManifest.items[0];
 assert.strictEqual(collapsedDecisionManifestTask.id, 'open-rerun-task-rerun-current-head');
-assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.sourceKinds, ['stale-against-head', 'queue-rerun', 'decision-rerun']);
-assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourcePatchPaths.includes(openRerunEntry.bundle.patchPath));
-assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourcePatchPaths.includes(path.join(openRerunEntry.outputDir, 'changes.patch')));
-assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourcePatchPaths.includes(openDecisionPatchPath));
-assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourceBundlePaths.includes(openRerunEntry.mergePath));
-assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourceBundlePaths.includes(path.join(openRerunEntry.outputDir, 'merge.json')));
-assert.ok(collapsedDecisionManifestTask.metadata.rerun.sourceBundlePaths.includes(openDecisionBundlePath));
-assert.ok(collapsedDecisionManifestTask.sourceRefs.includes(openRerunEntry.bundle.patchPath));
+assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.sourceKinds, ['decision-rerun']);
+assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.sourcePatchPaths, [openDecisionPatchPath]);
+assert.deepStrictEqual(collapsedDecisionManifestTask.metadata.rerun.sourceBundlePaths, [openDecisionBundlePath]);
+assert.ok(!collapsedDecisionManifestTask.sourceRefs.includes(openRerunEntry.bundle.patchPath));
 assert.ok(collapsedDecisionManifestTask.sourceRefs.includes(openDecisionBundlePath));
 assert.ok(!collapsedDecisionManifest.taskIds.includes('closed-stale-task'));
 assert.ok(!collapsedDecisionManifest.taskIds.includes('closed-conflict-task'));

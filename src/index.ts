@@ -3555,6 +3555,10 @@ function autonomousDecisionBlocksAutoDrain(status: FrontierCodexAutonomousDecisi
   return status === 'human-blocked';
 }
 
+function autonomousDecisionResolvesPriorQueueDebt(status: FrontierCodexAutonomousDecisionStatus): boolean {
+  return autonomousDecisionIsTerminal(status) || status === 'failed' || status === 'human-blocked';
+}
+
 function createCodexAutonomousDecisionLeaseReadback(
   decision: Omit<FrontierCodexAutonomousMergeDecision, 'leaseReadback'> | FrontierCodexAutonomousMergeDecision,
   input: { collectionHead?: string; leaseHead?: string } = {}
@@ -6245,7 +6249,7 @@ function createResolvedAutonomousDecisionQueueKeySet(decisions: readonly Frontie
   const resolved = new Set<string>();
   for (const component of components) {
     const decision = component.latest.decision;
-    if (decision.status !== 'applied' && decision.status !== 'committed') continue;
+    if (!autonomousDecisionResolvesPriorQueueDebt(decision.status)) continue;
     for (const key of component.keys) resolved.add(key);
   }
   return resolved;
@@ -9073,28 +9077,43 @@ function createAutonomousQueueOverlay(input: {
   generatedAt: number;
   runId?: string;
 }): FrontierSwarmQueueOverlay {
-  const entries: FrontierSwarmQueueOverlay['entries'] = [];
-  for (const decision of input.decisions) {
+  const currentDecisions = createDashboardAutonomousDecisionComponents(input.decisions)
+    .map((component) => component.latest)
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => entry.decision);
+  const currentDecisionIds = new Set(currentDecisions.map((decision) => decision.id));
+  const supersededDecisions = input.decisions.filter((decision) => !currentDecisionIds.has(decision.id));
+  const entryRows: Array<{ entry: FrontierSwarmQueueOverlay['entries'][number]; decision: FrontierCodexAutonomousMergeDecision }> = [];
+  for (const decision of currentDecisions) {
     const queueItemIds = decision.queueItemIds.length ? decision.queueItemIds : [decision.taskId ?? decision.jobId];
     for (const queueItemId of queueItemIds) {
-      entries.push({
-        queueItemId,
-        jobId: decision.jobId,
-        status: queueStatusFromAutonomousDecision(decision.status),
-        mergeReadiness: mergeReadinessFromAutonomousDecision(decision.status),
-        disposition: dispositionFromAutonomousDecision(decision.status),
-        riskLevel: decision.status === 'conflict-blocked' || decision.status === 'human-blocked' || decision.status === 'failed' ? 'high' : 'low',
-        ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
-        evidencePaths: [decision.bundlePath],
-        changedPaths: [...decision.changedPaths],
-        changedRegions: [...decision.changedRegions],
-        reasons: [decision.reason],
-        generatedAt: decision.finishedAt
+      entryRows.push({
+        decision,
+        entry: {
+          queueItemId,
+          jobId: decision.jobId,
+          status: queueStatusFromAutonomousDecision(decision.status),
+          mergeReadiness: mergeReadinessFromAutonomousDecision(decision.status),
+          disposition: dispositionFromAutonomousDecision(decision.status),
+          riskLevel: decision.status === 'conflict-blocked' || decision.status === 'human-blocked' || decision.status === 'failed' ? 'high' : 'low',
+          ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+          evidencePaths: [decision.bundlePath],
+          changedPaths: [...decision.changedPaths],
+          changedRegions: [...decision.changedRegions],
+          reasons: [decision.reason],
+          generatedAt: decision.finishedAt
+        }
       });
     }
   }
+  const entries = entryRows.map((row) => row.entry);
   const byQueueItemId = groupAutonomousQueueOverlayEntries(entries);
   const lockSummary = summarizeAutonomousDecisionLockScopes(input.decisions);
+  const activeReviewCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'active-review').length;
+  const terminalCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'terminal').length;
+  const conflictRetryCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'conflict-retry').length;
+  const humanNeededCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'human-needed').length;
+  const failedTriageCount = entryRows.filter((row) => autonomousQueueOverlayDecisionBucket(row.decision.status) === 'failed-triage').length;
   return {
     kind: FRONTIER_SWARM_QUEUE_OVERLAY_KIND,
     version: FRONTIER_SWARM_QUEUE_OVERLAY_VERSION,
@@ -9114,7 +9133,49 @@ function createAutonomousQueueOverlay(input: {
     },
     metadata: {
       source: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND,
-      terminalCount: entries.filter((entry) => entry.status === 'satisfied').length,
+      terminalCount,
+      activeReviewCount,
+      conflictRetryCount,
+      humanNeededCount,
+      failedTriageCount,
+      currentDecisionCount: currentDecisions.length,
+      supersededDecisionCount: supersededDecisions.length,
+      decisionHistoryCount: input.decisions.length,
+      currentDecisionStatusCounts: countAutonomousDecisionStatuses(currentDecisions),
+      allDecisionStatusCounts: countAutonomousDecisionStatuses(input.decisions),
+      queueStatusCounts: countAutonomousQueueOverlayStatuses(entries),
+      statusBuckets: {
+        activeReview: {
+          label: 'Active review',
+          count: activeReviewCount,
+          description: 'Latest checked decisions still need a non-dry autonomous apply pass and remain active coordinator review.'
+        },
+        terminal: {
+          label: 'Terminal outcomes',
+          count: terminalCount,
+          description: 'Latest applied, committed, rejected, or skipped decisions are collapsed out of active review debt.'
+        },
+        conflictRetry: {
+          label: 'Conflict retry',
+          count: conflictRetryCount,
+          description: 'Latest rerun or conflict-blocked decisions stay visible as coordinator retry work, not human-needed blockers.'
+        },
+        humanNeeded: {
+          label: 'Human needed',
+          count: humanNeededCount,
+          description: 'Latest human-blocked decisions are the only autonomous decisions that represent external authority or policy questions.'
+        },
+        failedTriage: {
+          label: 'Failed triage',
+          count: failedTriageCount,
+          description: 'Latest operational failures need coordinator triage before they become rerun, rejected, conflict-blocked, or human-blocked.'
+        },
+        supersededHistory: {
+          label: 'Superseded history',
+          count: supersededDecisions.length,
+          description: 'Older decisions sharing queue, task, or job aliases are preserved in the ledger but hidden from active overlay entries.'
+        }
+      },
       lockKeys: lockSummary.lockKeys,
       lockScopeCounts: {
         semantic: lockSummary.lockScopeCounts.semantic,
@@ -9130,6 +9191,7 @@ function queueStatusFromAutonomousDecision(status: FrontierCodexAutonomousDecisi
   if (status === 'rerun' || status === 'conflict-blocked') return 'stale-against-head';
   if (status === 'human-blocked') return 'blocked';
   if (status === 'failed') return 'failed-evidence';
+  if (status === 'rejected') return 'rejected';
   return 'satisfied';
 }
 
@@ -9151,6 +9213,28 @@ function dispositionFromAutonomousDecision(status: FrontierCodexAutonomousDecisi
 function groupAutonomousQueueOverlayEntries(entries: readonly FrontierSwarmQueueOverlay['entries'][number][]): Record<string, FrontierSwarmQueueOverlay['entries'][number][]> {
   const out: Record<string, FrontierSwarmQueueOverlay['entries'][number][]> = {};
   for (const entry of entries) out[entry.queueItemId] = [...(out[entry.queueItemId] ?? []), entry];
+  return out;
+}
+
+function autonomousQueueOverlayDecisionBucket(status: FrontierCodexAutonomousDecisionStatus): 'active-review' | 'terminal' | 'conflict-retry' | 'human-needed' | 'failed-triage' {
+  if (status === 'checked') return 'active-review';
+  if (status === 'rerun' || status === 'conflict-blocked') return 'conflict-retry';
+  if (status === 'human-blocked') return 'human-needed';
+  if (status === 'failed') return 'failed-triage';
+  return 'terminal';
+}
+
+function countAutonomousDecisionStatuses(decisions: readonly FrontierCodexAutonomousMergeDecision[]): Record<string, number> {
+  return countStringValues(decisions.map((decision) => decision.status));
+}
+
+function countAutonomousQueueOverlayStatuses(entries: readonly FrontierSwarmQueueOverlay['entries'][number][]): Record<string, number> {
+  return countStringValues(entries.map((entry) => entry.status));
+}
+
+function countStringValues(values: readonly string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const value of values) out[value] = (out[value] ?? 0) + 1;
   return out;
 }
 

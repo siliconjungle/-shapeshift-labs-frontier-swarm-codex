@@ -53,6 +53,15 @@ The same apply run also writes `autonomous-apply.json` and
 `autonomous-queue-overlay.json`. The JSONL ledger is the durable decision source; the
 overlay is a derived coordinator view.
 
+`autonomous-queue-overlay.json` should expose the current queue view, not replay every
+ledger line as active work. Its `entries` are derived from the latest connected
+decision per queue, task, or job alias. Older connected decisions stay auditable in the
+append-only ledger and decision readbacks as superseded history, while overlay
+`metadata.statusBuckets` explains the active review, terminal outcome, conflict retry,
+human-needed, failed triage, and superseded-history counts in human-readable terms.
+Committed, applied, rejected, and skipped decisions belong in terminal outcomes;
+`conflict-blocked` belongs in conflict retry work, not human-needed work.
+
 ## Scaled Coordinator Queue Contract
 
 In a scaled drain, many coordinator agents may inspect bundles and classify queue work
