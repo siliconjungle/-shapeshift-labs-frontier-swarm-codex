@@ -41,6 +41,7 @@ import {
   type FrontierSwarmLease,
   type FrontierSwarmManifestInput,
   type FrontierSwarmHierarchicalMergeQueue,
+  type FrontierSwarmMergeQueueAssignmentAction,
   type FrontierSwarmPatchStackPlan,
   type FrontierSwarmPlan,
   type FrontierSwarmPlanInput,
@@ -73,12 +74,18 @@ export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_KIND = 'frontier.swarm-cod
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND = 'frontier.swarm-codex.auto-drain-artifacts';
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND = 'frontier.swarm-codex.coordinator-agent-drain';
+export const FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND = 'frontier.swarm-codex.patch-score';
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND = 'frontier.swarm-codex.semantic-imports';
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND = 'frontier.swarm-codex.dashboard-queue-metadata';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND = 'frontier.swarm-codex.dashboard-queue-health';
+export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND = 'frontier.swarm-codex.dashboard-human-questions';
+export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION = 1;
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 
@@ -515,6 +522,56 @@ export interface FrontierCodexAutonomousApplyResult {
 
 export type FrontierCodexSwarmAutoDrainGroupingConflictKind = 'path' | 'region' | 'unscoped';
 export type FrontierCodexSwarmAutoDrainGroupingPlacement = 'compatible' | 'serialized' | 'deferred';
+export type FrontierCodexCoordinatorAgentDrainDecision = 'selected' | 'deferred';
+
+export interface FrontierCodexCoordinatorAgentDrainAssignment {
+  jobId: string;
+  taskId?: string;
+  lane?: string;
+  queueItemIds: string[];
+  queueAction: FrontierSwarmMergeQueueAssignmentAction;
+  decision: FrontierCodexCoordinatorAgentDrainDecision;
+  selected: boolean;
+  scopeId: string;
+  parentScopeIds: string[];
+  leaseKey: string;
+  promoteToScopeId?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  conflictingJobIds: string[];
+  serializesAfterJobIds: string[];
+  leaderJobIds: string[];
+  reasons: string[];
+  selectionReason: string;
+}
+
+export interface FrontierCodexCoordinatorAgentDrainArtifact {
+  kind: typeof FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_VERSION;
+  id: string;
+  runId?: string;
+  generatedAt: number;
+  iteration: number;
+  collectionDir: string;
+  mergeQueueId: string;
+  admissionId?: string;
+  readyJobIds: string[];
+  admittedJobIds: string[];
+  deferredJobIds: string[];
+  assignments: FrontierCodexCoordinatorAgentDrainAssignment[];
+  summary: {
+    assignmentCount: number;
+    selectedCount: number;
+    deferredCount: number;
+    applyLocalCount: number;
+    queueLocalCount: number;
+    promoteCount: number;
+    selectedQueueLocalCount: number;
+    selectedPromoteCount: number;
+    deferredPromoteCount: number;
+    scopeCount: number;
+  };
+}
 
 export interface FrontierCodexSwarmAutoDrainGroupingConflict {
   kind: FrontierCodexSwarmAutoDrainGroupingConflictKind;
@@ -537,6 +594,7 @@ export interface FrontierCodexSwarmAutoDrainGroupingJob {
   groupId?: string;
   serializesAfterJobIds: string[];
   conflicts: FrontierCodexSwarmAutoDrainGroupingConflict[];
+  coordinatorAgent?: FrontierCodexCoordinatorAgentDrainAssignment;
   reason?: string;
 }
 
@@ -782,9 +840,13 @@ export interface FrontierCodexSwarmAutoDrainIteration {
   admittedJobIds: string[];
   deferredJobIds: string[];
   readyJobIds: string[];
+  coordinatorAgentDrainPath: string;
+  coordinatorAgentDrain: FrontierCodexCoordinatorAgentDrainArtifact;
   groupingPath: string;
   grouping: FrontierCodexSwarmAutoDrainGroupingArtifact;
   apply?: FrontierCodexAutonomousApplyResult;
+  postApplyCollection?: FrontierCodexCollectResult;
+  postApplyCollectionPath?: string;
   lockKeys: string[];
   lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
   terminalJobIds: string[];
@@ -800,6 +862,8 @@ export interface FrontierCodexAutoDrainArtifactIteration {
   mergeAdmissionPath: string;
   reviewerLanePlanPath: string;
   patchStackPlanPath: string;
+  coordinatorAgentDrainPath?: string;
+  postApplyCollectionPath?: string;
   groupingPath?: string;
   applyPath?: string;
   autonomousQueueOverlayPath?: string;
@@ -857,6 +921,13 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     taskCount: number;
     decisionCount: number;
   };
+  coordinatorAgent: FrontierCodexAutoDrainArtifactPathGroup & {
+    assignmentCount: number;
+    selectedCount: number;
+    deferredCount: number;
+    promoteCount: number;
+    queueLocalCount: number;
+  };
   patchStack: FrontierCodexAutoDrainArtifactPathGroup & {
     stackCount: number;
     jobCount: number;
@@ -880,6 +951,7 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     collectionCount: number;
     applyCount: number;
     admissionCount: number;
+    coordinatorAgentDrainCount: number;
     mergeQueuePlanCount: number;
     reviewerPlanCount: number;
     patchStackPlanCount: number;
@@ -907,6 +979,7 @@ export interface FrontierCodexDashboardQueueMetadata {
     rejectCount: number;
     blockCount: number;
     trueBlockerCount: number;
+    conflictBlockedDecisionCount: number;
     recordOnlyCount: number;
   };
   bucketCounts: {
@@ -915,6 +988,46 @@ export interface FrontierCodexDashboardQueueMetadata {
     failedEvidenceCount: number;
     staleAgainstHeadCount: number;
   };
+  queueHealth: FrontierCodexDashboardQueueHealth;
+  humanQuestions: FrontierCodexDashboardHumanQuestions;
+}
+
+export interface FrontierCodexDashboardQueueHealth {
+  kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION;
+  source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND | 'not-collected';
+  available: boolean;
+  activeCoordinatorQueueCount: number;
+  leaseCount: number;
+  lockKeyCount: number;
+  lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
+  localQueueCount: number;
+  promotedCount: number;
+  appliedDecisionCount: number;
+  committedDecisionCount: number;
+  staleOrRerunCount: number;
+  staleCount: number;
+  rerunCount: number;
+  conflictBlockedDecisionCount: number;
+  trueBlockerCount: number;
+  rejectedCount: number;
+  recordOnlyCount: number;
+  coordinatorReviewCount: number;
+  coordinatorReviewAssignmentCount: number;
+  coordinatorReviewTaskCount: number;
+  humanQuestionCount: number;
+}
+
+export interface FrontierCodexDashboardHumanQuestions {
+  kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION;
+  source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND | 'not-collected';
+  available: boolean;
+  count: number;
+  decisionCount: number;
+  jobIds: string[];
+  taskIds: string[];
+  reasons: string[];
 }
 
 export interface FrontierCodexSwarmAutoDrainResult {
@@ -1208,24 +1321,43 @@ async function runCodexSwarmAutoDrain(input: {
       ...admission.deferred.map((entry) => entry.jobId),
       ...admittedCandidateJobIds.filter((jobId) => !admittedJobIds.includes(jobId))
     ]).sort();
+    const coordinatorAgentDrain = await writeAutoDrainCoordinatorAgentDrainArtifact({
+      collection,
+      outDir,
+      iteration: index + 1,
+      admission,
+      readyJobIds: allReadyJobIds,
+      admittedJobIds,
+      deferredJobIds
+    });
+    const drainAdmittedJobIds = coordinatorAgentDrain.artifact.assignments
+      .filter((assignment) => assignment.selected)
+      .map((assignment) => assignment.jobId);
+    const drainDeferredJobIds = uniqueStrings([
+      ...deferredJobIds,
+      ...allReadyJobIds.filter((jobId) => !drainAdmittedJobIds.includes(jobId))
+    ]).sort();
     const grouping = await writeAutoDrainGroupingArtifact({
       collection,
       outDir,
       iteration: index + 1,
       readyJobIds: allReadyJobIds,
-      admittedJobIds,
-      deferredJobIds
+      admittedJobIds: drainAdmittedJobIds,
+      deferredJobIds: drainDeferredJobIds,
+      coordinatorAgentDrain: coordinatorAgentDrain.artifact
     });
     remainingReadyCount = allReadyJobIds.length;
-    if (!allReadyJobIds.length || !admittedJobIds.length) {
+    if (!allReadyJobIds.length || !drainAdmittedJobIds.length) {
       iterations.push({
         index: index + 1,
         collection,
         admission,
         admissionPath,
-        admittedJobIds,
-        deferredJobIds,
+        admittedJobIds: drainAdmittedJobIds,
+        deferredJobIds: drainDeferredJobIds,
         readyJobIds: allReadyJobIds,
+        coordinatorAgentDrainPath: coordinatorAgentDrain.path,
+        coordinatorAgentDrain: coordinatorAgentDrain.artifact,
         groupingPath: grouping.path,
         grouping: grouping.artifact,
         lockKeys: [],
@@ -1239,7 +1371,7 @@ async function runCodexSwarmAutoDrain(input: {
       collection: collection.outDir,
       cwd: input.cwd,
       outDir: path.join(outDir, `apply-${String(index + 1).padStart(2, '0')}`),
-      jobIds: admittedJobIds,
+      jobIds: drainAdmittedJobIds,
       dryRun: normalized.dryRun ?? input.options.dryRun ?? false,
       allowDirty: true,
       commit: normalized.commit ?? false,
@@ -1256,24 +1388,39 @@ async function runCodexSwarmAutoDrain(input: {
       if (autonomousDecisionIsTerminal(decision.status)) terminalJobIds.add(decision.jobId);
       else blockedJobIds.add(decision.jobId);
     }
+    const postApplyCollection = await collectCodexSwarmRun({
+      run: input.outDir,
+      cwd: input.cwd,
+      outDir: path.join(outDir, `collection-${String(index + 1).padStart(2, '0')}-post-apply`),
+      checkStale: normalized.checkStale ?? true,
+      branchPrefix: normalized.branchPrefix
+    });
+    latestCollection = postApplyCollection;
+    await writeAutoDrainReviewArtifacts(outDir, postApplyCollection);
     const iterationLockSummary = summarizeAutonomousDecisionLockScopes(apply.decisions);
     iterations.push({
       index: index + 1,
       collection,
       admission,
       admissionPath,
-      admittedJobIds,
-      deferredJobIds,
+      admittedJobIds: drainAdmittedJobIds,
+      deferredJobIds: drainDeferredJobIds,
       readyJobIds: allReadyJobIds,
+      coordinatorAgentDrainPath: coordinatorAgentDrain.path,
+      coordinatorAgentDrain: coordinatorAgentDrain.artifact,
       groupingPath: grouping.path,
       grouping: grouping.artifact,
       apply,
+      postApplyCollection,
+      postApplyCollectionPath: postApplyCollection.artifacts?.collectionPath ?? path.join(postApplyCollection.outDir, 'collection.json'),
       lockKeys: iterationLockSummary.lockKeys,
       lockScopeCounts: iterationLockSummary.lockScopeCounts,
       terminalJobIds: [...terminalJobIds].sort(),
       blockedJobIds: [...blockedJobIds].sort()
     });
-    remainingReadyCount = allReadyJobIds.filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId)).length;
+    remainingReadyCount = postApplyCollection.buckets['ready-to-apply']
+      .map((entry) => entry.jobId)
+      .filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId)).length;
     if (!apply.decisions.length || remainingReadyCount === 0) break;
   }
   const lockSummary = summarizeAutonomousDecisionLockScopes(iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
@@ -1319,6 +1466,192 @@ async function writeAutoDrainReviewArtifacts(outDir: string, collection: Frontie
   if (collection.mergeAdmission) await writeJsonAtomic(path.join(outDir, 'merge-admission.json'), collection.mergeAdmission);
   if (collection.reviewerLanePlan) await writeJsonAtomic(path.join(outDir, 'reviewer-lane-plan.json'), collection.reviewerLanePlan);
   if (collection.patchStackPlan) await writeJsonAtomic(path.join(outDir, 'patch-stack-plan.json'), collection.patchStackPlan);
+}
+
+async function writeAutoDrainCoordinatorAgentDrainArtifact(input: {
+  collection: FrontierCodexCollectResult;
+  outDir: string;
+  iteration: number;
+  admission: FrontierSwarmMergeAdmission;
+  readyJobIds: readonly string[];
+  admittedJobIds: readonly string[];
+  deferredJobIds: readonly string[];
+}): Promise<{ path: string; artifact: FrontierCodexCoordinatorAgentDrainArtifact }> {
+  const artifact = createAutoDrainCoordinatorAgentDrainArtifact(input);
+  const artifactPath = path.join(input.outDir, `coordinator-agent-drain-${String(input.iteration).padStart(2, '0')}.json`);
+  await writeJsonAtomic(artifactPath, artifact);
+  return { path: artifactPath, artifact };
+}
+
+function createAutoDrainCoordinatorAgentDrainArtifact(input: {
+  collection: FrontierCodexCollectResult;
+  iteration: number;
+  admission: FrontierSwarmMergeAdmission;
+  readyJobIds: readonly string[];
+  admittedJobIds: readonly string[];
+  deferredJobIds: readonly string[];
+}): FrontierCodexCoordinatorAgentDrainArtifact {
+  const generatedAt = Date.now();
+  const readyIndex = filterMergeIndexForJobIds(input.collection.mergeIndex, input.readyJobIds);
+  const scopedAdmission = scopeAutoDrainCoordinatorAdmission({
+    index: readyIndex,
+    admission: input.admission,
+    admittedJobIds: input.admittedJobIds,
+    deferredJobIds: input.deferredJobIds
+  });
+  const queue = createSwarmHierarchicalMergeQueue({
+    index: readyIndex,
+    admission: scopedAdmission,
+    generatedAt,
+    metadata: {
+      source: FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
+      iteration: input.iteration,
+      collectionDir: input.collection.outDir
+    }
+  });
+  const entriesByJobId = new Map(readyIndex.entries.map((entry) => [entry.jobId, entry]));
+  const admitted = new Set(input.admittedJobIds);
+  const deferred = new Set(input.deferredJobIds);
+  const readyActions = new Set<FrontierSwarmMergeQueueAssignmentAction>(['apply-local', 'queue-local', 'promote']);
+  const assignments = queue.assignments
+    .filter((assignment) => readyActions.has(assignment.action) && input.readyJobIds.includes(assignment.jobId))
+    .map((assignment): FrontierCodexCoordinatorAgentDrainAssignment => {
+      const entry = entriesByJobId.get(assignment.jobId);
+      const selected = admitted.has(assignment.jobId);
+      const serializesAfterJobIds = selected
+        ? []
+        : assignment.conflictingJobIds.filter((jobId) => admitted.has(jobId)).sort();
+      const leaderJobIds = selected
+        ? [assignment.jobId]
+        : serializesAfterJobIds;
+      return {
+        jobId: assignment.jobId,
+        ...(assignment.taskId ? { taskId: assignment.taskId } : {}),
+        ...(assignment.lane ? { lane: assignment.lane } : {}),
+        queueItemIds: entry?.queueItemIds.length ? [...entry.queueItemIds].sort() : [assignment.taskId ?? assignment.jobId],
+        queueAction: assignment.action,
+        decision: selected ? 'selected' : 'deferred',
+        selected,
+        scopeId: assignment.scopeId,
+        parentScopeIds: [...assignment.parentScopeIds],
+        leaseKey: assignment.leaseKey,
+        ...(assignment.promoteToScopeId ? { promoteToScopeId: assignment.promoteToScopeId } : {}),
+        changedPaths: [...assignment.changedPaths],
+        changedRegions: [...assignment.changedRegions],
+        conflictingJobIds: [...assignment.conflictingJobIds],
+        serializesAfterJobIds,
+        leaderJobIds,
+        reasons: uniqueStrings([
+          ...assignment.reasons,
+          selected ? 'coordinator-agent-drain-selected' : 'coordinator-agent-drain-deferred',
+          ...(!selected && deferred.has(assignment.jobId) ? ['deferred-by-queue-leader'] : [])
+        ]),
+        selectionReason: autoDrainCoordinatorAgentSelectionReason(assignment.action, selected, serializesAfterJobIds)
+      };
+    })
+    .sort(compareCoordinatorAgentDrainAssignments);
+  return {
+    kind: FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
+    version: FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_VERSION,
+    id: `frontier-swarm-codex-coordinator-agent-drain:${stableHash([input.collection.outDir, input.iteration, input.readyJobIds, input.admittedJobIds, input.deferredJobIds, assignments, generatedAt])}`,
+    ...(readyIndex.runId ? { runId: readyIndex.runId } : {}),
+    generatedAt,
+    iteration: input.iteration,
+    collectionDir: input.collection.outDir,
+    mergeQueueId: queue.id,
+    admissionId: scopedAdmission.id,
+    readyJobIds: [...input.readyJobIds],
+    admittedJobIds: assignments.filter((assignment) => assignment.selected).map((assignment) => assignment.jobId),
+    deferredJobIds: assignments.filter((assignment) => !assignment.selected).map((assignment) => assignment.jobId),
+    assignments,
+    summary: {
+      assignmentCount: assignments.length,
+      selectedCount: assignments.filter((assignment) => assignment.selected).length,
+      deferredCount: assignments.filter((assignment) => !assignment.selected).length,
+      applyLocalCount: assignments.filter((assignment) => assignment.queueAction === 'apply-local').length,
+      queueLocalCount: assignments.filter((assignment) => assignment.queueAction === 'queue-local').length,
+      promoteCount: assignments.filter((assignment) => assignment.queueAction === 'promote').length,
+      selectedQueueLocalCount: assignments.filter((assignment) => assignment.selected && assignment.queueAction === 'queue-local').length,
+      selectedPromoteCount: assignments.filter((assignment) => assignment.selected && assignment.queueAction === 'promote').length,
+      deferredPromoteCount: assignments.filter((assignment) => !assignment.selected && assignment.queueAction === 'promote').length,
+      scopeCount: uniqueStrings(assignments.map((assignment) => assignment.scopeId)).length
+    }
+  };
+}
+
+function scopeAutoDrainCoordinatorAdmission(input: {
+  index: FrontierSwarmMergeIndex;
+  admission: FrontierSwarmMergeAdmission;
+  admittedJobIds: readonly string[];
+  deferredJobIds: readonly string[];
+}): FrontierSwarmMergeAdmission {
+  const admitted = uniqueStrings(input.admittedJobIds).sort();
+  const admittedSet = new Set(admitted);
+  const originalDeferrals = new Map(input.admission.deferred.map((entry) => [entry.jobId, entry.reasons]));
+  const deferred = uniqueStrings(input.deferredJobIds)
+    .filter((jobId) => !admittedSet.has(jobId))
+    .sort()
+    .map((jobId) => ({
+      jobId,
+      reasons: uniqueStrings([
+        ...(originalDeferrals.get(jobId) ?? []),
+        ...(originalDeferrals.has(jobId) ? [] : ['waiting-for-coordinator-agent-drain'])
+      ])
+    }));
+  const entriesByJobId = new Map(input.index.entries.map((entry) => [entry.jobId, entry]));
+  const changedPaths = new Set<string>();
+  const changedRegions = new Set<string>();
+  let highRiskCount = 0;
+  for (const jobId of admitted) {
+    const entry = entriesByJobId.get(jobId);
+    if (!entry) continue;
+    for (const file of entry.changedPaths) changedPaths.add(file);
+    for (const region of entry.changedRegions) changedRegions.add(region);
+    if (entry.riskLevel === 'high') highRiskCount += 1;
+  }
+  return {
+    ...input.admission,
+    id: `${input.admission.id}:coordinator-agent-drain:${stableHash([admitted, deferred])}`,
+    admitted,
+    deferred,
+    metadata: {
+      ...(input.admission.metadata ?? {}),
+      coordinatorAgentDrain: {
+        source: FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
+        scoped: true
+      }
+    },
+    summary: {
+      admittedCount: admitted.length,
+      deferredCount: deferred.length,
+      changedPathCount: changedPaths.size,
+      changedRegionCount: changedRegions.size,
+      highRiskCount
+    }
+  };
+}
+
+function autoDrainCoordinatorAgentSelectionReason(
+  action: FrontierSwarmMergeQueueAssignmentAction,
+  selected: boolean,
+  serializesAfterJobIds: readonly string[]
+): string {
+  if (selected && action === 'promote') return 'deterministic-promoted-queue-leader';
+  if (selected && action === 'queue-local') return 'queue-local-drain-leader';
+  if (selected) return 'ready-local-drain-leader';
+  if (action === 'promote' && serializesAfterJobIds.length) return 'serialized-behind-promoted-queue-leader';
+  if (action === 'queue-local') return 'waiting-for-local-queue-leader';
+  return 'deferred-by-coordinator-agent-drain';
+}
+
+function compareCoordinatorAgentDrainAssignments(
+  left: FrontierCodexCoordinatorAgentDrainAssignment,
+  right: FrontierCodexCoordinatorAgentDrainAssignment
+): number {
+  return Number(right.selected) - Number(left.selected)
+    || left.scopeId.localeCompare(right.scopeId)
+    || left.queueAction.localeCompare(right.queueAction)
+    || left.jobId.localeCompare(right.jobId);
 }
 
 function buildAutoDrainAdmission(input: {
@@ -1548,6 +1881,7 @@ async function writeAutoDrainGroupingArtifact(input: {
   readyJobIds: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
+  coordinatorAgentDrain?: FrontierCodexCoordinatorAgentDrainArtifact;
 }): Promise<{ path: string; artifact: FrontierCodexSwarmAutoDrainGroupingArtifact }> {
   const artifact = createAutoDrainGroupingArtifact(input);
   const artifactPath = path.join(input.outDir, `auto-drain-groups-${String(input.iteration).padStart(2, '0')}.json`);
@@ -1561,9 +1895,11 @@ function createAutoDrainGroupingArtifact(input: {
   readyJobIds: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
+  coordinatorAgentDrain?: FrontierCodexCoordinatorAgentDrainArtifact;
 }): FrontierCodexSwarmAutoDrainGroupingArtifact {
   const generatedAt = Date.now();
   const readyEntries = new Map(input.collection.buckets['ready-to-apply'].map((entry) => [entry.jobId, entry]));
+  const coordinatorAgentAssignments = new Map((input.coordinatorAgentDrain?.assignments ?? []).map((assignment) => [assignment.jobId, assignment]));
   const admittedRecords = input.admittedJobIds
     .map((jobId) => {
       const entry = readyEntries.get(jobId);
@@ -1615,6 +1951,7 @@ function createAutoDrainGroupingArtifact(input: {
     const placement = placements.get(record.jobId);
     const recordConflicts = placement?.conflicts ?? [];
     const serializesAfterJobIds = uniqueStrings(recordConflicts.flatMap((conflict) => conflict.jobIds.filter((jobId) => jobId !== record.jobId))).sort();
+    const coordinatorAgent = coordinatorAgentAssignments.get(record.jobId);
     return {
       jobId: record.jobId,
       ...(record.taskId ? { taskId: record.taskId } : {}),
@@ -1628,12 +1965,14 @@ function createAutoDrainGroupingArtifact(input: {
       placement: serializesAfterJobIds.length ? 'serialized' : 'compatible',
       ...(groupIds.get(record.jobId) ? { groupId: groupIds.get(record.jobId) } : {}),
       serializesAfterJobIds,
-      conflicts: recordConflicts
+      conflicts: recordConflicts,
+      ...(coordinatorAgent ? { coordinatorAgent } : {})
     };
   });
   const deferredJobs = input.deferredJobIds.map((jobId): FrontierCodexSwarmAutoDrainGroupingJob => {
     const entry = readyEntries.get(jobId);
     const record = entry ? autoDrainGroupingRecord(entry) : undefined;
+    const coordinatorAgent = coordinatorAgentAssignments.get(jobId);
     return {
       jobId,
       ...(record?.taskId ? { taskId: record.taskId } : {}),
@@ -1645,9 +1984,10 @@ function createAutoDrainGroupingArtifact(input: {
       changedRegions: record ? [...record.changedRegions] : [],
       scopeKeys: record ? [...record.scopeKeys] : [],
       placement: 'deferred',
-      serializesAfterJobIds: [],
+      serializesAfterJobIds: coordinatorAgent?.serializesAfterJobIds ?? [],
       conflicts: [],
-      reason: 'auto-drain-admission'
+      ...(coordinatorAgent ? { coordinatorAgent } : {}),
+      reason: coordinatorAgent?.selectionReason ?? 'auto-drain-admission'
     };
   });
   const dedupedConflicts = dedupeAutoDrainGroupingConflicts(conflicts);
@@ -2523,7 +2863,7 @@ export async function writeSwarmCoordinatorSnapshot(
     acc[result.mergeReadiness] = (acc[result.mergeReadiness] ?? 0) + 1;
     return acc;
   }, {});
-  const queueMetadata = createDashboardQueueMetadata(input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null);
+  const queueMetadata = createDashboardQueueMetadata(input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null, input.autoDrain ?? null);
   const dashboard = {
     kind: 'frontier.swarm-codex.coordinator-dashboard',
     version: 1,
@@ -2536,6 +2876,8 @@ export async function writeSwarmCoordinatorSnapshot(
     byLane,
     mergeReadiness,
     queueMetadata,
+    queueHealth: queueMetadata.queueHealth,
+    humanQuestions: queueMetadata.humanQuestions,
     autoDrain: input.autoDrain ?? null,
     autoDrainArtifacts: input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null,
     eventStream: input.eventStream ?? null,
@@ -2546,8 +2888,51 @@ export async function writeSwarmCoordinatorSnapshot(
   await fs.writeFile(file, JSON.stringify(dashboard, null, 2) + '\n');
 }
 
-function createDashboardQueueMetadata(artifacts: FrontierCodexAutoDrainArtifactMetadata | null): FrontierCodexDashboardQueueMetadata {
+function createDashboardQueueMetadata(
+  artifacts: FrontierCodexAutoDrainArtifactMetadata | null,
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null
+): FrontierCodexDashboardQueueMetadata {
   const iterations = artifacts?.iterations ?? [];
+  const decisionSummary = summarizeDashboardAutonomousDecisions(autoDrain);
+  const staleCount = artifacts?.grouping.staleAgainstHeadCount ?? 0;
+  const queueRerunCount = artifacts?.mergeQueue.rerunCount ?? 0;
+  const rerunCount = queueRerunCount + decisionSummary.rerunDecisionCount;
+  const humanQuestions: FrontierCodexDashboardHumanQuestions = {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION,
+    source: autoDrain ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND : 'not-collected',
+    available: !!autoDrain,
+    count: decisionSummary.humanBlockedDecisionCount,
+    decisionCount: decisionSummary.humanBlockedDecisionCount,
+    jobIds: decisionSummary.humanQuestionJobIds,
+    taskIds: decisionSummary.humanQuestionTaskIds,
+    reasons: decisionSummary.humanQuestionReasons
+  };
+  const queueHealth: FrontierCodexDashboardQueueHealth = {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION,
+    source: artifacts ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND : 'not-collected',
+    available: !!artifacts,
+    activeCoordinatorQueueCount: artifacts?.mergeQueue.count ?? 0,
+    leaseCount: artifacts?.mergeQueue.scopeCount ?? 0,
+    lockKeyCount: autoDrain?.lockKeys.length ?? 0,
+    lockScopeCounts: autoDrain?.lockScopeCounts ?? { semantic: 0, path: 0, repo: 0 },
+    localQueueCount: artifacts?.mergeQueue.queueLocalCount ?? 0,
+    promotedCount: artifacts?.mergeQueue.promoteCount ?? 0,
+    appliedDecisionCount: decisionSummary.appliedDecisionCount,
+    committedDecisionCount: decisionSummary.committedDecisionCount,
+    staleOrRerunCount: Math.max(staleCount, queueRerunCount) + decisionSummary.rerunDecisionCount,
+    staleCount,
+    rerunCount,
+    conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount,
+    trueBlockerCount: artifacts?.mergeQueue.blockCount ?? 0,
+    rejectedCount: artifacts?.mergeQueue.rejectCount ?? 0,
+    recordOnlyCount: artifacts?.mergeQueue.recordOnlyCount ?? 0,
+    coordinatorReviewCount: artifacts?.reviewer.taskCount ?? 0,
+    coordinatorReviewAssignmentCount: artifacts?.reviewer.assignmentCount ?? 0,
+    coordinatorReviewTaskCount: artifacts?.reviewer.taskCount ?? 0,
+    humanQuestionCount: humanQuestions.count
+  };
   return {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION,
@@ -2567,6 +2952,7 @@ function createDashboardQueueMetadata(artifacts: FrontierCodexAutoDrainArtifactM
       rejectCount: artifacts?.mergeQueue.rejectCount ?? 0,
       blockCount: artifacts?.mergeQueue.blockCount ?? 0,
       trueBlockerCount: artifacts?.mergeQueue.blockCount ?? 0,
+      conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount,
       recordOnlyCount: artifacts?.mergeQueue.recordOnlyCount ?? 0
     },
     bucketCounts: {
@@ -2574,7 +2960,33 @@ function createDashboardQueueMetadata(artifacts: FrontierCodexAutoDrainArtifactM
       needsHumanPortCount: artifacts?.grouping.needsHumanPortCount ?? 0,
       failedEvidenceCount: artifacts?.grouping.failedEvidenceCount ?? 0,
       staleAgainstHeadCount: artifacts?.grouping.staleAgainstHeadCount ?? 0
-    }
+    },
+    queueHealth,
+    humanQuestions
+  };
+}
+
+function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAutoDrainResult | null): {
+  appliedDecisionCount: number;
+  committedDecisionCount: number;
+  rerunDecisionCount: number;
+  conflictBlockedDecisionCount: number;
+  humanBlockedDecisionCount: number;
+  humanQuestionJobIds: string[];
+  humanQuestionTaskIds: string[];
+  humanQuestionReasons: string[];
+} {
+  const decisions = (autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []);
+  const humanQuestionDecisions = decisions.filter((decision) => decision.status === 'human-blocked');
+  return {
+    appliedDecisionCount: decisions.filter((decision) => decision.status === 'applied' || decision.status === 'committed').length,
+    committedDecisionCount: decisions.filter((decision) => decision.status === 'committed').length,
+    rerunDecisionCount: decisions.filter((decision) => decision.status === 'rerun').length,
+    conflictBlockedDecisionCount: decisions.filter((decision) => decision.status === 'conflict-blocked').length,
+    humanBlockedDecisionCount: humanQuestionDecisions.length,
+    humanQuestionJobIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.jobId)).sort(),
+    humanQuestionTaskIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.taskId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
+    humanQuestionReasons: uniqueStrings(humanQuestionDecisions.map((decision) => decision.reason).filter((entry) => entry.length > 0)).sort()
   };
 }
 
@@ -2882,6 +3294,8 @@ function createAutoDrainArtifactMetadata(input: {
       mergeAdmissionPath: collectionArtifacts.mergeAdmissionPath,
       reviewerLanePlanPath: collectionArtifacts.reviewerLanePlanPath,
       patchStackPlanPath: collectionArtifacts.patchStackPlanPath,
+      coordinatorAgentDrainPath: iteration.coordinatorAgentDrainPath,
+      ...(iteration.postApplyCollectionPath ? { postApplyCollectionPath: iteration.postApplyCollectionPath } : {}),
       groupingPath: iteration.groupingPath,
       ...(applyPath ? { applyPath } : {}),
       ...(autonomousQueueOverlayPath ? { autonomousQueueOverlayPath } : {}),
@@ -2912,9 +3326,11 @@ function createAutoDrainArtifactMetadata(input: {
     };
   });
   const admissionPaths = compactArtifactPaths(iterations.map((iteration) => iteration.mergeAdmissionPath));
+  const coordinatorAgentPaths = compactArtifactPaths(iterations.map((iteration) => iteration.coordinatorAgentDrainPath));
   const mergeQueuePaths = compactArtifactPaths(iterations.map((iteration) => iteration.hierarchicalMergeQueuePath));
   const groupingPaths = compactArtifactPaths(iterations.flatMap((iteration) => [
     iteration.collectionPath,
+    iteration.postApplyCollectionPath,
     iteration.mergeIndexPath,
     iteration.hierarchicalMergeQueuePath,
     iteration.queueOverlayPath,
@@ -2961,6 +3377,15 @@ function createAutoDrainArtifactMetadata(input: {
       taskCount: sum((iteration) => iteration.reviewerTaskCount),
       decisionCount: sum((iteration) => iteration.decisionCount)
     },
+    coordinatorAgent: {
+      paths: coordinatorAgentPaths,
+      count: coordinatorAgentPaths.length,
+      assignmentCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrain.summary.assignmentCount, 0),
+      selectedCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrain.summary.selectedCount, 0),
+      deferredCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrain.summary.deferredCount, 0),
+      promoteCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrain.summary.promoteCount, 0),
+      queueLocalCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrain.summary.queueLocalCount, 0)
+    },
     patchStack: {
       paths: patchStackPaths,
       count: patchStackPaths.length,
@@ -2986,6 +3411,7 @@ function createAutoDrainArtifactMetadata(input: {
       pathCount: compactArtifactPaths([
         input.autoDrainPath,
         ...admissionPaths,
+        ...coordinatorAgentPaths,
         ...mergeQueuePaths,
         ...groupingPaths,
         ...reviewerPaths,
@@ -2995,6 +3421,7 @@ function createAutoDrainArtifactMetadata(input: {
       collectionCount: iterations.length,
       applyCount: iterations.filter((iteration) => !!iteration.applyPath).length,
       admissionCount: admissionPaths.length,
+      coordinatorAgentDrainCount: coordinatorAgentPaths.length,
       mergeQueuePlanCount: mergeQueuePaths.length,
       reviewerPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.reviewerLanePlanPath)).length,
       patchStackPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.patchStackPlanPath)).length,

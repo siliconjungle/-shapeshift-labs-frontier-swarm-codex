@@ -4,6 +4,16 @@ A flat swarm makes one coordinator read every worker result, decide every confli
 
 This guide is for operators running `frontier-swarm-codex`, Loom-backed swarm workflows, or another runner that emits Frontier-compatible merge bundles. It does not assume a specific repository layout. Replace the example globs, commands, and lane names with the surfaces in your project.
 
+## Coordinator-Agent Drain Versus Raw Runs
+
+Raw worker execution only leases tasks, runs workers, and captures their output. A raw run is useful for diagnostics because it leaves the repository untouched after workers finish, but it also leaves every merge decision to the human operator. Use `--no-auto-drain` only for that diagnostic mode.
+
+The default `run` path adds coordinator-agent drain after worker execution. The coordinator side does not ask workers to merge their own output and does not make decisions from prose alone. It collects `merge.json`, `changes.patch`, verification records, semantic sidecars, and handoff artifacts; builds a merge index; assigns each bundle to a local queue; and then applies only admitted work under the repo lock and any scope lease the queue requires. Manual `autonomous-apply` or `drain` uses the same drain machinery against an existing run or collection, but without launching a new worker wave.
+
+Local queues keep decisions close to the surface that can prove them. A docs lane can drain a clean docs patch while a runtime lane drains a clean runtime patch, as long as their paths or semantic regions do not conflict. Promotion is the escape route, not the default: move work upward only when the child queue cannot safely decide because of cross-scope conflict, high risk, missing authority, or ownership impact.
+
+Workers should not use evidence-only handoffs when a patch, action, or concrete follow-up is possible. Evidence-only output is appropriate for discovery, failed evidence, diagnostics, or a true blocker. A true blocker is a question with an owner and affected surface, not a vague "needs review" label.
+
 ## Queue Shape
 
 `createSwarmHierarchicalMergeQueue()` starts from a merge index and optional merge-admission result. It assigns each bundle to the narrowest useful scope:
@@ -27,8 +37,8 @@ Hierarchical queue assignments collapse worker output into concrete operator act
 | `promote` | The bundle is useful but cannot be safely decided inside the leaf scope, often because of conflicts, high risk, missing auto-merge permission, or cross-scope impact. | Move it to the nearest parent queue that can serialize the decision. Promote to lane before root when the conflict is lane-local. |
 | `rerun` | The bundle is stale against the current head or was produced from an old base. | Close the old item as stale and run a fresh narrow worker against the current source. Do not spend coordinator review time on the old patch. |
 | `reject` | Evidence is failed or invalid: failed required command, failed patch check, ownership violation, rejected disposition, malformed patch, or contradictory handoff. | Record the rejection with evidence and only create a new task if there is a narrower hypothesis to test. |
-| `record-only` | The worker produced discovery, traces, source maps, or notes without a patch candidate. | Attach the artifact to the queue item and close it as discovery unless it creates a concrete follow-up task. |
-| `block` | A true human or policy decision is required. | Preserve the blocker with the exact owner, surface, question, and missing authority. Do not use this for ordinary stale, invalid, or unreviewed work. |
+| `record-only` | The worker produced discovery, traces, source maps, or notes without a patch candidate. | Attach the artifact to the queue item and close it as discovery unless it creates a concrete follow-up task. Do not use this when the worker could have produced the patch or action. |
+| `block` | A true human or policy decision is required. | Preserve the blocker with the exact owner, surface, question, and missing authority. Do not use this for ordinary stale, invalid, unreviewed, or evidence-poor work. |
 
 These actions reduce the single coordinator bottleneck because most work stops at the scope that can prove it. Root review becomes an exception path instead of the default path.
 
@@ -84,7 +94,7 @@ The local queue can keep running while sibling queues drain their own clean work
 
 6. Promote only when local proof is insufficient. Promotion is a structured route upward: semantic-region to lane, lane to root, or path to nearest parent. The parent queue decides whether to serialize, split, rerun, reject, or ask for human approval.
 
-7. Record terminal decisions. The decision ledger and queue overlay should explain every item. Unreviewed is not a terminal state. A clean item is applied or queued locally; stale work is rerun; invalid work is rejected; discovery is recorded; true blockers name the missing authority.
+7. Record terminal decisions. The decision ledger and queue overlay should explain every item. Unreviewed is not a terminal state. A clean item is applied or queued locally; stale work is rerun; invalid work is rejected; discovery is recorded; true blockers name the missing authority and the exact question that must be answered.
 
 ## Loom And Semantic Regions
 

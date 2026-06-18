@@ -12,6 +12,7 @@ import {
   coerceCodexSwarmTasksInput,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
+  FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
   createCodexResourceAllocation,
@@ -558,7 +559,28 @@ assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.rerunCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.rejectCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.blockCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.conflictBlockedDecisionCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.recordOnlyCount, 0);
+assert.deepStrictEqual(autoDrainDashboard.queueHealth, autoDrainDashboard.queueMetadata.queueHealth);
+assert.deepStrictEqual(autoDrainDashboard.humanQuestions, autoDrainDashboard.queueMetadata.humanQuestions);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.kind, 'frontier.swarm-codex.dashboard-queue-health');
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.available, true);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount, autoDrainRun.autoDrainArtifacts.mergeQueue.count);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.leaseCount, autoDrainRun.autoDrainArtifacts.mergeQueue.scopeCount);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.lockKeyCount, 1);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.queueHealth.lockScopeCounts, { semantic: 1, path: 0, repo: 0 });
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.localQueueCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.promotedCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.appliedDecisionCount, 1);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.coordinatorReviewCount, autoDrainRun.autoDrainArtifacts.reviewer.taskCount);
+assert.ok(!Object.hasOwn(autoDrainDashboard.queueMetadata.queueHealth, 'humanReviewCount'));
+assert.ok(!Object.hasOwn(autoDrainDashboard.queueMetadata.queueHealth, 'humanPortCount'));
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanQuestions.kind, 'frontier.swarm-codex.dashboard-human-questions');
+assert.strictEqual(autoDrainDashboard.queueMetadata.humanQuestions.count, 0);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanQuestions.jobIds, []);
 const autoDrainArtifact = JSON.parse(await fs.readFile(path.join(autoDrainOutDir, 'auto-drain', 'auto-drain.json'), 'utf8'));
 assert.deepStrictEqual(autoDrainArtifact.lockKeys, ['region:src/apply.ts#apply']);
 assert.strictEqual(autoDrainArtifact.iterations[0].lockScopeCounts.semantic, 1);
@@ -714,6 +736,35 @@ assert.strictEqual(autoDrainConflictRun.autoDrain.iterations[0].admission.metada
 assert.strictEqual(autoDrainConflictRun.autoDrain.iterations[0].admission.metadata.conflictLeaderAdmission.selectedJobIds.length, 1);
 assert.strictEqual(autoDrainConflictRun.autoDrain.summary.applyCount >= 1, true);
 assert.strictEqual(autoDrainConflictRun.autoDrain.summary.terminalCount >= 1, true);
+const conflictDrainIteration = autoDrainConflictRun.autoDrain.iterations[0];
+assert.ok(conflictDrainIteration.apply.decisions.some((decision) => decision.status === 'applied'));
+assert.ok(await exists(conflictDrainIteration.postApplyCollectionPath));
+assert.strictEqual(conflictDrainIteration.postApplyCollection.kind, 'frontier.swarm-codex.collection');
+assert.ok(await exists(conflictDrainIteration.coordinatorAgentDrainPath));
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.kind, FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.assignmentCount, 2);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.selectedCount, 1);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.deferredCount, 1);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.promoteCount, 2);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.selectedPromoteCount, 1);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.deferredPromoteCount, 1);
+const selectedConflictDrain = conflictDrainIteration.coordinatorAgentDrain.assignments.find((assignment) => assignment.selected);
+const deferredConflictDrain = conflictDrainIteration.coordinatorAgentDrain.assignments.find((assignment) => !assignment.selected);
+assert.ok(selectedConflictDrain);
+assert.ok(deferredConflictDrain);
+assert.strictEqual(selectedConflictDrain.queueAction, 'promote');
+assert.strictEqual(deferredConflictDrain.queueAction, 'promote');
+assert.strictEqual(selectedConflictDrain.selectionReason, 'deterministic-promoted-queue-leader');
+assert.strictEqual(deferredConflictDrain.selectionReason, 'serialized-behind-promoted-queue-leader');
+assert.strictEqual(selectedConflictDrain.jobId < deferredConflictDrain.jobId, true);
+assert.deepStrictEqual(deferredConflictDrain.serializesAfterJobIds, [selectedConflictDrain.jobId]);
+const deferredConflictGroupingJob = conflictDrainIteration.grouping.jobs.find((job) => job.jobId === deferredConflictDrain.jobId);
+assert.ok(deferredConflictGroupingJob);
+assert.strictEqual(deferredConflictGroupingJob.placement, 'deferred');
+assert.strictEqual(deferredConflictGroupingJob.coordinatorAgent.queueAction, 'promote');
+assert.deepStrictEqual(deferredConflictGroupingJob.coordinatorAgent.leaderJobIds, [selectedConflictDrain.jobId]);
+assert.strictEqual(autoDrainConflictRun.autoDrainArtifacts.coordinatorAgent.count >= 1, true);
+assert.strictEqual(autoDrainConflictRun.autoDrainArtifacts.summary.coordinatorAgentDrainCount >= 1, true);
 assert.ok(['first\n', 'second\n'].includes(await fs.readFile(path.join(autoDrainConflictRepo, 'src', 'apply.ts'), 'utf8')));
 
 const autoDrainDryRunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dry-run-repo');
@@ -745,6 +796,96 @@ assert.strictEqual(autoDrainDryRun.autoDrain.summary.terminalCount, 1);
 assert.strictEqual(autoDrainDryRun.autoDrain.summary.blockedCount, 0);
 assert.strictEqual(autoDrainDryRun.autoDrain.iterations[0].apply.decisions[0].status, 'checked');
 assert.strictEqual(await fs.readFile(path.join(autoDrainDryRunRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+
+const autoDrainClassificationOutDir = path.join(tmp, 'auto-drain-classification-run');
+const autoDrainClassificationPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-classification',
+    lanes: [{ id: 'classification', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'classification-marker',
+      lane: 'classification',
+      ownedFiles: ['src/marker.ts']
+    }]
+  }
+});
+const autoDrainClassificationRun = await runCodexSwarm(autoDrainClassificationPlan, {
+  outDir: autoDrainClassificationOutDir,
+  cwd: tmp,
+  dryRun: false,
+  autoDrain: {
+    maxIterations: 2,
+    checkStale: false
+  },
+  executor: async (input) => {
+    const runDir = path.dirname(input.paths.jobDir);
+    await writeSyntheticMergeBundle(runDir, 'classification-coordinator-review');
+    await writeSyntheticMergeBundle(runDir, 'classification-stale', {
+      disposition: 'stale-against-head',
+      staleAgainstHead: true
+    });
+    await writeSyntheticMergeBundle(runDir, 'classification-failed', {
+      status: 'failed',
+      mergeReadiness: 'rejected',
+      disposition: 'rejected'
+    });
+    await writeSyntheticMergeBundle(runDir, 'classification-evidence', {
+      changedPaths: [],
+      mergeReadiness: 'discovery-only',
+      disposition: 'discovery-only'
+    });
+    await writeSyntheticMergeBundle(runDir, 'classification-human-question', {
+      status: 'blocked',
+      mergeReadiness: 'blocked',
+      disposition: 'blocked'
+    });
+    await fs.writeFile(input.paths.lastMessagePath, 'classification seeded\n');
+    return { exitCode: 0, changedPaths: [], lastMessage: 'classification seeded' };
+  }
+});
+assert.strictEqual(autoDrainClassificationRun.ok, true);
+assert.strictEqual(autoDrainClassificationRun.autoDrain.summary.applyCount, 0);
+assert.strictEqual(autoDrainClassificationRun.autoDrain.summary.blockedCount, 0);
+assert.strictEqual(autoDrainClassificationRun.autoDrain.summary.remainingReadyCount, 0);
+assert.strictEqual(autoDrainClassificationRun.autoDrainArtifacts.mergeQueue.promoteCount, 1);
+assert.strictEqual(autoDrainClassificationRun.autoDrainArtifacts.mergeQueue.rerunCount, 1);
+assert.strictEqual(autoDrainClassificationRun.autoDrainArtifacts.mergeQueue.rejectCount, 1);
+assert.strictEqual(autoDrainClassificationRun.autoDrainArtifacts.mergeQueue.recordOnlyCount, 2);
+assert.strictEqual(autoDrainClassificationRun.autoDrainArtifacts.mergeQueue.blockCount, 1);
+const autoDrainClassificationDashboard = JSON.parse(await fs.readFile(path.join(autoDrainClassificationOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.available, true);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.promoteCount, 1);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.rerunCount, 1);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.rejectCount, 1);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.recordOnlyCount, 2);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.blockCount, 1);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.trueBlockerCount, 1);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.actionCounts.conflictBlockedDecisionCount, 0);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.queueHealth.trueBlockerCount, 1);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.readyToApplyCount, 0);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.needsHumanPortCount, 3);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.failedEvidenceCount, 2);
+assert.strictEqual(autoDrainClassificationDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 1);
+const autoDrainClassificationQueue = JSON.parse(await fs.readFile(autoDrainClassificationDashboard.queueMetadata.paths.mergeQueues[0], 'utf8'));
+const autoDrainClassificationAssignments = new Map(autoDrainClassificationQueue.assignments.map((assignment) => [assignment.jobId, assignment]));
+assert.strictEqual(autoDrainClassificationAssignments.get('classification-coordinator-review').action, 'promote');
+assert.ok(autoDrainClassificationAssignments.get('classification-coordinator-review').reasons.includes('coordinator-queue-required'));
+assert.strictEqual(autoDrainClassificationAssignments.get('classification-stale').action, 'rerun');
+assert.ok(autoDrainClassificationAssignments.get('classification-stale').reasons.includes('stale-against-head'));
+assert.strictEqual(autoDrainClassificationAssignments.get('classification-failed').action, 'reject');
+assert.ok(autoDrainClassificationAssignments.get('classification-failed').reasons.includes('failed-or-invalid-evidence'));
+assert.strictEqual(autoDrainClassificationAssignments.get('classification-evidence').action, 'record-only');
+assert.ok(autoDrainClassificationAssignments.get('classification-evidence').reasons.includes('discovery-only'));
+assert.strictEqual(autoDrainClassificationAssignments.get('classification-human-question').action, 'block');
+assert.ok(autoDrainClassificationAssignments.get('classification-human-question').reasons.includes('true-blocker'));
+assert.deepStrictEqual(autoDrainClassificationQueue.byAction.block, ['classification-human-question']);
+assert.ok(!autoDrainClassificationQueue.byAction.promote.includes('classification-human-question'));
+assert.ok(!autoDrainClassificationQueue.byAction.rerun.includes('classification-human-question'));
+assert.ok(!autoDrainClassificationQueue.byAction['record-only'].includes('classification-human-question'));
+assert.ok(!autoDrainClassificationQueue.promotions.some((promotion) => promotion.jobId === 'classification-evidence'));
 
 const cleanApplyRepo = path.join(tmp, 'clean-apply-repo');
 await fs.mkdir(path.join(cleanApplyRepo, 'src'), { recursive: true });
