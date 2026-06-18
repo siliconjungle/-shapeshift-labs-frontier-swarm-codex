@@ -39,6 +39,28 @@ Each autonomous merge decision still records lock key metadata for the bundle it
 
 The autonomous apply result summarizes the unique lock keys and counts decisions by `semantic`, `path`, and `repo` scope. This makes later review and queue overlays aware of the intended conflict surface even though the current physical lock remains repository-wide.
 
+## Decision Readback Records
+
+Each autonomous decision includes `leaseReadback`, and `autonomous-apply.json` also
+includes `decisionReadbacks`. The readback record is repository-generic and repeats the
+queue subject, queue alias keys, status, reason, bundle path, patch path, changed
+paths, changed regions, lock scope, lock keys, lock file path, lock token, and head
+readback in one place.
+
+The head readback distinguishes the bundle's collected head from the repository head
+read under the apply lock. `head.movedSinceCollection` is true when a sibling
+coordinator advanced the checkout after collection but before this decision acquired
+the lock. `head.movedDuringDecision` is true when the head changed after the lock head
+was read and before the decision finished, excluding the decision's own successful
+apply or commit. This lets later coordinators understand why a bundle was committed,
+rerun, conflict-blocked, or rejected after the checkout changed.
+
+When multiple decisions refer to the same queue subject in one result artifact, the
+final `decisionReadbacks` list marks older readbacks with `supersededByDecisionId` and
+the latest readback with `supersedesDecisionIds`. The append-only decision log still
+records each individual decision as it happens; the result artifact is the compact
+readback view for sibling coordinators.
+
 ## Stale Head Checks
 
 Stale head checks happen before and during autonomous apply:

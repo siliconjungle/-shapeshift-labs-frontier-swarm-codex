@@ -1036,6 +1036,27 @@ assert.strictEqual(autonomousResult.decisions[0].lockScope, 'path');
 assert.deepStrictEqual(autonomousResult.decisions[0].lockKeys, ['path:src/apply.ts']);
 assert.deepStrictEqual(autonomousResult.lockKeys, ['path:src/apply.ts']);
 assert.strictEqual(autonomousResult.lockScopeCounts.path, 1);
+const autonomousReadback = autonomousResult.decisions[0].leaseReadback;
+assert.strictEqual(autonomousReadback.source, 'autonomous-apply');
+assert.strictEqual(autonomousReadback.decisionId, autonomousResult.decisions[0].id);
+assert.strictEqual(autonomousReadback.status, 'applied');
+assert.strictEqual(autonomousReadback.reason, 'patch applied and verification passed');
+assert.strictEqual(autonomousReadback.terminal, true);
+assert.deepStrictEqual(autonomousReadback.queueItemIds, ['apply-task']);
+assert.deepStrictEqual(autonomousReadback.queueKeys, ['queue:apply-task', 'task:apply-task', 'job:apply-job']);
+assert.deepStrictEqual(autonomousReadback.applyScope.changedPaths, ['src/apply.ts']);
+assert.deepStrictEqual(autonomousReadback.applyScope.changedRegions, []);
+assert.strictEqual(autonomousReadback.lease.scope, 'path');
+assert.deepStrictEqual(autonomousReadback.lease.keys, ['path:src/apply.ts']);
+assert.strictEqual(autonomousReadback.lease.lockPath, autonomousResult.lockPath);
+assert.strictEqual(autonomousReadback.lease.token, autonomousResult.decisions[0].lockToken);
+assert.strictEqual(autonomousReadback.head.leaseHead, autonomousResult.decisions[0].headBefore);
+assert.strictEqual(autonomousReadback.head.headBefore, autonomousResult.decisions[0].headBefore);
+assert.strictEqual(autonomousReadback.head.headAfter, autonomousResult.decisions[0].headAfter);
+assert.strictEqual(autonomousReadback.head.currentHead, autonomousResult.decisions[0].headAfter);
+assert.strictEqual(autonomousReadback.head.movedSinceCollection, false);
+assert.strictEqual(autonomousReadback.head.movedDuringDecision, false);
+assert.deepStrictEqual(autonomousResult.decisionReadbacks, [autonomousReadback]);
 assert.strictEqual(autonomousResult.queueOverlay.entries[0].status, 'satisfied');
 assert.strictEqual(await fs.readFile(path.join(autonomousRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
 assert.strictEqual(await exists(autonomousResult.lockPath), false);
@@ -1044,8 +1065,78 @@ assert.strictEqual(autonomousDecisionLines.length, 1);
 const autonomousDecisionLogEntry = JSON.parse(autonomousDecisionLines[0]);
 assert.strictEqual(autonomousDecisionLogEntry.jobId, 'apply-job');
 assert.deepStrictEqual(autonomousDecisionLogEntry.lockKeys, ['path:src/apply.ts']);
+assert.strictEqual(autonomousDecisionLogEntry.leaseReadback.decisionId, autonomousResult.decisions[0].id);
+assert.deepStrictEqual(autonomousDecisionLogEntry.leaseReadback.lease.keys, ['path:src/apply.ts']);
 const autonomousApplyArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'autonomous-apply-out', 'autonomous-apply.json'), 'utf8'));
 assert.deepStrictEqual(autonomousApplyArtifact.lockKeys, ['path:src/apply.ts']);
+assert.deepStrictEqual(autonomousApplyArtifact.decisionReadbacks, [autonomousReadback]);
+
+const readbackSupersedeRepo = await createApplyFixtureRepo(tmp, 'autonomous-readback-supersede-repo');
+await fs.writeFile(path.join(readbackSupersedeRepo, 'src', 'first.ts'), 'old-first\n');
+await fs.writeFile(path.join(readbackSupersedeRepo, 'src', 'second.ts'), 'old-second\n');
+await execFileP('git', ['add', '--', 'src/first.ts', 'src/second.ts'], { cwd: readbackSupersedeRepo });
+await execFileP('git', ['commit', '-m', 'Add readback files'], { cwd: readbackSupersedeRepo });
+const readbackSupersedeCollection = path.join(tmp, 'autonomous-readback-supersede-collection');
+const readbackSupersedeReadyRoot = path.join(readbackSupersedeCollection, 'ready-to-apply');
+await writeSyntheticMergeBundle(readbackSupersedeReadyRoot, 'readback-first-job', {
+  taskId: 'shared-readback-task',
+  lane: 'readback',
+  mergeReadiness: 'verified-patch',
+  disposition: 'auto-mergeable',
+  autoMergeable: true,
+  changedPaths: ['src/first.ts'],
+  changedRegions: ['src/first.ts#first'],
+  ownedFilesTouched: ['src/first.ts'],
+  allowedWrites: ['src/first.ts'],
+  patchPath: 'changes.patch',
+  queueItemIds: ['shared-readback-task']
+});
+await fs.writeFile(path.join(readbackSupersedeReadyRoot, 'readback-first-job', 'changes.patch'), [
+  'diff --git a/src/first.ts b/src/first.ts',
+  '--- a/src/first.ts',
+  '+++ b/src/first.ts',
+  '@@ -1 +1 @@',
+  '-old-first',
+  '+new-first',
+  ''
+].join('\n'));
+await writeSyntheticMergeBundle(readbackSupersedeReadyRoot, 'readback-second-job', {
+  taskId: 'shared-readback-task',
+  lane: 'readback',
+  mergeReadiness: 'verified-patch',
+  disposition: 'auto-mergeable',
+  autoMergeable: true,
+  changedPaths: ['src/second.ts'],
+  changedRegions: ['src/second.ts#second'],
+  ownedFilesTouched: ['src/second.ts'],
+  allowedWrites: ['src/second.ts'],
+  patchPath: 'changes.patch',
+  queueItemIds: ['shared-readback-task']
+});
+await fs.writeFile(path.join(readbackSupersedeReadyRoot, 'readback-second-job', 'changes.patch'), [
+  'diff --git a/src/second.ts b/src/second.ts',
+  '--- a/src/second.ts',
+  '+++ b/src/second.ts',
+  '@@ -1 +1 @@',
+  '-old-second',
+  '+new-second',
+  ''
+].join('\n'));
+const readbackSupersedeResult = await autonomousApplyCodexSwarmRun({
+  collection: readbackSupersedeCollection,
+  cwd: readbackSupersedeRepo,
+  outDir: path.join(tmp, 'autonomous-readback-supersede-out')
+});
+assert.strictEqual(readbackSupersedeResult.ok, true);
+assert.deepStrictEqual(readbackSupersedeResult.decisions.map((decision) => decision.status), ['applied', 'applied']);
+assert.strictEqual(readbackSupersedeResult.decisionReadbacks.length, 2);
+const readbackSupersededDecision = readbackSupersedeResult.decisions[0];
+const readbackLatestDecision = readbackSupersedeResult.decisions[1];
+assert.strictEqual(readbackSupersededDecision.leaseReadback.supersededByDecisionId, readbackLatestDecision.id);
+assert.deepStrictEqual(readbackLatestDecision.leaseReadback.supersedesDecisionIds, [readbackSupersededDecision.id]);
+assert.strictEqual(readbackSupersedeResult.decisionReadbacks[0].supersededByDecisionId, readbackLatestDecision.id);
+assert.deepStrictEqual(readbackSupersedeResult.decisionReadbacks[1].supersedesDecisionIds, [readbackSupersededDecision.id]);
+assert.deepStrictEqual(readbackLatestDecision.leaseReadback.queueKeys, ['queue:shared-readback-task', 'task:shared-readback-task', 'job:readback-second-job']);
 
 const dependencyGateRepo = await createApplyFixtureRepo(tmp, 'autonomous-gate-order-repo');
 await fs.mkdir(path.join(dependencyGateRepo, 'packages', 'frontier-swarm'), { recursive: true });
@@ -1201,6 +1292,13 @@ assert.strictEqual(staleBeforeApplyDecision.status, 'rerun');
 assert.strictEqual(staleBeforeApplyDecision.reason, 'repository head changed since bundle collection; rerun against current head');
 assert.strictEqual(staleBeforeApplyDecision.headBefore, staleBeforeApplyCollectedHead);
 assert.strictEqual(staleBeforeApplyDecision.headAfter, staleBeforeApplyAdvancedHead);
+assert.strictEqual(staleBeforeApplyDecision.leaseReadback.status, 'rerun');
+assert.strictEqual(staleBeforeApplyDecision.leaseReadback.head.collectionHead, staleBeforeApplyCollectedHead);
+assert.strictEqual(staleBeforeApplyDecision.leaseReadback.head.leaseHead, staleBeforeApplyAdvancedHead);
+assert.strictEqual(staleBeforeApplyDecision.leaseReadback.head.currentHead, staleBeforeApplyAdvancedHead);
+assert.strictEqual(staleBeforeApplyDecision.leaseReadback.head.movedSinceCollection, true);
+assert.strictEqual(staleBeforeApplyDecision.leaseReadback.head.movedDuringDecision, false);
+assert.deepStrictEqual(staleBeforeApplyResult.decisionReadbacks, [staleBeforeApplyDecision.leaseReadback]);
 assert.strictEqual(staleBeforeApplyResult.queueOverlay.entries[0].status, 'stale-against-head');
 assert.strictEqual(await fs.readFile(path.join(staleBeforeApplyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 assert.strictEqual(await fs.readFile(path.join(staleBeforeApplyRepo, 'src', 'head.txt'), 'utf8'), 'advanced\n');
@@ -1250,6 +1348,13 @@ assert.strictEqual(staleConflictBeforeApplyDecision.status, 'conflict-blocked');
 assert.strictEqual(staleConflictBeforeApplyDecision.reason, 'repository head changed since bundle collection and git apply --check failed');
 assert.strictEqual(staleConflictBeforeApplyDecision.headBefore, staleConflictBeforeApplyCollectedHead);
 assert.strictEqual(staleConflictBeforeApplyDecision.headAfter, staleConflictBeforeApplyAdvancedHead);
+assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.status, 'conflict-blocked');
+assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.collectionHead, staleConflictBeforeApplyCollectedHead);
+assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.leaseHead, staleConflictBeforeApplyAdvancedHead);
+assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.currentHead, staleConflictBeforeApplyAdvancedHead);
+assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.movedSinceCollection, true);
+assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.movedDuringDecision, false);
+assert.deepStrictEqual(staleConflictBeforeApplyResult.decisionReadbacks, [staleConflictBeforeApplyDecision.leaseReadback]);
 assert.strictEqual(staleConflictBeforeApplyResult.queueOverlay.entries[0].status, 'stale-against-head');
 assert.strictEqual(await fs.readFile(path.join(staleConflictBeforeApplyRepo, 'src', 'apply.ts'), 'utf8'), 'other\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: staleConflictBeforeApplyRepo })).stdout, '');
@@ -1273,6 +1378,12 @@ assert.strictEqual(rollbackResult.summary.skippedRequiredGateCount, 1);
 const rollbackDecision = rollbackResult.decisions[0];
 assert.strictEqual(rollbackDecision.status, 'rejected');
 assert.match(rollbackDecision.reason, /verification failed: reject-new/);
+assert.strictEqual(rollbackDecision.leaseReadback.status, 'rejected');
+assert.strictEqual(rollbackDecision.leaseReadback.terminal, true);
+assert.strictEqual(rollbackDecision.leaseReadback.head.leaseHead, rollbackDecision.headBefore);
+assert.strictEqual(rollbackDecision.leaseReadback.head.movedSinceCollection, false);
+assert.strictEqual(rollbackDecision.leaseReadback.head.movedDuringDecision, false);
+assert.deepStrictEqual(rollbackResult.decisionReadbacks, [rollbackDecision.leaseReadback]);
 assert.deepStrictEqual(rollbackDecision.verification, {
   planned: 2,
   run: 1,
@@ -1788,6 +1899,12 @@ assert.deepStrictEqual(autoDrainCommitDecision.verification, {
 assert.match(autoDrainCommitDecision.headAfter, /^[0-9a-f]{40}$/);
 assert.strictEqual(autoDrainCommitDecision.commit, autoDrainCommitDecision.headAfter);
 assert.notStrictEqual(autoDrainCommitDecision.headAfter, autoDrainCommitDecision.headBefore);
+assert.strictEqual(autoDrainCommitDecision.leaseReadback.status, 'committed');
+assert.strictEqual(autoDrainCommitDecision.leaseReadback.head.leaseHead, autoDrainCommitDecision.headBefore);
+assert.strictEqual(autoDrainCommitDecision.leaseReadback.head.currentHead, autoDrainCommitDecision.headAfter);
+assert.strictEqual(autoDrainCommitDecision.leaseReadback.head.commit, autoDrainCommitDecision.headAfter);
+assert.strictEqual(autoDrainCommitDecision.leaseReadback.head.movedDuringDecision, false);
+assert.deepStrictEqual(autoDrainCommitIteration.apply.decisionReadbacks, [autoDrainCommitDecision.leaseReadback]);
 assert.strictEqual(autoDrainCommitDecision.jobId, autoDrainCommitJobId);
 assert.deepStrictEqual(autoDrainCommitDecision.queueItemIds, ['apply-task']);
 assert.deepStrictEqual(autoDrainCommitDecision.lockKeys, ['region:src/apply.ts#apply']);
@@ -2113,6 +2230,13 @@ assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.status, 'committed');
 assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.headBefore, autoDrainApplyRerunCommittedDecision.headAfter);
 assert.match(autoDrainApplyRerunRevalidatedDecision.headAfter, /^[0-9a-f]{40}$/);
 assert.notStrictEqual(autoDrainApplyRerunRevalidatedDecision.headAfter, autoDrainApplyRerunRevalidatedDecision.headBefore);
+assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.leaseReadback.status, 'committed');
+assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.leaseReadback.head.collectionHead, autoDrainApplyRerunCommittedDecision.headBefore);
+assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.leaseReadback.head.leaseHead, autoDrainApplyRerunCommittedDecision.headAfter);
+assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.leaseReadback.head.currentHead, autoDrainApplyRerunRevalidatedDecision.headAfter);
+assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.leaseReadback.head.commit, autoDrainApplyRerunRevalidatedDecision.headAfter);
+assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.leaseReadback.head.movedSinceCollection, true);
+assert.strictEqual(autoDrainApplyRerunRevalidatedDecision.leaseReadback.head.movedDuringDecision, false);
 assert.deepStrictEqual(autoDrainApplyRerunApply.lockKeys, [
   'region:src/apply.ts#apply',
   'region:src/other.ts#other'

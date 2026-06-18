@@ -606,6 +606,43 @@ export interface FrontierCodexAutonomousLockScopeCounts {
   repo: number;
 }
 
+export interface FrontierCodexAutonomousDecisionLeaseReadback {
+  source: 'autonomous-apply';
+  decisionId: string;
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  status: FrontierCodexAutonomousDecisionStatus;
+  reason: string;
+  terminal: boolean;
+  dryRun: boolean;
+  applyScope: {
+    bundlePath: string;
+    patchPath?: string;
+    changedPaths: string[];
+    changedRegions: string[];
+  };
+  lease: {
+    scope: FrontierCodexAutonomousLockScope;
+    keys: string[];
+    lockPath?: string;
+    token?: string;
+  };
+  head: {
+    collectionHead?: string;
+    leaseHead?: string;
+    headBefore?: string;
+    headAfter?: string;
+    currentHead?: string;
+    commit?: string;
+    movedSinceCollection: boolean;
+    movedDuringDecision: boolean;
+  };
+  supersedesDecisionIds?: string[];
+  supersededByDecisionId?: string;
+}
+
 export interface FrontierCodexAutonomousApplyInput {
   collection?: string;
   run?: string;
@@ -765,6 +802,7 @@ export interface FrontierCodexAutonomousMergeDecision {
   verification: FrontierCodexAutonomousDecisionVerification;
   finalGateSummary: FrontierCodexAutonomousDecisionFinalGateSummary;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
+  leaseReadback: FrontierCodexAutonomousDecisionLeaseReadback;
   error?: string;
 }
 
@@ -870,6 +908,7 @@ export interface FrontierCodexAutonomousApplyResult {
   decisionLogPath: string;
   lockPath: string;
   decisions: FrontierCodexAutonomousMergeDecision[];
+  decisionReadbacks: FrontierCodexAutonomousDecisionLeaseReadback[];
   lockKeys: string[];
   lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
   queueOverlay: FrontierSwarmQueueOverlay;
@@ -3512,6 +3551,112 @@ function autonomousDecisionIsTerminal(status: FrontierCodexAutonomousDecisionSta
 
 function autonomousDecisionBlocksAutoDrain(status: FrontierCodexAutonomousDecisionStatus): boolean {
   return status === 'human-blocked';
+}
+
+function createCodexAutonomousDecisionLeaseReadback(
+  decision: Omit<FrontierCodexAutonomousMergeDecision, 'leaseReadback'> | FrontierCodexAutonomousMergeDecision,
+  input: { collectionHead?: string; leaseHead?: string } = {}
+): FrontierCodexAutonomousDecisionLeaseReadback {
+  const existing = (decision as Partial<FrontierCodexAutonomousMergeDecision>).leaseReadback;
+  const collectionHead = input.collectionHead ?? existing?.head.collectionHead;
+  const leaseHead = input.leaseHead ?? existing?.head.leaseHead;
+  const currentHead = decision.commit ?? decision.headAfter ?? leaseHead ?? decision.headBefore;
+  const movedSinceCollection = Boolean(collectionHead && leaseHead && collectionHead !== leaseHead);
+  const movedDuringDecision = Boolean(
+    leaseHead
+      && decision.headAfter
+      && decision.headAfter !== leaseHead
+      && decision.status !== 'applied'
+      && decision.status !== 'committed'
+  );
+  return {
+    source: 'autonomous-apply',
+    decisionId: decision.id,
+    jobId: decision.jobId,
+    ...(decision.taskId ? { taskId: decision.taskId } : {}),
+    queueItemIds: [...decision.queueItemIds],
+    queueKeys: dashboardQueueSubjectAliasKeys(decision),
+    status: decision.status,
+    reason: decision.reason,
+    terminal: autonomousDecisionIsTerminal(decision.status),
+    dryRun: decision.dryRun,
+    applyScope: {
+      bundlePath: decision.bundlePath,
+      ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+      changedPaths: [...decision.changedPaths],
+      changedRegions: [...decision.changedRegions]
+    },
+    lease: {
+      scope: decision.lockScope,
+      keys: [...decision.lockKeys],
+      ...(decision.lockPath ? { lockPath: decision.lockPath } : {}),
+      ...(decision.lockToken ? { token: decision.lockToken } : {})
+    },
+    head: {
+      ...(collectionHead ? { collectionHead } : {}),
+      ...(leaseHead ? { leaseHead } : {}),
+      ...(decision.headBefore ? { headBefore: decision.headBefore } : {}),
+      ...(decision.headAfter ? { headAfter: decision.headAfter } : {}),
+      ...(currentHead ? { currentHead } : {}),
+      ...(decision.commit ? { commit: decision.commit } : {}),
+      movedSinceCollection,
+      movedDuringDecision
+    },
+    ...(existing?.supersedesDecisionIds?.length ? { supersedesDecisionIds: [...existing.supersedesDecisionIds] } : {}),
+    ...(existing?.supersededByDecisionId ? { supersededByDecisionId: existing.supersededByDecisionId } : {})
+  };
+}
+
+function attachCodexAutonomousDecisionLeaseReadbacks(
+  decisions: FrontierCodexAutonomousMergeDecision[]
+): FrontierCodexAutonomousDecisionLeaseReadback[] {
+  for (const decision of decisions) {
+    decision.leaseReadback = createCodexAutonomousDecisionLeaseReadback(decision);
+  }
+  for (const component of createDashboardAutonomousDecisionComponents(decisions)) {
+    const latest = component.latest.decision;
+    const superseded = decisions.filter((decision) => (
+      decision.id !== latest.id
+        && dashboardAutonomousDecisionAliasKeys(decision).some((key) => component.keys.has(key))
+    ));
+    if (!superseded.length) continue;
+    latest.leaseReadback = {
+      ...latest.leaseReadback,
+      supersedesDecisionIds: uniqueStrings([
+        ...(latest.leaseReadback.supersedesDecisionIds ?? []),
+        ...superseded.map((decision) => decision.id)
+      ]).sort()
+    };
+    for (const decision of superseded) {
+      decision.leaseReadback = {
+        ...decision.leaseReadback,
+        supersededByDecisionId: latest.id
+      };
+    }
+  }
+  return decisions.map((decision) => cloneCodexAutonomousDecisionLeaseReadback(decision.leaseReadback));
+}
+
+function cloneCodexAutonomousDecisionLeaseReadback(
+  readback: FrontierCodexAutonomousDecisionLeaseReadback
+): FrontierCodexAutonomousDecisionLeaseReadback {
+  return {
+    ...readback,
+    queueItemIds: [...readback.queueItemIds],
+    queueKeys: [...readback.queueKeys],
+    applyScope: {
+      ...readback.applyScope,
+      changedPaths: [...readback.applyScope.changedPaths],
+      changedRegions: [...readback.applyScope.changedRegions]
+    },
+    lease: {
+      ...readback.lease,
+      keys: [...readback.lease.keys]
+    },
+    head: { ...readback.head },
+    ...(readback.supersedesDecisionIds?.length ? { supersedesDecisionIds: [...readback.supersedesDecisionIds] } : {}),
+    ...(readback.supersededByDecisionId ? { supersededByDecisionId: readback.supersededByDecisionId } : {})
+  };
 }
 
 function emptyAutonomousLockScopeCounts(): FrontierCodexAutonomousLockScopeCounts {
@@ -8117,6 +8262,7 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
     await releaseAutonomousApplyLock(lock).catch(() => {});
   }
 
+  const decisionReadbacks = attachCodexAutonomousDecisionLeaseReadbacks(decisions);
   const queueOverlay = createAutonomousQueueOverlay({ decisions, generatedAt, runId: readRunIdFromDecisions(decisions) });
   const lockSummary = summarizeAutonomousDecisionLockScopes(decisions);
   const statuses: FrontierCodexAutonomousDecisionStatus[] = [
@@ -8148,6 +8294,7 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
     decisionLogPath,
     lockPath,
     decisions,
+    decisionReadbacks,
     lockKeys: lockSummary.lockKeys,
     lockScopeCounts: lockSummary.lockScopeCounts,
     queueOverlay,
@@ -8289,6 +8436,7 @@ async function applyCodexMergeBundleAutonomously(input: {
   const patchPath = await resolveApplyPatchPath(input.bundle, input.mergePath);
   const queueItemIds = input.bundle.queueItemIds.length ? [...input.bundle.queueItemIds] : [input.bundle.taskId ?? input.bundle.jobId];
   const lockKeys = deriveCodexAutonomousApplyLockKeys(input.bundle);
+  const collectionHead = readCodexCollectionHead(input.bundle);
   const plannedVerificationCommands = autonomousVerificationCommands(input.bundle, input.input, input.packageGateOrder);
   const verificationRuns: AutonomousVerificationRun[] = [];
   const finish = (
@@ -8297,39 +8445,49 @@ async function applyCodexMergeBundleAutonomously(input: {
     extra: {
       headBefore?: string;
       headAfter?: string;
+      leaseHead?: string;
       commit?: string;
       error?: string;
     } = {}
-  ): FrontierCodexAutonomousMergeDecision => ({
-    kind: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
-    version: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_VERSION,
-    id: `frontier-swarm-codex-autonomous-decision:${input.bundle.jobId}:${randomUUID()}`,
-    ...(input.bundle.runId ? { runId: input.bundle.runId } : {}),
-    ...(input.bundle.planId ? { planId: input.bundle.planId } : {}),
-    jobId: input.bundle.jobId,
-    ...(input.bundle.taskId ? { taskId: input.bundle.taskId } : {}),
-    queueItemIds,
-    status,
-    reason,
-    bundlePath: input.mergePath,
-    ...(patchPath ? { patchPath } : {}),
-    changedPaths: [...input.bundle.changedPaths],
-    changedRegions: [...input.bundle.changedRegions],
-    lockScope: lockKeys.scope,
-    lockKeys: [...lockKeys.keys],
-    startedAt,
-    finishedAt: Date.now(),
-    dryRun: input.dryRun,
-    ...(extra.headBefore ? { headBefore: extra.headBefore } : {}),
-    ...(extra.headAfter ? { headAfter: extra.headAfter } : {}),
-    ...(extra.commit ? { commit: extra.commit } : {}),
-    lockPath: input.lock.lockPath,
-    lockToken: input.lock.token,
-    verification: summarizeAutonomousDecisionVerification(plannedVerificationCommands, verificationRuns),
-    finalGateSummary: summarizeAutonomousDecisionFinalGates(plannedVerificationCommands, verificationRuns),
-    commands,
-    ...(extra.error ? { error: extra.error } : {})
-  });
+  ): FrontierCodexAutonomousMergeDecision => {
+    const decision: Omit<FrontierCodexAutonomousMergeDecision, 'leaseReadback'> = {
+      kind: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
+      version: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_VERSION,
+      id: `frontier-swarm-codex-autonomous-decision:${input.bundle.jobId}:${randomUUID()}`,
+      ...(input.bundle.runId ? { runId: input.bundle.runId } : {}),
+      ...(input.bundle.planId ? { planId: input.bundle.planId } : {}),
+      jobId: input.bundle.jobId,
+      ...(input.bundle.taskId ? { taskId: input.bundle.taskId } : {}),
+      queueItemIds,
+      status,
+      reason,
+      bundlePath: input.mergePath,
+      ...(patchPath ? { patchPath } : {}),
+      changedPaths: [...input.bundle.changedPaths],
+      changedRegions: [...input.bundle.changedRegions],
+      lockScope: lockKeys.scope,
+      lockKeys: [...lockKeys.keys],
+      startedAt,
+      finishedAt: Date.now(),
+      dryRun: input.dryRun,
+      ...(extra.headBefore ? { headBefore: extra.headBefore } : {}),
+      ...(extra.headAfter ? { headAfter: extra.headAfter } : {}),
+      ...(extra.commit ? { commit: extra.commit } : {}),
+      lockPath: input.lock.lockPath,
+      lockToken: input.lock.token,
+      verification: summarizeAutonomousDecisionVerification(plannedVerificationCommands, verificationRuns),
+      finalGateSummary: summarizeAutonomousDecisionFinalGates(plannedVerificationCommands, verificationRuns),
+      commands,
+      ...(extra.error ? { error: extra.error } : {})
+    };
+    return {
+      ...decision,
+      leaseReadback: createCodexAutonomousDecisionLeaseReadback(decision, {
+        collectionHead,
+        leaseHead: extra.leaseHead
+      })
+    };
+  };
 
   if (input.bundle.staleAgainstHead || input.bundle.disposition === 'stale-against-head') {
     return finish('rerun', 'bundle is stale against the current repository head');
@@ -8353,7 +8511,6 @@ async function applyCodexMergeBundleAutonomously(input: {
 
   const headBefore = await readGitHead(input.cwd, commands);
   if (!headBefore) return finish('failed', 'unable to read repository head before apply');
-  const collectionHead = readCodexCollectionHead(input.bundle);
   const check = await runLoggedProcess('git', ['apply', '--check', patchPath], input.cwd);
   commands.push(check);
   if (collectionHead && collectionHead !== headBefore) {
@@ -8361,7 +8518,7 @@ async function applyCodexMergeBundleAutonomously(input: {
       return finish(
         'conflict-blocked',
         'repository head changed since bundle collection and git apply --check failed',
-        { headBefore: collectionHead, headAfter: headBefore }
+        { headBefore: collectionHead, headAfter: headBefore, leaseHead: headBefore }
       );
     }
     const revalidation = revalidateAutonomousHeadMoveCandidate({
@@ -8376,29 +8533,29 @@ async function applyCodexMergeBundleAutonomously(input: {
       priorDecisions: input.priorDecisions
     });
     if (!revalidation.ok) {
-      return finish('rerun', revalidation.reason, { headBefore: collectionHead, headAfter: headBefore });
+      return finish('rerun', revalidation.reason, { headBefore: collectionHead, headAfter: headBefore, leaseHead: headBefore });
     }
   }
-  if (check.status !== 0) return finish('conflict-blocked', 'git apply --check failed', { headBefore });
+  if (check.status !== 0) return finish('conflict-blocked', 'git apply --check failed', { headBefore, leaseHead: headBefore });
   const checkedHead = await readGitHead(input.cwd, commands);
   if (checkedHead && checkedHead !== headBefore) {
     return finish(
       'rerun',
       'repository head changed while checking patch',
-      { headBefore, headAfter: checkedHead }
+      { headBefore, headAfter: checkedHead, leaseHead: headBefore }
     );
   }
-  if (input.dryRun) return finish('checked', 'patch checked under autonomous apply lock', { headBefore, headAfter: checkedHead ?? headBefore });
+  if (input.dryRun) return finish('checked', 'patch checked under autonomous apply lock', { headBefore, headAfter: checkedHead ?? headBefore, leaseHead: headBefore });
 
   const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(input.bundle.jobId)}` : input.bundle.branchName;
   if (branchName) {
     const branch = await runLoggedProcess('git', ['switch', '-c', branchName], input.cwd);
     commands.push(branch);
-    if (branch.status !== 0) return finish('failed', 'git switch -c failed', { headBefore });
+    if (branch.status !== 0) return finish('failed', 'git switch -c failed', { headBefore, leaseHead: headBefore });
   }
   const apply = await runLoggedProcess('git', ['apply', patchPath], input.cwd);
   commands.push(apply);
-  if (apply.status !== 0) return finish('failed', 'git apply failed', { headBefore });
+  if (apply.status !== 0) return finish('failed', 'git apply failed', { headBefore, leaseHead: headBefore });
 
   const gates = plannedVerificationCommands;
   for (let gateIndex = 0; gateIndex < gates.length; gateIndex += 1) {
@@ -8415,12 +8572,14 @@ async function applyCodexMergeBundleAutonomously(input: {
         return finish('failed', `verification failed and rollback failed: ${gate.name}`, {
           headBefore,
           headAfter: headAfterRollback,
+          leaseHead: headBefore,
           error: `required gate failed: ${gate.name}`
         });
       }
       return finish('rejected', `verification failed: ${gate.name}`, {
         headBefore,
         headAfter: headAfterRollback,
+        leaseHead: headBefore,
         error: `required gate failed: ${gate.name}`
       });
     }
@@ -8430,7 +8589,8 @@ async function applyCodexMergeBundleAutonomously(input: {
     const headAfter = await readGitHead(input.cwd, commands);
     return finish('applied', gates.length ? 'patch applied and verification passed' : 'patch applied after git apply check', {
       headBefore,
-      headAfter
+      headAfter,
+      leaseHead: headBefore
     });
   }
   const preCommitHead = await readGitHead(input.cwd, commands);
@@ -8441,6 +8601,7 @@ async function applyCodexMergeBundleAutonomously(input: {
     return finish('failed', rollback.status === 0 ? 'unable to re-read repository head before commit; patch rolled back' : 'unable to re-read repository head before commit and rollback failed', {
       headBefore,
       headAfter: headAfterRollback,
+      leaseHead: headBefore,
       error: 'unable to read repository head before commit'
     });
   }
@@ -8450,6 +8611,7 @@ async function applyCodexMergeBundleAutonomously(input: {
     return finish(rollback.status === 0 ? 'rerun' : 'failed', rollback.status === 0 ? 'repository head changed before commit; patch rolled back for rerun' : 'repository head changed before commit and rollback failed', {
       headBefore,
       headAfter: preCommitHead,
+      leaseHead: headBefore,
       ...(rollback.status === 0 ? {} : { error: 'repository head changed before commit and rollback failed' })
     });
   }
@@ -8462,6 +8624,7 @@ async function applyCodexMergeBundleAutonomously(input: {
     return finish('failed', rollback.status === 0 ? 'git add failed; patch rolled back' : 'git add failed and rollback failed', {
       headBefore,
       headAfter: headAfterRollback,
+      leaseHead: headBefore,
       error: 'git add failed'
     });
   }
@@ -8486,6 +8649,7 @@ async function applyCodexMergeBundleAutonomously(input: {
     return finish('failed', rollback.status === 0 ? 'git commit failed; patch rolled back' : 'git commit failed and rollback failed', {
       headBefore,
       headAfter: headAfterRollback,
+      leaseHead: headBefore,
       error: 'git commit failed'
     });
   }
@@ -8493,6 +8657,7 @@ async function applyCodexMergeBundleAutonomously(input: {
   return finish('committed', committedReason, {
     headBefore,
     headAfter,
+    leaseHead: headBefore,
     ...(headAfter ? { commit: headAfter } : {})
   });
 }
