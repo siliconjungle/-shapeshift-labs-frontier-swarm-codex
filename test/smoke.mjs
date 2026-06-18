@@ -2943,6 +2943,100 @@ assert.ok(!autoDrainClassificationQueue.byAction.rerun.includes('classification-
 assert.ok(!autoDrainClassificationQueue.byAction['record-only'].includes('classification-human-question'));
 assert.ok(!autoDrainClassificationQueue.promotions.some((promotion) => promotion.jobId === 'classification-evidence'));
 
+const unansweredHumanQuestionOutDir = path.join(tmp, 'auto-drain-unanswered-human-question');
+const humanQuestionPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'human-question-routing',
+    lanes: [{ id: 'question', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'human-question-marker',
+      lane: 'question',
+      ownedFiles: ['src/question.ts']
+    }]
+  }
+});
+const explicitQueueQuestionReason = 'human-question: owner=product; surface=src/question.ts; missing-authority=policy; question=Can this product behavior ship?; answer-code=choose:ship|hold';
+const unansweredHumanQuestionRun = await runCodexSwarm(humanQuestionPlan, {
+  outDir: unansweredHumanQuestionOutDir,
+  cwd: tmp,
+  dryRun: false,
+  autoDrain: {
+    maxIterations: 1,
+    checkStale: false
+  },
+  executor: async (input) => {
+    const runDir = path.dirname(input.paths.jobDir);
+    await writeSyntheticMergeBundle(runDir, 'unanswered-human-question', {
+      status: 'blocked',
+      mergeReadiness: 'blocked',
+      disposition: 'blocked',
+      riskLevel: 'high',
+      reasons: [explicitQueueQuestionReason],
+      queueItemIds: ['unanswered-human-question-task']
+    });
+    await fs.writeFile(input.paths.lastMessagePath, `${explicitQueueQuestionReason}\n`);
+    return { exitCode: 0, changedPaths: [], lastMessage: explicitQueueQuestionReason };
+  }
+});
+const unansweredHumanQuestionDashboard = JSON.parse(await fs.readFile(path.join(unansweredHumanQuestionOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(unansweredHumanQuestionRun.autoDrain.humanAnswers.available, false);
+assert.strictEqual(unansweredHumanQuestionRun.autoDrain.summary.humanAnswerContinuationCount, 0);
+assert.strictEqual(unansweredHumanQuestionDashboard.queueMetadata.actionCounts.blockCount, 1);
+assert.strictEqual(unansweredHumanQuestionDashboard.queueMetadata.actionCounts.trueBlockerCount, 1);
+assert.strictEqual(unansweredHumanQuestionDashboard.queueMetadata.operatorSummary.status, 'blocked');
+assert.strictEqual(unansweredHumanQuestionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 1);
+
+const answeredHumanQuestionOutDir = path.join(tmp, 'auto-drain-answered-human-question');
+await fs.mkdir(answeredHumanQuestionOutDir, { recursive: true });
+const answeredHumanQuestionAnswerLogPath = path.join(answeredHumanQuestionOutDir, 'human-action-answers.jsonl');
+await fs.writeFile(answeredHumanQuestionAnswerLogPath, JSON.stringify({
+  id: 'answer-answered-human-question',
+  queueItemId: 'answered-human-question-task',
+  route: 'choose:ship',
+  answer: 'Ship this behavior.',
+  evidencePath: 'human-answer-evidence.md'
+}) + '\n');
+const answeredHumanQuestionRun = await runCodexSwarm(humanQuestionPlan, {
+  outDir: answeredHumanQuestionOutDir,
+  cwd: tmp,
+  dryRun: false,
+  autoDrain: {
+    maxIterations: 1,
+    checkStale: false
+  },
+  executor: async (input) => {
+    const runDir = path.dirname(input.paths.jobDir);
+    await writeSyntheticMergeBundle(runDir, 'answered-human-question', {
+      status: 'blocked',
+      mergeReadiness: 'blocked',
+      disposition: 'blocked',
+      riskLevel: 'high',
+      reasons: [explicitQueueQuestionReason],
+      queueItemIds: ['answered-human-question-task']
+    });
+    await fs.writeFile(input.paths.lastMessagePath, `${explicitQueueQuestionReason}\n`);
+    return { exitCode: 0, changedPaths: [], lastMessage: explicitQueueQuestionReason };
+  }
+});
+const answeredHumanQuestionDashboard = JSON.parse(await fs.readFile(path.join(answeredHumanQuestionOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.available, true);
+assert.deepStrictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.paths, [answeredHumanQuestionAnswerLogPath]);
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedDecisionCount, 0);
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedContinuationCount, 1);
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.consumedCount, 1);
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.ignoredCount, 0);
+assert.strictEqual(answeredHumanQuestionRun.autoDrain.summary.humanAnswerContinuationCount, 1);
+assert.deepStrictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedJobIds, ['answered-human-question']);
+assert.deepStrictEqual(answeredHumanQuestionRun.autoDrain.humanAnswers.routedQueueItemIds, ['answered-human-question-task']);
+assert.deepStrictEqual(answeredHumanQuestionDashboard.queueMetadata.humanAnswers.routedContinuationIds, answeredHumanQuestionRun.autoDrain.humanAnswers.routedContinuationIds);
+assert.strictEqual(answeredHumanQuestionDashboard.queueMetadata.actionCounts.blockCount, 0);
+assert.strictEqual(answeredHumanQuestionDashboard.queueMetadata.actionCounts.trueBlockerCount, 0);
+assert.strictEqual(answeredHumanQuestionDashboard.queueMetadata.operatorSummary.status, 'ok');
+assert.strictEqual(answeredHumanQuestionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
+assert.deepStrictEqual(answeredHumanQuestionDashboard.queueMetadata.paths.humanAnswers, [answeredHumanQuestionAnswerLogPath]);
+
 const cleanApplyRepo = path.join(tmp, 'clean-apply-repo');
 await fs.mkdir(path.join(cleanApplyRepo, 'src'), { recursive: true });
 await execFileP('git', ['init'], { cwd: cleanApplyRepo });
@@ -3184,6 +3278,7 @@ assert.ok(cliSource.includes('--no-auto-drain-promote-patch-candidates'));
 assert.ok(cliSource.includes('--promote-patch-candidates[=true|false] --no-promote-patch-candidates'));
 assert.ok(cliSource.includes('--promotion-focused-command <cmd> --promotion-global-command <cmd> --promotion-global-glob <glob>'));
 assert.ok(cliSource.includes('--auto-drain-decision-log <path>'));
+assert.ok(cliSource.includes('--auto-drain-human-answer-log <path>'));
 assert.ok(cliSource.includes('--auto-drain-lock-path <path>'));
 assert.ok(cliSource.includes('--auto-drain-lock-timeout-ms <n>'));
 assert.ok(cliSource.includes('--auto-drain-lock-stale-ms <n>'));
@@ -3194,6 +3289,7 @@ assert.ok(cliSource.includes("promotePatchCandidates: disableAutoDrainPatchCandi
 assert.ok(cliSource.includes("args['no-promote-patch-candidates']"));
 assert.ok(cliSource.includes("promotePatchCandidates: disablePatchCandidatePromotion ? false : optionalBoolArg(args.promotePatchCandidates ?? args['promote-patch-candidates'])"));
 assert.ok(cliSource.includes("args['auto-drain-decision-log']"));
+assert.ok(cliSource.includes("args['auto-drain-human-answer-log']"));
 assert.ok(cliSource.includes("args['auto-drain-lock-path']"));
 assert.ok(cliSource.includes('autonomous coordinator drain work'));
 assert.ok(cliSource.includes('frontier.swarm.coordinator-agent-drain-work contract'));

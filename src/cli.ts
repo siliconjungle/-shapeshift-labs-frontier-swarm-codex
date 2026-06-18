@@ -71,6 +71,7 @@ try {
         globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
         globalGlobs: listArg(args.globalGlob ?? args['global-glob']),
         decisionLogPath: stringArg(args.autoDrainDecisionLog ?? args['auto-drain-decision-log'] ?? args.decisionLog ?? args['decision-log']),
+        humanAnswerLogPath: stringArg(args.autoDrainHumanAnswerLog ?? args['auto-drain-human-answer-log'] ?? args.humanAnswerLog ?? args['human-answer-log']),
         lockPath: stringArg(args.autoDrainLockPath ?? args['auto-drain-lock-path'] ?? args.lockPath ?? args['lock-path']),
         lockTimeoutMs: numberArg(args.autoDrainLockTimeoutMs ?? args['auto-drain-lock-timeout-ms'] ?? args.lockTimeoutMs ?? args['lock-timeout-ms'], undefined),
         lockStaleMs: numberArg(args.autoDrainLockStaleMs ?? args['auto-drain-lock-stale-ms'] ?? args.lockStaleMs ?? args['lock-stale-ms'], undefined)
@@ -221,7 +222,7 @@ function printHelp() {
     '  --no-auto-drain-promote-patch-candidates',
     '  --promote-patch-candidates[=true|false] --no-promote-patch-candidates (collect/drain: promote safe patch candidates only when coordinator gates are configured)',
     '  --promotion-focused-command <cmd> --promotion-global-command <cmd> --promotion-global-glob <glob> (collect promotion gates; aliases: --focused-command/--global-command/--global-glob)',
-    '  --auto-drain-decision-log <path> --auto-drain-lock-path <path>',
+    '  --auto-drain-decision-log <path> --auto-drain-human-answer-log <path> --auto-drain-lock-path <path>',
     '  --auto-drain-lock-timeout-ms <n> --auto-drain-lock-stale-ms <n>',
     '  --focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)',
     '',
