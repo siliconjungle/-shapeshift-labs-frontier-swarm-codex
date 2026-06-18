@@ -18,10 +18,12 @@ import {
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
   createCodexResourceAllocation,
+  estimateCodexRunCost,
   deriveCodexAutonomousApplyLockKeys,
   discoverCodexHandoffArtifacts,
   normalizeCodexApprovalPolicy,
   normalizeCodexModelFlag,
+  normalizeCodexRunMetrics,
   readCodexPidManifest,
   renderCodexPrompt,
   runCodexSwarm,
@@ -167,6 +169,45 @@ assert.throws(() => buildCodexArgs(unsupportedPlanJob, {
   modelPolicy: 'plan'
 }), unsupportedModelError);
 assert.strictEqual(normalizeCodexApprovalPolicy('on_request'), 'on-request');
+const normalizedUsage = normalizeCodexRunMetrics({
+  model: 'gpt-5.5',
+  usage: {
+    input_tokens: 1000,
+    output_tokens: 250,
+    input_token_details: { cached_tokens: 400 }
+  }
+});
+assert.deepStrictEqual({
+  inputTokens: normalizedUsage.inputTokens,
+  cachedInputTokens: normalizedUsage.cachedInputTokens,
+  uncachedInputTokens: normalizedUsage.uncachedInputTokens,
+  outputTokens: normalizedUsage.outputTokens,
+  totalTokens: normalizedUsage.totalTokens,
+  hasTokenUsage: normalizedUsage.hasTokenUsage
+}, {
+  inputTokens: 1000,
+  cachedInputTokens: 400,
+  uncachedInputTokens: 600,
+  outputTokens: 250,
+  totalTokens: 1250,
+  hasTokenUsage: true
+});
+const normalizedUncachedUsage = normalizeCodexRunMetrics({
+  usage: {
+    input_tokens: 1000,
+    uncached_input_tokens: 700,
+    output_tokens: 200
+  }
+});
+assert.strictEqual(normalizedUncachedUsage.cachedInputTokens, 300);
+assert.strictEqual(normalizedUncachedUsage.uncachedInputTokens, 700);
+const knownCost = estimateCodexRunCost(normalizedUsage);
+assert.strictEqual(knownCost.estimated, true);
+assert.strictEqual(knownCost.estimatedCostUsd, 0.0107);
+const unknownCost = estimateCodexRunCost({ ...normalizedUsage, model: 'future-codex-model' });
+assert.strictEqual(unknownCost.estimated, false);
+assert.strictEqual(unknownCost.reason, 'unknown-model-pricing');
+assert.strictEqual(Object.hasOwn(unknownCost, 'estimatedCostUsd'), false);
 const copyArgs = buildCodexArgs(plan.jobs[0], {
   outDir: tmp,
   workspacePath: tmp,
@@ -252,7 +293,16 @@ const result = await runCodexSwarm(plan, {
     await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
     await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), 'export function action() { return 1; }\n');
     await fs.writeFile(input.paths.lastMessagePath, 'done\n');
-    return { exitCode: 0, changedPaths: ['src/runtime/action.ts'], lastMessage: 'done' };
+    return {
+      exitCode: 0,
+      changedPaths: ['src/runtime/action.ts'],
+      lastMessage: 'done',
+      metrics: {
+        inputTokens: 1200,
+        cachedInputTokens: 200,
+        outputTokens: 300
+      }
+    };
   }
 });
 assert.strictEqual(result.ok, true);
@@ -261,6 +311,16 @@ assert.ok(result.proof.hash);
 assert.ok(await exists(path.join(tmp, 'run', 'coordinator-dashboard.json')));
 const dashboard = JSON.parse(await fs.readFile(path.join(tmp, 'run', 'coordinator-dashboard.json'), 'utf8'));
 assert.strictEqual(dashboard.queueMetadata.kind, 'frontier.swarm-codex.dashboard-queue-metadata');
+assert.strictEqual(dashboard.costSummary.kind, 'frontier.swarm-codex.dashboard-cost-summary');
+assert.strictEqual(dashboard.costSummary.jobsWithTokenUsage, 1);
+assert.strictEqual(dashboard.costSummary.estimatedJobCount, 1);
+assert.strictEqual(dashboard.costSummary.unknownPricingJobCount, 0);
+assert.strictEqual(dashboard.costSummary.inputTokens, 1200);
+assert.strictEqual(dashboard.costSummary.cachedInputTokens, 200);
+assert.strictEqual(dashboard.costSummary.uncachedInputTokens, 1000);
+assert.strictEqual(dashboard.costSummary.outputTokens, 300);
+assert.strictEqual(dashboard.costSummary.estimatedCostUsd, 0.0141);
+assert.deepStrictEqual(dashboard.costSummary.byModel.map((entry) => [entry.model, entry.estimatedCostUsd]), [['gpt-5.5', 0.0141]]);
 assert.deepStrictEqual(dashboard.operatorSummary, dashboard.queueMetadata.operatorSummary);
 assert.strictEqual(dashboard.operatorSummary.kind, 'frontier.swarm-codex.dashboard-operator-queue');
 assert.strictEqual(dashboard.operatorSummary.available, dashboard.queueMetadata.available);
@@ -296,6 +356,12 @@ assert.ok(semanticImports.summary.sourceMapMappingCount >= 1);
 assert.ok(semanticImports.summary.lossCount >= 1);
 assert.ok(semanticImports.summary.semanticIndex.symbols >= 1);
 assert.ok(semanticImports.summary.readiness['ready-with-losses'] >= 1 || semanticImports.summary.readiness['ready'] >= 1);
+assert.strictEqual(result.run.results[0].metadata.codexRunMetrics.inputTokens, 1200);
+assert.strictEqual(result.run.results[0].metadata.codexRunMetrics.cachedInputTokens, 200);
+assert.strictEqual(result.run.results[0].metadata.codexRunMetrics.uncachedInputTokens, 1000);
+assert.strictEqual(result.run.results[0].metadata.codexRunMetrics.outputTokens, 300);
+assert.strictEqual(result.run.results[0].metadata.codexCostEstimate.estimated, true);
+assert.strictEqual(result.run.results[0].metadata.codexCostEstimate.estimatedCostUsd, 0.0141);
 assert.strictEqual(result.run.results[0].mergeReadiness, 'patch-candidate');
 const mergeBundlePath = result.run.results[0].evidencePaths.find((entry) => entry.endsWith('merge.json'));
 const mergeBundle = JSON.parse(await fs.readFile(mergeBundlePath, 'utf8'));
@@ -303,6 +369,54 @@ assert.strictEqual(mergeBundle.disposition, 'needs-port');
 assert.deepStrictEqual(mergeBundle.queueItemIds, ['runtime-action']);
 assert.strictEqual(mergeBundle.metadata.semanticImport.total, 1);
 assert.ok(mergeBundle.metadata.semanticImport.sourceMapCount >= 1);
+assert.strictEqual(mergeBundle.metadata.codexRunMetrics.inputTokens, 1200);
+assert.strictEqual(mergeBundle.metadata.codexCostEstimate.estimatedCostUsd, 0.0141);
+const unknownPricingPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'unknown-pricing',
+    compute: [{ id: 'codex.custom', kind: 'codex', model: 'future-codex-model' }],
+    policy: { defaultCompute: 'codex.custom', defaultConcurrency: 1 },
+    lanes: [{ id: 'cost', allowedGlobs: ['cost.txt'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'cost-task',
+      lane: 'cost',
+      ownedFiles: ['cost.txt']
+    }]
+  }
+});
+const unknownPricingRun = await runCodexSwarm(unknownPricingPlan, {
+  outDir: path.join(tmp, 'unknown-pricing-run'),
+  cwd: tmp,
+  autoDrain: false,
+  dryRun: false,
+  executor: async (input) => {
+    await fs.writeFile(input.paths.lastMessagePath, 'unknown pricing\n');
+    return {
+      exitCode: 0,
+      changedPaths: [],
+      lastMessage: 'unknown pricing',
+      metrics: {
+        inputTokens: 100,
+        outputTokens: 50
+      }
+    };
+  }
+});
+assert.strictEqual(unknownPricingRun.ok, true);
+assert.strictEqual(unknownPricingRun.run.results[0].metadata.codexCostEstimate.estimated, false);
+assert.strictEqual(unknownPricingRun.run.results[0].metadata.codexCostEstimate.reason, 'unknown-model-pricing');
+assert.strictEqual(Object.hasOwn(unknownPricingRun.run.results[0].metadata.codexCostEstimate, 'estimatedCostUsd'), false);
+const unknownPricingDashboard = JSON.parse(await fs.readFile(path.join(tmp, 'unknown-pricing-run', 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(unknownPricingDashboard.costSummary.jobsWithTokenUsage, 1);
+assert.strictEqual(unknownPricingDashboard.costSummary.estimatedJobCount, 0);
+assert.strictEqual(unknownPricingDashboard.costSummary.unknownPricingJobCount, 1);
+assert.deepStrictEqual(unknownPricingDashboard.costSummary.unknownPricing, [{
+  jobId: unknownPricingRun.run.results[0].jobId,
+  model: 'future-codex-model',
+  reason: 'unknown-model-pricing'
+}]);
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);

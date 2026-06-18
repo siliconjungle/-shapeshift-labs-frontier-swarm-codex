@@ -56,6 +56,9 @@ import {
 
 export const FRONTIER_SWARM_CODEX_DEFAULT_MODEL = FRONTIER_SWARM_DEFAULT_MODEL;
 export const FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT = FRONTIER_SWARM_DEFAULT_REASONING_EFFORT;
+export const FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE = 'https://developers.openai.com/api/docs/pricing';
+export const FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE_CHECKED_AT = '2026-06-18';
+export const FRONTIER_SWARM_CODEX_MODEL_PRICING_UNIT_TOKENS = 1_000_000;
 export const FRONTIER_SWARM_CODEX_SUPPORTED_MODELS = [
   'gpt-5.5',
   'gpt-5.4-mini',
@@ -96,6 +99,8 @@ export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND = 'frontier.swa
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND = 'frontier.swarm-codex.dashboard-operator-queue';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_KIND = 'frontier.swarm-codex.dashboard-cost-summary';
+export const FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_VERSION = 1;
 const DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIXES = [
   'human-question:',
   'human question:',
@@ -111,6 +116,32 @@ const CODEX_WORKER_HUMAN_QUESTION_CONTRACT = [
 ];
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
+export type FrontierCodexCostEstimateReason =
+  | 'missing-model'
+  | 'missing-token-breakdown'
+  | 'missing-token-usage'
+  | 'unknown-model-pricing';
+
+export interface FrontierCodexModelPricing {
+  model: string;
+  currency: 'USD';
+  unitTokens: number;
+  inputUsdPerUnit: number;
+  cachedInputUsdPerUnit: number;
+  outputUsdPerUnit: number;
+  source: string;
+  sourceCheckedAt: string;
+}
+
+// Standard direct OpenAI API rates, verified against the official pricing page on 2026-06-18.
+// The catalog is intentionally exact-model only so unknown or renamed models do not look free.
+export const FRONTIER_SWARM_CODEX_MODEL_PRICING: Readonly<Record<string, FrontierCodexModelPricing>> = {
+  'gpt-5.5': codexModelPricing('gpt-5.5', 5, 0.5, 30),
+  'gpt-5.4': codexModelPricing('gpt-5.4', 2.5, 0.25, 15),
+  'gpt-5.4-mini': codexModelPricing('gpt-5.4-mini', 0.75, 0.075, 4.5),
+  'gpt-5.4-nano': codexModelPricing('gpt-5.4-nano', 0.2, 0.02, 1.25),
+  'gpt-5.3-codex': codexModelPricing('gpt-5.3-codex', 1.75, 0.175, 14)
+};
 
 const DEFAULT_WORKSPACE_INCLUDES = ['AGENTS.md', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'config'];
 const DEFAULT_WORKSPACE_EXCLUDES = [
@@ -312,10 +343,56 @@ export interface FrontierCodexBrowserAllocation {
   headless?: boolean;
 }
 
+export interface FrontierCodexRunMetricsInput {
+  model?: string | null;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  uncachedInputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  usage?: unknown;
+  metadata?: unknown;
+}
+
+export interface FrontierCodexRunMetrics {
+  model?: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  hasTokenUsage: boolean;
+}
+
+export interface FrontierCodexRunCostEstimate {
+  estimated: boolean;
+  reason?: FrontierCodexCostEstimateReason;
+  model?: string;
+  pricingModel?: string;
+  currency: 'USD';
+  unitTokens: number;
+  source: string;
+  sourceCheckedAt: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputCostUsd?: number;
+  cachedInputCostUsd?: number;
+  uncachedInputCostUsd?: number;
+  outputCostUsd?: number;
+  estimatedCostUsd?: number;
+  pricing?: FrontierCodexModelPricing;
+}
+
 export interface FrontierCodexResourceAllocation {
   capabilities: string[];
   resources: Record<string, number>;
   env: Record<string, string>;
+  model?: string;
+  modelPricing?: FrontierCodexModelPricing;
+  modelPricingUnknownReason?: FrontierCodexCostEstimateReason;
   browser?: FrontierCodexBrowserAllocation;
 }
 
@@ -845,6 +922,7 @@ export interface FrontierCodexExecutorResult {
   signal?: string;
   changedPaths?: readonly string[];
   lastMessage?: string;
+  metrics?: FrontierCodexRunMetricsInput;
   error?: unknown;
 }
 
@@ -1158,6 +1236,53 @@ export interface FrontierCodexDashboardHumanQuestions {
   jobIds: string[];
   taskIds: string[];
   reasons: string[];
+}
+
+export interface FrontierCodexDashboardCostModelSummary {
+  model: string;
+  jobCount: number;
+  estimatedJobCount: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+}
+
+export interface FrontierCodexDashboardCostUnknownPricing {
+  jobId: string;
+  model?: string;
+  reason: FrontierCodexCostEstimateReason;
+}
+
+export interface FrontierCodexDashboardCostSummary {
+  kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_VERSION;
+  source: 'run-results-metadata';
+  available: boolean;
+  currency: 'USD';
+  unitTokens: number;
+  pricingSource: string;
+  pricingSourceCheckedAt: string;
+  jobCount: number;
+  jobsWithTokenUsage: number;
+  estimatedJobCount: number;
+  unknownPricingJobCount: number;
+  missingUsageJobCount: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputCostUsd: number;
+  cachedInputCostUsd: number;
+  uncachedInputCostUsd: number;
+  outputCostUsd: number;
+  estimatedCostUsd: number;
+  byModel: FrontierCodexDashboardCostModelSummary[];
+  unknownPricing: FrontierCodexDashboardCostUnknownPricing[];
+  missingUsageJobIds: string[];
 }
 
 export type FrontierCodexDashboardOperatorQueueStatus = 'ok' | 'info' | 'warning' | 'blocked' | 'unavailable';
@@ -2470,7 +2595,7 @@ export async function runCodexJob(
     }
   });
   const startedAt = Date.now();
-  const execution = options.dryRun
+  const execution: FrontierCodexExecutorResult = options.dryRun
     ? { exitCode: 0, changedPaths: [] }
     : await (options.executor ?? spawnCodexExecutor)({
       job,
@@ -2484,6 +2609,11 @@ export async function runCodexJob(
       env: resourceAllocation.env,
       timeoutMs: job.compute.timeoutMs ?? options.jobTimeoutMs ?? 7200000
     });
+  const codexRunMetrics = normalizeCodexRunMetrics({
+    ...(execution.metrics ?? {}),
+    model: normalizeCodexMetricsModel(execution.metrics?.model) ?? resourceAllocation.model ?? job.compute.model ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL
+  });
+  const codexCostEstimate = estimateCodexRunCost(codexRunMetrics);
   const collected = await collectJobChangedPaths({
     workspace,
     fileSnapshot,
@@ -2542,9 +2672,15 @@ export async function runCodexJob(
     metadata: {
       ...(lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : {}),
       resourceAllocation,
+      codexRunMetrics,
+      codexCostEstimate,
       ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {}),
       codexHandoffArtifacts: handoffArtifacts
     }
+  };
+  const mergeMetadata = {
+    ...(codexRunMetrics.hasTokenUsage ? { codexRunMetrics, codexCostEstimate } : {}),
+    ...(semanticImport ? { semanticImport: semanticImport.sidecar.summary } : {})
   };
   const mergeBundle = createSwarmMergeBundle({
     runId: options.eventStream?.runId,
@@ -2559,7 +2695,7 @@ export async function runCodexJob(
       ...handoffArtifacts.map((artifact) => artifact.path)
     ]),
     queueItemIds: [job.taskId],
-    ...(semanticImport ? { metadata: { semanticImport: semanticImport.sidecar.summary } } : {})
+    ...(Object.keys(mergeMetadata).length ? { metadata: mergeMetadata } : {})
   });
   await fs.writeFile(paths.mergeBundlePath, JSON.stringify(mergeBundle, null, 2) + '\n');
   return result;
@@ -2789,6 +2925,110 @@ function resolveCodexReasoningEffort(
   return effort ? String(effort).trim() : undefined;
 }
 
+export function getCodexModelPricing(model: string | null | undefined): FrontierCodexModelPricing | undefined {
+  const key = normalizeCodexPricingModelKey(model);
+  return key ? FRONTIER_SWARM_CODEX_MODEL_PRICING[key] : undefined;
+}
+
+export function normalizeCodexRunMetrics(input: FrontierCodexRunMetricsInput = {}): FrontierCodexRunMetrics {
+  const usage = isObject(input.usage) ? input.usage : {};
+  const metadata = isObject(input.metadata) ? input.metadata : {};
+  const model = normalizeCodexMetricsModel(
+    input.model
+      ?? readStringField(usage, ['model'])
+      ?? readStringField(metadata, ['model'])
+  );
+  const directInputTokens = tokenCount(input.inputTokens)
+    ?? readNumberField(usage, ['inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens'])
+    ?? readNumberField(metadata, ['inputTokens', 'input_tokens']);
+  const directCachedInputTokens = tokenCount(input.cachedInputTokens)
+    ?? readNumberField(usage, ['cachedInputTokens', 'cached_input_tokens', 'inputCachedTokens', 'input_cached_tokens', 'promptCachedTokens', 'prompt_cached_tokens'])
+    ?? readNestedNumberField(usage, [
+      ['inputTokenDetails', 'cachedTokens'],
+      ['input_token_details', 'cached_tokens'],
+      ['input_tokens_details', 'cached_tokens'],
+      ['promptTokenDetails', 'cachedTokens'],
+      ['prompt_token_details', 'cached_tokens'],
+      ['prompt_tokens_details', 'cached_tokens']
+    ])
+    ?? readNumberField(metadata, ['cachedInputTokens', 'cached_input_tokens']);
+  const directUncachedInputTokens = tokenCount(input.uncachedInputTokens)
+    ?? readNumberField(usage, ['uncachedInputTokens', 'uncached_input_tokens', 'inputUncachedTokens', 'input_uncached_tokens'])
+    ?? readNumberField(metadata, ['uncachedInputTokens', 'uncached_input_tokens']);
+  const outputTokens = tokenCount(input.outputTokens)
+    ?? readNumberField(usage, ['outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens'])
+    ?? readNumberField(metadata, ['outputTokens', 'output_tokens'])
+    ?? 0;
+  const explicitTotalTokens = tokenCount(input.totalTokens)
+    ?? readNumberField(usage, ['totalTokens', 'total_tokens'])
+    ?? readNumberField(metadata, ['totalTokens', 'total_tokens']);
+  const cachedInputTokens = directCachedInputTokens ?? (
+    directInputTokens !== undefined && directUncachedInputTokens !== undefined
+      ? Math.max(0, directInputTokens - directUncachedInputTokens)
+      : 0
+  );
+  const uncachedInputTokens = directUncachedInputTokens ?? (
+    directInputTokens !== undefined
+      ? Math.max(0, directInputTokens - cachedInputTokens)
+      : 0
+  );
+  const inputTokens = directInputTokens ?? cachedInputTokens + uncachedInputTokens;
+  const totalTokens = explicitTotalTokens ?? inputTokens + outputTokens;
+  return {
+    ...(model ? { model } : {}),
+    inputTokens,
+    cachedInputTokens,
+    uncachedInputTokens,
+    outputTokens,
+    totalTokens,
+    hasTokenUsage: inputTokens > 0 || cachedInputTokens > 0 || uncachedInputTokens > 0 || outputTokens > 0 || totalTokens > 0
+  };
+}
+
+export function estimateCodexRunCost(metrics: FrontierCodexRunMetricsInput | FrontierCodexRunMetrics): FrontierCodexRunCostEstimate {
+  const normalized = 'hasTokenUsage' in metrics ? metrics : normalizeCodexRunMetrics(metrics);
+  const base = {
+    ...(normalized.model ? { model: normalized.model } : {}),
+    currency: 'USD' as const,
+    unitTokens: FRONTIER_SWARM_CODEX_MODEL_PRICING_UNIT_TOKENS,
+    source: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE,
+    sourceCheckedAt: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE_CHECKED_AT,
+    inputTokens: normalized.inputTokens,
+    cachedInputTokens: normalized.cachedInputTokens,
+    uncachedInputTokens: normalized.uncachedInputTokens,
+    outputTokens: normalized.outputTokens,
+    totalTokens: normalized.totalTokens
+  };
+  if (!normalized.hasTokenUsage) {
+    return { ...base, estimated: false, reason: 'missing-token-usage' };
+  }
+  if (normalized.inputTokens === 0 && normalized.outputTokens === 0) {
+    return { ...base, estimated: false, reason: 'missing-token-breakdown' };
+  }
+  if (!normalized.model) {
+    return { ...base, estimated: false, reason: 'missing-model' };
+  }
+  const pricing = getCodexModelPricing(normalized.model);
+  if (!pricing) {
+    return { ...base, estimated: false, reason: 'unknown-model-pricing' };
+  }
+  const uncachedInputCostUsd = roundUsd(normalized.uncachedInputTokens * pricing.inputUsdPerUnit / pricing.unitTokens);
+  const cachedInputCostUsd = roundUsd(normalized.cachedInputTokens * pricing.cachedInputUsdPerUnit / pricing.unitTokens);
+  const inputCostUsd = roundUsd(uncachedInputCostUsd + cachedInputCostUsd);
+  const outputCostUsd = roundUsd(normalized.outputTokens * pricing.outputUsdPerUnit / pricing.unitTokens);
+  return {
+    ...base,
+    estimated: true,
+    pricingModel: pricing.model,
+    pricing,
+    uncachedInputCostUsd,
+    cachedInputCostUsd,
+    inputCostUsd,
+    outputCostUsd,
+    estimatedCostUsd: roundUsd(inputCostUsd + outputCostUsd)
+  };
+}
+
 export function createCodexResourceAllocation(
   job: FrontierSwarmJob,
   input: { cwd?: string; outDir: string; workspacePath?: string; lease?: FrontierSwarmLease }
@@ -2802,8 +3042,18 @@ export function createCodexResourceAllocation(
     FRONTIER_SWARM_LANE: job.lane,
     FRONTIER_SWARM_CAPABILITIES: capabilities.join(',')
   };
+  const model = normalizeCodexMetricsModel(job.compute.model ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL);
+  const modelPricing = getCodexModelPricing(model);
+  const baseAllocation = {
+    capabilities,
+    resources,
+    env,
+    ...(model ? { model } : {}),
+    ...(modelPricing ? { modelPricing } : {}),
+    ...(!modelPricing ? { modelPricingUnknownReason: model ? 'unknown-model-pricing' as const : 'missing-model' as const } : {})
+  };
   const browser = requirements?.browser;
-  if (!browser) return { capabilities, resources, env };
+  if (!browser) return baseAllocation;
   const portPool = uniqueWorkspacePaths(browser.portPool ?? []);
   const port = portPool.length ? portPool[resourceSlot(job, input.lease, portPool.length)] : undefined;
   const profileDir = resolveBrowserProfileDir(job, browser.profileDir, browser.profileDirPrefix, input.cwd ?? process.cwd());
@@ -2823,9 +3073,7 @@ export function createCodexResourceAllocation(
   if (browser.headless !== undefined) env.FRONTIER_SWARM_BROWSER_HEADLESS = String(browser.headless);
   env.FRONTIER_SWARM_RESOURCE_ALLOCATION = JSON.stringify({ capabilities, resources, browser: browserAllocation });
   return {
-    capabilities,
-    resources,
-    env,
+    ...baseAllocation,
     browser: browserAllocation
   };
 }
@@ -2921,10 +3169,12 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
     child.stdin.end(input.prompt);
     child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timer);
+      const metrics = extractCodexRunMetricsFromEventText(await readOptionalText(input.paths.eventsPath) ?? '');
       resolve({
         exitCode: code ?? 1,
         ...(signal ? { signal } : {}),
-        lastMessage: await readOptionalText(input.paths.lastMessagePath)
+        lastMessage: await readOptionalText(input.paths.lastMessagePath),
+        ...(metrics ? { metrics } : {})
       });
     });
     child.on('error', (error: Error) => {
@@ -3160,6 +3410,7 @@ export async function writeSwarmCoordinatorSnapshot(
     return acc;
   }, {});
   const queueMetadata = createDashboardQueueMetadata(input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null, input.autoDrain ?? null);
+  const costSummary = createCodexDashboardCostSummary(input.run.results);
   const dashboard = {
     kind: 'frontier.swarm-codex.coordinator-dashboard',
     version: 1,
@@ -3171,6 +3422,7 @@ export async function writeSwarmCoordinatorSnapshot(
     summary: input.run.summary,
     byLane,
     mergeReadiness,
+    costSummary,
     queueMetadata,
     queueHealth: queueMetadata.queueHealth,
     humanQuestions: queueMetadata.humanQuestions,
@@ -3183,6 +3435,97 @@ export async function writeSwarmCoordinatorSnapshot(
   };
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(dashboard, null, 2) + '\n');
+}
+
+function createCodexDashboardCostSummary(results: FrontierSwarmRun['results']): FrontierCodexDashboardCostSummary {
+  const byModel = new Map<string, FrontierCodexDashboardCostModelSummary>();
+  const unknownPricing: FrontierCodexDashboardCostUnknownPricing[] = [];
+  const missingUsageJobIds: string[] = [];
+  const summary: FrontierCodexDashboardCostSummary = {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_VERSION,
+    source: 'run-results-metadata',
+    available: false,
+    currency: 'USD',
+    unitTokens: FRONTIER_SWARM_CODEX_MODEL_PRICING_UNIT_TOKENS,
+    pricingSource: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE,
+    pricingSourceCheckedAt: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE_CHECKED_AT,
+    jobCount: results.length,
+    jobsWithTokenUsage: 0,
+    estimatedJobCount: 0,
+    unknownPricingJobCount: 0,
+    missingUsageJobCount: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    uncachedInputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    inputCostUsd: 0,
+    cachedInputCostUsd: 0,
+    uncachedInputCostUsd: 0,
+    outputCostUsd: 0,
+    estimatedCostUsd: 0,
+    byModel: [],
+    unknownPricing,
+    missingUsageJobIds
+  };
+  for (const result of results) {
+    const metrics = readCodexRunMetrics(result.metadata);
+    const estimate = readCodexCostEstimate(result.metadata);
+    if (!metrics?.hasTokenUsage) {
+      summary.missingUsageJobCount += 1;
+      missingUsageJobIds.push(result.jobId);
+      continue;
+    }
+    summary.available = true;
+    summary.jobsWithTokenUsage += 1;
+    summary.inputTokens += metrics.inputTokens;
+    summary.cachedInputTokens += metrics.cachedInputTokens;
+    summary.uncachedInputTokens += metrics.uncachedInputTokens;
+    summary.outputTokens += metrics.outputTokens;
+    summary.totalTokens += metrics.totalTokens;
+    const model = metrics.model ?? estimate?.model ?? 'unknown';
+    const modelSummary = byModel.get(model) ?? {
+      model,
+      jobCount: 0,
+      estimatedJobCount: 0,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      uncachedInputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      estimatedCostUsd: 0
+    };
+    modelSummary.jobCount += 1;
+    modelSummary.inputTokens += metrics.inputTokens;
+    modelSummary.cachedInputTokens += metrics.cachedInputTokens;
+    modelSummary.uncachedInputTokens += metrics.uncachedInputTokens;
+    modelSummary.outputTokens += metrics.outputTokens;
+    modelSummary.totalTokens += metrics.totalTokens;
+    if (estimate?.estimated) {
+      summary.estimatedJobCount += 1;
+      modelSummary.estimatedJobCount += 1;
+      summary.inputCostUsd = roundUsd(summary.inputCostUsd + (estimate.inputCostUsd ?? 0));
+      summary.cachedInputCostUsd = roundUsd(summary.cachedInputCostUsd + (estimate.cachedInputCostUsd ?? 0));
+      summary.uncachedInputCostUsd = roundUsd(summary.uncachedInputCostUsd + (estimate.uncachedInputCostUsd ?? 0));
+      summary.outputCostUsd = roundUsd(summary.outputCostUsd + (estimate.outputCostUsd ?? 0));
+      summary.estimatedCostUsd = roundUsd(summary.estimatedCostUsd + (estimate.estimatedCostUsd ?? 0));
+      modelSummary.estimatedCostUsd = roundUsd(modelSummary.estimatedCostUsd + (estimate.estimatedCostUsd ?? 0));
+    } else {
+      const reason = estimate?.reason ?? 'unknown-model-pricing';
+      if (reason === 'unknown-model-pricing' || reason === 'missing-model') summary.unknownPricingJobCount += 1;
+      unknownPricing.push({
+        jobId: result.jobId,
+        ...(model !== 'unknown' ? { model } : {}),
+        reason
+      });
+    }
+    byModel.set(model, modelSummary);
+  }
+  summary.byModel = Array.from(byModel.values()).sort((left, right) => left.model.localeCompare(right.model));
+  summary.unknownPricing = unknownPricing.sort((left, right) => left.jobId.localeCompare(right.jobId));
+  summary.missingUsageJobIds = missingUsageJobIds.sort();
+  return summary;
 }
 
 function createDashboardQueueMetadata(
@@ -5129,6 +5472,149 @@ function readRawTask(job: FrontierSwarmJob): Record<string, unknown> {
   return isObject(metadata.source) ? metadata.source : {};
 }
 
+function codexModelPricing(
+  model: string,
+  inputUsdPerUnit: number,
+  cachedInputUsdPerUnit: number,
+  outputUsdPerUnit: number
+): FrontierCodexModelPricing {
+  return {
+    model,
+    currency: 'USD',
+    unitTokens: FRONTIER_SWARM_CODEX_MODEL_PRICING_UNIT_TOKENS,
+    inputUsdPerUnit,
+    cachedInputUsdPerUnit,
+    outputUsdPerUnit,
+    source: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE,
+    sourceCheckedAt: FRONTIER_SWARM_CODEX_MODEL_PRICING_SOURCE_CHECKED_AT
+  };
+}
+
+function normalizeCodexPricingModelKey(model: string | null | undefined): string | undefined {
+  const value = normalizeCodexMetricsModel(model);
+  return value ? value.toLowerCase() : undefined;
+}
+
+function normalizeCodexMetricsModel(model: string | null | undefined): string | undefined {
+  if (model == null) return undefined;
+  const value = String(model).trim();
+  if (!value) return undefined;
+  const normalized = value.toLowerCase();
+  if (normalized === 'auto' || normalized === 'default' || normalized === 'config' || normalized === 'config-default') return undefined;
+  return value;
+}
+
+function tokenCount(value: unknown): number | undefined {
+  const numberValue = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() ? Number(value.trim()) : Number.NaN;
+  if (!Number.isFinite(numberValue) || numberValue < 0) return undefined;
+  return Math.floor(numberValue);
+}
+
+function readStringField(source: Record<string, unknown>, names: readonly string[]): string | undefined {
+  for (const name of names) {
+    const value = source[name];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function readNumberField(source: Record<string, unknown>, names: readonly string[]): number | undefined {
+  for (const name of names) {
+    const value = tokenCount(source[name]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function readNestedNumberField(source: Record<string, unknown>, paths: readonly (readonly string[])[]): number | undefined {
+  for (const pathParts of paths) {
+    let current: unknown = source;
+    for (const part of pathParts) {
+      if (!isObject(current)) {
+        current = undefined;
+        break;
+      }
+      current = current[part];
+    }
+    const value = tokenCount(current);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function roundUsd(value: number): number {
+  const rounded = Math.round((value + Number.EPSILON) * 1_000_000_000_000) / 1_000_000_000_000;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function readCodexRunMetrics(metadata: unknown): FrontierCodexRunMetrics | undefined {
+  if (!isObject(metadata) || !isObject(metadata.codexRunMetrics)) return undefined;
+  return normalizeCodexRunMetrics(metadata.codexRunMetrics as FrontierCodexRunMetricsInput);
+}
+
+function readCodexCostEstimate(metadata: unknown): FrontierCodexRunCostEstimate | undefined {
+  if (!isObject(metadata) || !isObject(metadata.codexCostEstimate)) return undefined;
+  return metadata.codexCostEstimate as unknown as FrontierCodexRunCostEstimate;
+}
+
+function extractCodexRunMetricsFromEventText(text: string): FrontierCodexRunMetricsInput | undefined {
+  let latest: FrontierCodexRunMetrics | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    for (const candidate of collectCodexRunMetricCandidates(parsed)) {
+      const metrics = normalizeCodexRunMetrics(candidate);
+      if (metrics.hasTokenUsage) latest = metrics;
+    }
+  }
+  return latest;
+}
+
+function collectCodexRunMetricCandidates(value: unknown, depth = 0): FrontierCodexRunMetricsInput[] {
+  if (!isObject(value) || depth > 5) return [];
+  const candidates: FrontierCodexRunMetricsInput[] = [];
+  if (hasCodexTokenCounterField(value)) candidates.push(value as FrontierCodexRunMetricsInput);
+  for (const key of ['usage', 'tokenUsage', 'token_usage', 'metrics', 'runMetrics', 'run_metrics', 'data', 'message', 'response', 'result']) {
+    const child = value[key];
+    if (isObject(child)) candidates.push(...collectCodexRunMetricCandidates(child, depth + 1));
+  }
+  return candidates;
+}
+
+function hasCodexTokenCounterField(value: Record<string, unknown>): boolean {
+  return readNumberField(value, [
+    'inputTokens',
+    'input_tokens',
+    'promptTokens',
+    'prompt_tokens',
+    'cachedInputTokens',
+    'cached_input_tokens',
+    'uncachedInputTokens',
+    'uncached_input_tokens',
+    'outputTokens',
+    'output_tokens',
+    'completionTokens',
+    'completion_tokens',
+    'totalTokens',
+    'total_tokens'
+  ]) !== undefined || readNestedNumberField(value, [
+    ['inputTokenDetails', 'cachedTokens'],
+    ['input_token_details', 'cached_tokens'],
+    ['input_tokens_details', 'cached_tokens'],
+    ['promptTokenDetails', 'cachedTokens'],
+    ['prompt_token_details', 'cached_tokens'],
+    ['prompt_tokens_details', 'cached_tokens']
+  ]) !== undefined;
+}
+
 function normalizeWorkspacePath(value: string): string | undefined {
   const clean = value.replace(/\\/g, '/').replace(/\/+$/, '');
   if (!clean || clean.includes('\0') || clean.includes('*') || path.isAbsolute(clean)) return undefined;
@@ -5466,6 +5952,9 @@ function formatResourceAllocation(allocation: FrontierCodexResourceAllocation): 
     allocation.browser?.port ? `browser.port=${allocation.browser.port}` : undefined,
     allocation.browser?.profileDir ? `browser.profileDir=${allocation.browser.profileDir}` : undefined,
     allocation.browser?.headless === undefined ? undefined : `browser.headless=${allocation.browser.headless}`,
+    allocation.model ? `model=${allocation.model}` : undefined,
+    allocation.modelPricing ? `modelPricing=${allocation.modelPricing.model}` : undefined,
+    allocation.modelPricingUnknownReason ? `modelPricingUnknownReason=${allocation.modelPricingUnknownReason}` : undefined,
     Object.keys(allocation.env).length ? `env=${Object.keys(allocation.env).sort().join(',')}` : undefined
   ].filter((value): value is string => !!value);
   return entries.length ? entries : ['none'];
