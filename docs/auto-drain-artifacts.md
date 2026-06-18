@@ -5,7 +5,7 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 ## Read Order
 
 1. Start with `swarm-results.json` for the top-level run result, worker run/proof payload, and embedded `autoDrain` and `autoDrainArtifacts` summaries.
-2. Read `coordinator-dashboard.json` when a UI needs the dashboard-shaped snapshot with lane counts, merge readiness counts, `queueMetadata`, `queueHealth`, `humanQuestions`, proof, event stream, PID manifest path, and the same auto-drain summaries.
+2. Read `coordinator-dashboard.json` when a UI needs the dashboard-shaped snapshot with lane counts, merge readiness counts, `queueMetadata`, `queueHealth`, `humanQuestions`, `operatorSummary`, proof, event stream, PID manifest path, and the same auto-drain summaries.
 3. Read `auto-drain/auto-drain.json` for the canonical auto-drain ledger, including every iteration, admission result, grouping result, apply result, lock summary, terminal jobs, blocked jobs, and aggregate counts.
 4. Use the `autoDrainArtifacts` object from either `swarm-results.json`, `coordinator-dashboard.json`, or `auto-drain/auto-drain.json` as the compact path index for per-iteration artifacts.
 5. Drill into `auto-drain/collection-NN/*`, `auto-drain/auto-drain-groups-NN.json`, and `auto-drain/apply-NN/*` only when a dashboard needs per-iteration details.
@@ -15,7 +15,7 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 | Artifact | Scope | Primary consumers | Contents |
 | --- | --- | --- | --- |
 | `swarm-results.json` | Whole run | CI, coordinator handoff, dashboards that want one read | `{ ok, outDir, run, proof }` plus `autoDrain` and `autoDrainArtifacts` when auto-drain ran. |
-| `coordinator-dashboard.json` | Whole run | Dashboards and status views | Dashboard-normalized run summary, `byLane`, `mergeReadiness`, proof, event stream metadata, PID manifest path, `autoDrain`, and `autoDrainArtifacts`. |
+| `coordinator-dashboard.json` | Whole run | Dashboards and status views | Dashboard-normalized run summary, `byLane`, `mergeReadiness`, root `queueHealth`, `humanQuestions`, `operatorSummary`, proof, event stream metadata, PID manifest path, `autoDrain`, `queueMetadata`, and `autoDrainArtifacts`. |
 | `auto-drain/auto-drain.json` | Whole auto-drain pass | Coordinators, auditors, resume/debug tooling | Canonical auto-drain result with `iterations`, `lockKeys`, `lockScopeCounts`, terminal and blocked job ids, `summary`, and `artifacts`. |
 | `auto-drain/merge-index.json` | Latest collection snapshot | Review dashboards | Convenience copy of the latest iteration's merge index. |
 | `auto-drain/merge-admission.json` | Latest collection snapshot | Merge admission views | Convenience copy of the latest iteration's admission decision set. |
@@ -57,6 +57,16 @@ Auto-drain emits workflow states, queue actions, and apply decisions. Dashboards
 | Queue true blocker | `autoDrainArtifacts.mergeQueue.blockCount`, `coordinator-dashboard.json.queueMetadata.actionCounts.trueBlockerCount`, and `coordinator-dashboard.json.queueMetadata.queueHealth.trueBlockerCount` | `auto-drain/collection-NN/hierarchical-merge-queue.json` assignments with `action === "block"` and reasons including `true-blocker` | Show separately from conflict-blocked. This is a pre-apply queue/planner blocker based on an already blocked bundle state. |
 
 `needs-human-port` is also a workflow bucket, not automatically a human blocker. Use `autoDrainArtifacts.grouping.needsHumanPortCount` and `auto-drain/collection-NN/needs-human-port/<job>/merge.json` to show work that may need manual porting or review, but only `human-blocked` decisions and queue `block` actions should feed blocker badges.
+
+## Operator Summary Contract
+
+For human-facing status views and cards, read `coordinator-dashboard.json.operatorSummary` or the mirrored `coordinator-dashboard.json.queueMetadata.operatorSummary`. The summary is the dashboard display contract: render its `status`, `headline`, `cards[]`, and `counts` directly instead of recomputing human-facing state from raw queue counters.
+
+`operatorSummary.status` is one of `ok`, `info`, `warning`, `blocked`, or `unavailable`. Treat `blocked` as the only summary status that asks for human-facing blocker treatment. It is derived from true queue blockers and explicit `humanQuestions`; stale work, rerun work, conflict-blocked apply decisions, and `needs-human-port` buckets are not human blockers by themselves.
+
+Stable card ids are `coordinator-queues`, `applied-decisions`, `stale-rerun`, `true-blockers`, and `coordinator-review-artifacts`. Each card carries its own `label`, `value`, `detail`, `status`, `action`, and `sourceFields`; dashboards should use `sourceFields` to link diagnostics without changing the card's human-facing meaning.
+
+Use root `queueHealth` or `queueMetadata.queueHealth` when a UI needs drill-down counters, trend charts, or diagnostic filters. Use root `humanQuestions` or `queueMetadata.humanQuestions` only for explicit missing-authority questions that need a human answer. Do not convert `queueMetadata.bucketCounts.needsHumanPortCount`, `queueHealth.staleOrRerunCount`, `queueHealth.conflictBlockedDecisionCount`, or `autoDrainArtifacts.grouping.staleAgainstHeadCount` into blocker badges. Blocker UI should come from `operatorSummary.status`, the `true-blockers` card/count, and explicit `humanQuestions`.
 
 ## Per-Iteration Collection Artifacts
 

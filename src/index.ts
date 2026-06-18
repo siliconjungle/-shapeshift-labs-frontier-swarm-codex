@@ -86,6 +86,8 @@ export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND = 'frontier.swarm-
 export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND = 'frontier.swarm-codex.dashboard-human-questions';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND = 'frontier.swarm-codex.dashboard-operator-queue';
+export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION = 1;
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 
@@ -990,6 +992,7 @@ export interface FrontierCodexDashboardQueueMetadata {
   };
   queueHealth: FrontierCodexDashboardQueueHealth;
   humanQuestions: FrontierCodexDashboardHumanQuestions;
+  operatorSummary: FrontierCodexDashboardOperatorQueueSummary;
 }
 
 export interface FrontierCodexDashboardQueueHealth {
@@ -1028,6 +1031,37 @@ export interface FrontierCodexDashboardHumanQuestions {
   jobIds: string[];
   taskIds: string[];
   reasons: string[];
+}
+
+export type FrontierCodexDashboardOperatorQueueStatus = 'ok' | 'info' | 'warning' | 'blocked' | 'unavailable';
+
+export interface FrontierCodexDashboardOperatorQueueCard {
+  id: string;
+  label: string;
+  value: number;
+  detail: string;
+  status: FrontierCodexDashboardOperatorQueueStatus;
+  action: string;
+  sourceFields: string[];
+}
+
+export interface FrontierCodexDashboardOperatorQueueSummary {
+  kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION;
+  source: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND | 'not-collected';
+  available: boolean;
+  status: FrontierCodexDashboardOperatorQueueStatus;
+  headline: string;
+  cards: FrontierCodexDashboardOperatorQueueCard[];
+  counts: {
+    coordinatorQueues: number;
+    leases: number;
+    appliedDecisions: number;
+    staleOrRerun: number;
+    trueBlockers: number;
+    humanQuestions: number;
+    coordinatorReviewArtifacts: number;
+  };
 }
 
 export interface FrontierCodexSwarmAutoDrainResult {
@@ -2893,6 +2927,7 @@ export async function writeSwarmCoordinatorSnapshot(
     queueMetadata,
     queueHealth: queueMetadata.queueHealth,
     humanQuestions: queueMetadata.humanQuestions,
+    operatorSummary: queueMetadata.operatorSummary,
     autoDrain: input.autoDrain ?? null,
     autoDrainArtifacts: input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null,
     eventStream: input.eventStream ?? null,
@@ -2951,6 +2986,7 @@ function createDashboardQueueMetadata(
     coordinatorReviewTaskCount: artifacts?.reviewer.taskCount ?? 0,
     humanQuestionCount: humanQuestions.count
   };
+  const operatorSummary = createDashboardOperatorQueueSummary(queueHealth, humanQuestions);
   return {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_VERSION,
@@ -2980,8 +3016,131 @@ function createDashboardQueueMetadata(
       staleAgainstHeadCount: artifacts?.grouping.staleAgainstHeadCount ?? 0
     },
     queueHealth,
-    humanQuestions
+    humanQuestions,
+    operatorSummary
   };
+}
+
+function createDashboardOperatorQueueSummary(
+  queueHealth: FrontierCodexDashboardQueueHealth,
+  humanQuestions: FrontierCodexDashboardHumanQuestions
+): FrontierCodexDashboardOperatorQueueSummary {
+  const available = queueHealth.available;
+  const queueBlockActionCount = Math.max(0, queueHealth.trueBlockerCount);
+  const explicitHumanQuestionCount = Math.max(0, humanQuestions.count);
+  const trueBlockerCount = queueBlockActionCount + explicitHumanQuestionCount;
+  const status: FrontierCodexDashboardOperatorQueueStatus = !available
+    ? 'unavailable'
+    : trueBlockerCount > 0
+      ? 'blocked'
+      : queueHealth.staleOrRerunCount > 0
+        ? 'warning'
+        : queueHealth.appliedDecisionCount > 0
+          ? 'ok'
+          : queueHealth.activeCoordinatorQueueCount > 0 || queueHealth.localQueueCount > 0 || queueHealth.promotedCount > 0
+            ? 'info'
+            : 'ok';
+  const headline = createDashboardOperatorQueueHeadline(status, queueHealth, humanQuestions, trueBlockerCount, queueBlockActionCount);
+  return {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION,
+    source: queueHealth.source,
+    available,
+    status,
+    headline,
+    cards: [
+      {
+        id: 'coordinator-queues',
+        label: 'Coordinator queues',
+        value: queueHealth.activeCoordinatorQueueCount,
+        detail: `${queueHealth.leaseCount} leases, ${queueHealth.lockKeyCount} locks`,
+        status: queueHealth.activeCoordinatorQueueCount > 0 ? 'info' : 'ok',
+        action: 'Inspect queue artifacts when work is waiting for autonomous coordination.',
+        sourceFields: ['queueHealth.activeCoordinatorQueueCount', 'queueHealth.leaseCount', 'queueHealth.lockKeyCount']
+      },
+      {
+        id: 'applied-decisions',
+        label: 'Applied decisions',
+        value: queueHealth.appliedDecisionCount,
+        detail: `${queueHealth.committedDecisionCount} committed, ${queueHealth.recordOnlyCount} recorded only`,
+        status: queueHealth.appliedDecisionCount > 0 ? 'ok' : 'info',
+        action: 'Review applied decision logs for landed autonomous work.',
+        sourceFields: ['queueHealth.appliedDecisionCount', 'queueHealth.committedDecisionCount', 'queueHealth.recordOnlyCount']
+      },
+      {
+        id: 'stale-rerun',
+        label: 'Stale or rerun work',
+        value: queueHealth.staleOrRerunCount,
+        detail: `${queueHealth.staleCount} stale, ${queueHealth.rerunCount} rerun, ${queueHealth.conflictBlockedDecisionCount} current-head conflicts`,
+        status: queueHealth.staleOrRerunCount > 0 ? 'warning' : 'ok',
+        action: 'Refresh stale workers or resolve current-head conflicts before asking a human.',
+        sourceFields: ['queueHealth.staleOrRerunCount', 'queueHealth.staleCount', 'queueHealth.rerunCount', 'queueHealth.conflictBlockedDecisionCount']
+      },
+      {
+        id: 'true-blockers',
+        label: 'True blockers',
+        value: trueBlockerCount,
+        detail: `${formatDashboardOperatorQueueCount(queueBlockActionCount, 'queue block action')}, ${formatDashboardOperatorQueueCount(explicitHumanQuestionCount, 'explicit human question')}`,
+        status: trueBlockerCount > 0 ? 'blocked' : 'ok',
+        action: 'Escalate only queue blocks or explicit questions that cannot be decided from repo context.',
+        sourceFields: ['queueHealth.trueBlockerCount', 'humanQuestions.count']
+      },
+      {
+        id: 'coordinator-review-artifacts',
+        label: 'Coordinator review evidence',
+        value: queueHealth.coordinatorReviewCount,
+        detail: `${queueHealth.coordinatorReviewAssignmentCount} reviewer assignments, ${queueHealth.coordinatorReviewTaskCount} review tasks`,
+        status: queueHealth.coordinatorReviewCount > 0 ? 'info' : 'ok',
+        action: 'Use these artifacts to audit coordinator work; they are not active human blockers.',
+        sourceFields: ['queueHealth.coordinatorReviewCount', 'queueHealth.coordinatorReviewAssignmentCount', 'queueHealth.coordinatorReviewTaskCount']
+      }
+    ],
+    counts: {
+      coordinatorQueues: queueHealth.activeCoordinatorQueueCount,
+      leases: queueHealth.leaseCount,
+      appliedDecisions: queueHealth.appliedDecisionCount,
+      staleOrRerun: queueHealth.staleOrRerunCount,
+      trueBlockers: trueBlockerCount,
+      humanQuestions: humanQuestions.count,
+      coordinatorReviewArtifacts: queueHealth.coordinatorReviewCount
+    }
+  };
+}
+
+function createDashboardOperatorQueueHeadline(
+  status: FrontierCodexDashboardOperatorQueueStatus,
+  queueHealth: FrontierCodexDashboardQueueHealth,
+  humanQuestions: FrontierCodexDashboardHumanQuestions,
+  trueBlockerCount: number,
+  queueBlockActionCount: number
+): string {
+  if (status === 'unavailable') return 'Queue data has not been collected yet.';
+  if (status === 'blocked') {
+    const sources = formatDashboardOperatorQueueBlockerSources(queueBlockActionCount, humanQuestions.count);
+    return `${formatDashboardOperatorQueueCount(trueBlockerCount, 'true blocker')} (${sources}) ${trueBlockerCount === 1 ? 'needs' : 'need'} coordinator action.`;
+  }
+  if (status === 'warning') {
+    return `${queueHealth.staleOrRerunCount} stale or rerun item${queueHealth.staleOrRerunCount === 1 ? '' : 's'} should be collapsed or retried.`;
+  }
+  if (queueHealth.appliedDecisionCount > 0) {
+    return `${queueHealth.appliedDecisionCount} autonomous decision${queueHealth.appliedDecisionCount === 1 ? '' : 's'} applied with no true blockers.`;
+  }
+  if (status === 'info') return 'Coordinator queues are available; no true blockers are open.';
+  return 'No coordinator queue pressure is open.';
+}
+
+function formatDashboardOperatorQueueBlockerSources(queueBlockActionCount: number, humanQuestionCount: number): string {
+  const sources = [
+    humanQuestionCount > 0 ? formatDashboardOperatorQueueCount(humanQuestionCount, 'explicit human question') : '',
+    queueBlockActionCount > 0 ? formatDashboardOperatorQueueCount(queueBlockActionCount, 'queue block action') : ''
+  ].filter((entry) => entry.length > 0);
+  if (sources.length === 0) return formatDashboardOperatorQueueCount(0, 'true blocker');
+  if (sources.length === 1) return sources[0];
+  return `${sources[0]} and ${sources[1]}`;
+}
+
+function formatDashboardOperatorQueueCount(count: number, singular: string): string {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
 function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAutoDrainResult | null): {
