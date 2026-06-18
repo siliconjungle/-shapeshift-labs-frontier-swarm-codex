@@ -4211,6 +4211,364 @@ assert.strictEqual(collapsedHealthSections.get('completed-history').value, 7);
 assert.match(collapsedHealthSections.get('completed-history').detail, /3 superseded decisions/);
 assert.strictEqual(collapsedHealthSections.get('rerun-work').value, 0);
 assert.strictEqual(collapsedHealthSections.get('real-blockers').value, 0);
+
+const run8LikeOutDir = path.join(tmp, 'run8-like-queue-health-dashboard');
+const run8LikeArtifacts = createSyntheticAutoDrainArtifacts(run8LikeOutDir);
+Object.assign(run8LikeArtifacts.grouping, {
+  collectionCount: 1,
+  groupedBundleCount: 2,
+  readyToApplyCount: 2,
+  coordinatorReviewCount: 2,
+  staleAgainstHeadCount: 2
+});
+Object.assign(run8LikeArtifacts.reviewer, {
+  count: 2,
+  assignmentCount: 2,
+  taskCount: 2,
+  decisionCount: 2
+});
+Object.assign(run8LikeArtifacts.coordinatorAgent, {
+  count: 1,
+  assignmentCount: 2,
+  selectedCount: 2,
+  deferredCount: 0,
+  promoteCount: 0,
+  queueLocalCount: 0
+});
+Object.assign(run8LikeArtifacts.coordinatorAgentDrainWork, {
+  count: 1,
+  leaseCount: 2,
+  assignmentCount: 2,
+  terminalCount: 2,
+  nonTerminalCount: 0,
+  appliedCount: 2
+});
+Object.assign(run8LikeArtifacts.mergeQueue, {
+  count: 1,
+  scopeCount: 2,
+  applyLocalCount: 2,
+  promotedPatchCandidateCount: 2
+});
+Object.assign(run8LikeArtifacts.summary, {
+  decisionCount: 2,
+  committedDecisionCount: 2,
+  coordinatorAgentDrainWorkCount: 1,
+  mergeQueuePlanCount: 1,
+  reviewerPlanCount: 1
+});
+const run8LikeTasks = [{
+  jobId: 'run8-like-gate-ordering-job',
+  taskId: 'run8-like-gate-ordering-task',
+  queueItemId: 'run8-like-gate-ordering-task',
+  lane: 'gate-ordering',
+  changedPaths: ['packages/frontier-swarm-codex/src/index.ts'],
+  changedRegions: ['packages/frontier-swarm-codex/src/index.ts#run8LikeGateOrdering'],
+  commit: '1'.repeat(40)
+}, {
+  jobId: 'run8-like-review-label-job',
+  taskId: 'run8-like-review-label-task',
+  queueItemId: 'run8-like-review-label-task',
+  lane: 'review-labels',
+  changedPaths: ['packages/frontier-swarm-codex/test/smoke.mjs'],
+  changedRegions: ['packages/frontier-swarm-codex/test/smoke.mjs#run8LikeReviewLabels'],
+  commit: '2'.repeat(40)
+}];
+const run8LikeCollectedEntry = (task, bucket) => ({
+  jobId: task.jobId,
+  bucket,
+  outputDir: path.join(run8LikeOutDir, 'collection-01-post-apply', bucket, task.jobId),
+  mergePath: path.join(run8LikeOutDir, 'collection-01', 'ready-to-apply', task.jobId, 'merge.json'),
+  bundle: {
+    jobId: task.jobId,
+    taskId: task.taskId,
+    lane: task.lane,
+    queueItemIds: [task.queueItemId],
+    patchPath: path.join(run8LikeOutDir, 'collection-01', 'ready-to-apply', task.jobId, 'changes.patch'),
+    changedPaths: task.changedPaths,
+    changedRegions: task.changedRegions,
+    reasons: bucket === 'stale-against-head' ? ['stale-against-head'] : ['admitted-by-merge-admission'],
+    evidencePaths: [],
+    allowedWrites: task.changedPaths
+  }
+});
+const run8LikeQueueAssignment = (task, action) => ({
+  jobId: task.jobId,
+  taskId: task.taskId,
+  lane: task.lane,
+  title: task.taskId,
+  queueItemIds: [task.queueItemId],
+  action,
+  changedPaths: task.changedPaths,
+  changedRegions: task.changedRegions,
+  conflictingJobIds: [],
+  scopeId: `lane:${task.lane}`,
+  leaseKey: `merge:lane:${task.lane}`,
+  reasons: action === 'rerun' ? ['stale-against-head'] : ['admitted-by-merge-admission']
+});
+const run8LikeDrainAssignment = (task) => ({
+  id: `run8-like-drain-assignment:${task.jobId}`,
+  jobId: task.jobId,
+  taskId: task.taskId,
+  lane: task.lane,
+  title: task.taskId,
+  queueItemIds: [task.queueItemId],
+  queueId: `lane:${task.lane}`,
+  rootQueueId: 'root',
+  parentQueueIds: ['root'],
+  leaseId: `run8-like-lease:${task.lane}`,
+  leaseScope: `merge:lane:${task.lane}`,
+  assignedAction: 'apply-local',
+  decision: 'applied',
+  classification: 'terminal',
+  terminal: true,
+  reasons: ['admitted-by-merge-admission', 'lease-backed-cross-scope-apply'],
+  admitted: true,
+  changedPaths: task.changedPaths,
+  changedRegions: task.changedRegions,
+  conflictingJobIds: []
+});
+const run8LikeTerminalDecision = (task) => ({
+  id: `run8-like-terminal:${task.jobId}`,
+  jobId: task.jobId,
+  queueItemIds: [task.queueItemId],
+  queueId: `lane:${task.lane}`,
+  leaseId: `run8-like-lease:${task.lane}`,
+  leaseScope: `merge:lane:${task.lane}`,
+  assignedAction: 'apply-local',
+  decision: 'applied',
+  classification: 'terminal',
+  terminal: true,
+  reasons: ['admitted-by-merge-admission', 'lease-backed-cross-scope-apply']
+});
+const run8LikeDecisions = run8LikeTasks.map((task, index) => createSyntheticAutonomousDecision('committed', {
+  id: `run8-like-committed:${task.jobId}`,
+  jobId: task.jobId,
+  taskId: task.taskId,
+  queueItemIds: [task.queueItemId],
+  reason: 'patch committed and verification passed',
+  bundlePath: path.join(run8LikeOutDir, 'collection-01', 'ready-to-apply', task.jobId, 'merge.json'),
+  patchPath: path.join(run8LikeOutDir, 'collection-01', 'ready-to-apply', task.jobId, 'changes.patch'),
+  changedPaths: task.changedPaths,
+  changedRegions: task.changedRegions,
+  lockScope: 'semantic',
+  lockKeys: task.changedRegions.map((region) => `region:${region}`),
+  commit: task.commit,
+  finishedAt: run8LikeArtifacts.generatedAt + index + 1,
+  verification: {
+    planned: 1,
+    run: 1,
+    required: 1,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    skippedRequired: 0,
+    names: ['npm --prefix packages/frontier-swarm-codex run test'],
+    passedNames: ['npm --prefix packages/frontier-swarm-codex run test'],
+    failedNames: [],
+    skippedNames: [],
+    skippedRequiredNames: []
+  }
+}));
+const run8LikeCollection = {
+  outDir: path.join(run8LikeOutDir, 'collection-01'),
+  artifacts: {
+    collectionPath: path.join(run8LikeOutDir, 'collection-01', 'collection.json'),
+    hierarchicalMergeQueuePath: path.join(run8LikeOutDir, 'collection-01', 'hierarchical-merge-queue.json'),
+    queueOverlayPath: path.join(run8LikeOutDir, 'collection-01', 'queue-overlay.json')
+  },
+  buckets: {
+    'ready-to-apply': run8LikeTasks.map((task) => run8LikeCollectedEntry(task, 'ready-to-apply')),
+    'coordinator-review': [],
+    'failed-evidence': [],
+    'stale-against-head': []
+  },
+  hierarchicalMergeQueue: {
+    scopes: run8LikeTasks.map((task) => ({
+      id: `lane:${task.lane}`,
+      kind: 'lane',
+      title: task.lane,
+      lane: task.lane,
+      leaseKey: `merge:lane:${task.lane}`,
+      changedPaths: task.changedPaths,
+      changedRegions: task.changedRegions,
+      jobIds: [task.jobId]
+    })),
+    assignments: run8LikeTasks.map((task) => run8LikeQueueAssignment(task, 'apply-local'))
+  }
+};
+const run8LikePostApplyCollection = {
+  ...run8LikeCollection,
+  outDir: path.join(run8LikeOutDir, 'collection-01-post-apply'),
+  artifacts: {
+    collectionPath: path.join(run8LikeOutDir, 'collection-01-post-apply', 'collection.json'),
+    hierarchicalMergeQueuePath: path.join(run8LikeOutDir, 'collection-01-post-apply', 'hierarchical-merge-queue.json'),
+    queueOverlayPath: path.join(run8LikeOutDir, 'collection-01-post-apply', 'queue-overlay.json')
+  },
+  buckets: {
+    'ready-to-apply': [],
+    'coordinator-review': [],
+    'failed-evidence': [],
+    'stale-against-head': run8LikeTasks.map((task) => run8LikeCollectedEntry(task, 'stale-against-head'))
+  },
+  hierarchicalMergeQueue: {
+    ...run8LikeCollection.hierarchicalMergeQueue,
+    assignments: run8LikeTasks.map((task) => run8LikeQueueAssignment(task, 'rerun'))
+  }
+};
+const run8LikeAutoDrain = {
+  kind: 'frontier.swarm-codex.auto-drain',
+  version: 1,
+  ok: true,
+  enabled: true,
+  cwd: tmp,
+  runDir: run8LikeOutDir,
+  outDir: run8LikeOutDir,
+  generatedAt: run8LikeArtifacts.generatedAt,
+  iterations: [{
+    index: 1,
+    collection: run8LikeCollection,
+    postApplyCollection: run8LikePostApplyCollection,
+    postApplyCollectionPath: run8LikePostApplyCollection.artifacts.collectionPath,
+    admittedJobIds: run8LikeTasks.map((task) => task.jobId),
+    deferredJobIds: [],
+    readyJobIds: run8LikeTasks.map((task) => task.jobId),
+    coordinatorAgentDrain: {
+      summary: {
+        assignmentCount: 2,
+        selectedCount: 2,
+        deferredCount: 0,
+        applyLocalCount: 2,
+        queueLocalCount: 0,
+        promoteCount: 0,
+        selectedQueueLocalCount: 0,
+        selectedPromoteCount: 0,
+        deferredPromoteCount: 0,
+        scopeCount: 2
+      },
+      assignments: []
+    },
+    coordinatorAgentDrainWork: {
+      summary: {
+        leaseCount: 2,
+        assignmentCount: 2,
+        terminalCount: 2,
+        nonTerminalCount: 0,
+        promotedWorkCount: 0,
+        appliedCount: 2,
+        queuedCount: 0,
+        escalatedCount: 0,
+        rerunCount: 0,
+        rejectedCount: 0,
+        recordedCount: 0,
+        blockedCount: 0
+      },
+      leases: [],
+      assignments: run8LikeTasks.map(run8LikeDrainAssignment),
+      terminalDecisions: run8LikeTasks.map(run8LikeTerminalDecision)
+    },
+    grouping: { conflicts: [] },
+    apply: {
+      outDir: path.join(run8LikeOutDir, 'apply-01'),
+      decisionLogPath: path.join(run8LikeOutDir, 'apply-01', 'autonomous-merge-decisions.jsonl'),
+      decisions: run8LikeDecisions
+    }
+  }],
+  lockKeys: run8LikeDecisions.flatMap((decision) => decision.lockKeys),
+  lockScopeCounts: { semantic: run8LikeDecisions.length, path: 0, repo: 0 },
+  terminalJobIds: run8LikeTasks.map((task) => task.jobId),
+  blockedJobIds: [],
+  artifacts: run8LikeArtifacts,
+  summary: {
+    iterationCount: 1,
+    collectionCount: 1,
+    applyCount: 1,
+    terminalCount: 2,
+    blockedCount: 0,
+    conflictBlockedCount: 0,
+    humanBlockedCount: 0,
+    humanBlockedDecisionCount: 0,
+    answeredHumanBlockedCount: 0,
+    humanAnswerContinuationCount: 0,
+    committedDecisionCount: 2,
+    gatedDecisionCount: 2,
+    verificationGateCount: 2,
+    requiredVerificationGateCount: 2,
+    finalGateOk: true,
+    finalGateState: 'passed',
+    failedRequiredGateCount: 0,
+    skippedRequiredGateCount: 0,
+    finalGateContinuationDecisionCount: 0,
+    finalGateContinuationSkippedRequiredGateCount: 0,
+    remainingReadyCount: 0,
+    rerunTaskCount: 0,
+    admittedCount: 2,
+    deferredCount: 0,
+    reviewerAssignmentCount: 2,
+    reviewerTaskCount: 2,
+    patchStackCount: 2
+  }
+};
+const run8LikeDashboardPath = path.join(run8LikeOutDir, 'coordinator-dashboard.json');
+await writeSwarmCoordinatorSnapshot(run8LikeDashboardPath, {
+  ok: true,
+  outDir: run8LikeOutDir,
+  plan,
+  run: {
+    id: 'run8-like-dashboard-run',
+    jobs: run8LikeTasks.map((task) => ({
+      id: task.jobId,
+      taskId: task.taskId,
+      lane: task.lane,
+      title: task.taskId,
+      status: 'completed'
+    })),
+    results: run8LikeTasks.map((task) => ({
+      jobId: task.jobId,
+      status: 'completed',
+      mergeReadiness: 'verified-patch',
+      changedPaths: task.changedPaths,
+      evidencePaths: []
+    })),
+    summary: {}
+  },
+  proof: {},
+  autoDrain: run8LikeAutoDrain,
+  autoDrainArtifacts: run8LikeArtifacts
+});
+const run8LikeDashboard = JSON.parse(await fs.readFile(run8LikeDashboardPath, 'utf8'));
+assert.deepStrictEqual(
+  run8LikeDashboard.autonomousQueueHealth.sections.map((section) => section.id),
+  ['active-workers', 'coordinator-review', 'completed-history', 'rerun-work', 'real-blockers', 'human-questions']
+);
+const run8LikeSections = new Map(run8LikeDashboard.autonomousQueueHealth.sections.map((section) => [section.id, section]));
+assert.strictEqual(run8LikeDashboard.queueMetadata.bucketCounts.coordinatorReviewCount, 2);
+assert.strictEqual(run8LikeDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 2);
+assert.strictEqual(run8LikeDashboard.queueMetadata.queueHealth.coordinatorReviewCount, 2);
+assert.strictEqual(run8LikeDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount, 0);
+assert.strictEqual(run8LikeDashboard.queueMetadata.queueHealth.appliedDecisionCount, 2);
+assert.strictEqual(run8LikeDashboard.queueMetadata.queueHealth.committedDecisionCount, 2);
+assert.strictEqual(run8LikeDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
+assert.strictEqual(run8LikeDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
+assert.strictEqual(run8LikeDashboard.queueMetadata.humanQuestions.count, 0);
+assert.strictEqual(run8LikeDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
+assert.strictEqual(run8LikeDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
+assert.strictEqual(run8LikeDashboard.queueMetadata.operatorSummary.cards.find((card) => card.id === 'coordinator-review-artifacts').value, 2);
+assert.strictEqual(run8LikeDashboard.queueMetadata.operatorSummary.cards.find((card) => card.id === 'true-blockers').value, 0);
+assert.strictEqual(run8LikeDashboard.queueMetadata.mergeQueueHealth.counts.terminalDecisionCount, 4);
+assert.strictEqual(run8LikeDashboard.queueMetadata.mergeQueueHealth.counts.appliedDecisionCount, 2);
+assert.strictEqual(run8LikeDashboard.queueMetadata.mergeQueueHealth.counts.committedDecisionCount, 2);
+assert.strictEqual(run8LikeDashboard.queueMetadata.mergeQueueHealth.counts.rerunCandidateCount, 0);
+assert.strictEqual(run8LikeDashboard.autonomousQueueHealth.summary.completedHistoryCount, 2);
+assert.strictEqual(run8LikeDashboard.autonomousQueueHealth.summary.rerunWorkCount, 0);
+assert.strictEqual(run8LikeDashboard.autonomousQueueHealth.summary.realBlockerCount, 0);
+assert.strictEqual(run8LikeDashboard.autonomousQueueHealth.summary.humanQuestionCount, 0);
+assert.strictEqual(run8LikeSections.get('coordinator-review').value, 2);
+assert.strictEqual(run8LikeSections.get('completed-history').value, 2);
+assert.strictEqual(run8LikeSections.get('rerun-work').value, 0);
+assert.strictEqual(run8LikeSections.get('real-blockers').value, 0);
+assert.strictEqual(run8LikeSections.get('human-questions').value, 0);
+assert.deepStrictEqual(run8LikeDashboard.autonomousQueueHealth.completedHistory.map((decision) => decision.status), ['committed', 'committed']);
+assert.deepStrictEqual(run8LikeDashboard.mergeQueueHealth.appliedDecisions.map((decision) => decision.commit), run8LikeTasks.map((task) => task.commit));
 const collapsedManifestHead = 'f'.repeat(40);
 const closedStaleEntry = createSyntheticCollectedRerunEntry(collapsedDecisionOutDir, {
   jobId: 'closed-stale-old-job',
@@ -5292,6 +5650,8 @@ function createSyntheticAutonomousDecision(status, overrides = {}) {
     ...(typeof overrides.patchPath === 'string' ? { patchPath: overrides.patchPath } : {}),
     ...(typeof overrides.headBefore === 'string' ? { headBefore: overrides.headBefore } : {}),
     ...(typeof overrides.headAfter === 'string' ? { headAfter: overrides.headAfter } : {}),
+    ...(typeof overrides.commit === 'string' ? { commit: overrides.commit } : {}),
+    ...(overrides.verification ? { verification: overrides.verification } : {}),
     startedAt: overrides.startedAt ?? now,
     finishedAt: overrides.finishedAt ?? now,
     dryRun: overrides.dryRun ?? false,
