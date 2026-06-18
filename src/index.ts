@@ -12,6 +12,7 @@ import {
   FRONTIER_SWARM_MERGE_BUNDLE_VERSION,
   FRONTIER_SWARM_QUEUE_OVERLAY_KIND,
   FRONTIER_SWARM_QUEUE_OVERLAY_VERSION,
+  createSwarmHierarchicalMergeQueue,
   createSwarmMergeAdmission,
   createSwarmMergeBundle,
   createSwarmMergeIndex,
@@ -39,6 +40,7 @@ import {
   type FrontierSwarmMergeIndex,
   type FrontierSwarmLease,
   type FrontierSwarmManifestInput,
+  type FrontierSwarmHierarchicalMergeQueue,
   type FrontierSwarmPatchStackPlan,
   type FrontierSwarmPlan,
   type FrontierSwarmPlanInput,
@@ -305,6 +307,7 @@ export interface FrontierCodexCollectedBundle {
 export interface FrontierCodexCollectArtifacts {
   collectionPath: string;
   mergeIndexPath: string;
+  hierarchicalMergeQueuePath: string;
   queueOverlayPath: string;
   mergeAdmissionPath: string;
   reviewerLanePlanPath: string;
@@ -323,6 +326,14 @@ export interface FrontierCodexCollectArtifacts {
     patchStackCount: number;
     patchStackJobCount: number;
     conflictedPatchStackCount: number;
+    mergeQueueScopeCount: number;
+    mergeQueueApplyLocalCount: number;
+    mergeQueueQueueLocalCount: number;
+    mergeQueuePromoteCount: number;
+    mergeQueueRerunCount: number;
+    mergeQueueRejectCount: number;
+    mergeQueueBlockCount: number;
+    mergeQueueRecordOnlyCount: number;
     patchCount: number;
   };
 }
@@ -336,6 +347,7 @@ export interface FrontierCodexCollectResult {
   generatedAt: number;
   buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]>;
   mergeIndex: FrontierSwarmMergeIndex;
+  hierarchicalMergeQueue?: FrontierSwarmHierarchicalMergeQueue;
   mergeAdmission?: FrontierSwarmMergeAdmission;
   reviewerLanePlan?: FrontierSwarmReviewerLanePlan;
   patchStackPlan?: FrontierSwarmPatchStackPlan;
@@ -347,6 +359,10 @@ export interface FrontierCodexCollectResult {
     reviewerAssignmentCount?: number;
     reviewerTaskCount?: number;
     patchStackCount?: number;
+    mergeQueueScopeCount?: number;
+    mergeQueueApplyLocalCount?: number;
+    mergeQueueQueueLocalCount?: number;
+    mergeQueuePromoteCount?: number;
   };
   artifacts?: FrontierCodexCollectArtifacts;
 }
@@ -772,6 +788,7 @@ export interface FrontierCodexAutoDrainArtifactIteration {
   index: number;
   collectionPath: string;
   mergeIndexPath: string;
+  hierarchicalMergeQueuePath: string;
   queueOverlayPath: string;
   mergeAdmissionPath: string;
   reviewerLanePlanPath: string;
@@ -795,6 +812,14 @@ export interface FrontierCodexAutoDrainArtifactIteration {
   patchStackCount: number;
   patchStackJobCount: number;
   conflictedPatchStackCount: number;
+  mergeQueueScopeCount: number;
+  mergeQueueApplyLocalCount: number;
+  mergeQueueQueueLocalCount: number;
+  mergeQueuePromoteCount: number;
+  mergeQueueRerunCount: number;
+  mergeQueueRejectCount: number;
+  mergeQueueBlockCount: number;
+  mergeQueueRecordOnlyCount: number;
 }
 
 export interface FrontierCodexAutoDrainArtifactPathGroup {
@@ -831,6 +856,16 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     conflictedStackCount: number;
     patchCount: number;
   };
+  mergeQueue: FrontierCodexAutoDrainArtifactPathGroup & {
+    scopeCount: number;
+    applyLocalCount: number;
+    queueLocalCount: number;
+    promoteCount: number;
+    rerunCount: number;
+    rejectCount: number;
+    blockCount: number;
+    recordOnlyCount: number;
+  };
   iterations: FrontierCodexAutoDrainArtifactIteration[];
   summary: {
     pathCount: number;
@@ -838,6 +873,7 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     collectionCount: number;
     applyCount: number;
     admissionCount: number;
+    mergeQueuePlanCount: number;
     reviewerPlanCount: number;
     patchStackPlanCount: number;
     decisionCount: number;
@@ -2460,6 +2496,12 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     generatedAt,
     metadata: { source: FRONTIER_SWARM_CODEX_COLLECTION_KIND }
   });
+  const hierarchicalMergeQueue = createSwarmHierarchicalMergeQueue({
+    index: mergeIndex,
+    admission: mergeAdmission,
+    generatedAt,
+    metadata: { source: FRONTIER_SWARM_CODEX_COLLECTION_KIND }
+  });
   const reviewerLanePlan = createSwarmReviewerLanePlan({
     index: mergeIndex,
     admission: mergeAdmission,
@@ -2485,13 +2527,18 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     deferredCount: mergeAdmission.summary.deferredCount,
     reviewerAssignmentCount: reviewerLanePlan.summary.assignmentCount,
     reviewerTaskCount: reviewerLanePlan.summary.taskCount,
-    patchStackCount: patchStackPlan.summary.stackCount
+    patchStackCount: patchStackPlan.summary.stackCount,
+    mergeQueueScopeCount: hierarchicalMergeQueue.summary.scopeCount,
+    mergeQueueApplyLocalCount: hierarchicalMergeQueue.summary.applyLocalCount,
+    mergeQueueQueueLocalCount: hierarchicalMergeQueue.summary.queueLocalCount,
+    mergeQueuePromoteCount: hierarchicalMergeQueue.summary.promoteCount
   };
   const artifacts = createCollectArtifacts({
     outDir,
     summary,
     patchStatuses,
     mergeAdmission,
+    hierarchicalMergeQueue,
     reviewerLanePlan,
     patchStackPlan
   });
@@ -2504,6 +2551,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     generatedAt,
     buckets,
     mergeIndex,
+    hierarchicalMergeQueue,
     mergeAdmission,
     reviewerLanePlan,
     patchStackPlan,
@@ -2514,6 +2562,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(artifacts.collectionPath, JSON.stringify(result, null, 2) + '\n');
   await fs.writeFile(artifacts.mergeIndexPath, JSON.stringify(mergeIndex, null, 2) + '\n');
+  await fs.writeFile(artifacts.hierarchicalMergeQueuePath, JSON.stringify(hierarchicalMergeQueue, null, 2) + '\n');
   await fs.writeFile(artifacts.mergeAdmissionPath, JSON.stringify(mergeAdmission, null, 2) + '\n');
   await fs.writeFile(artifacts.reviewerLanePlanPath, JSON.stringify(reviewerLanePlan, null, 2) + '\n');
   await fs.writeFile(artifacts.patchStackPlanPath, JSON.stringify(patchStackPlan, null, 2) + '\n');
@@ -2526,12 +2575,14 @@ function createCollectArtifacts(input: {
   summary: FrontierCodexCollectResult['summary'];
   patchStatuses: Record<string, 'unknown' | 'applies' | 'missing' | 'stale'>;
   mergeAdmission: FrontierSwarmMergeAdmission;
+  hierarchicalMergeQueue: FrontierSwarmHierarchicalMergeQueue;
   reviewerLanePlan: FrontierSwarmReviewerLanePlan;
   patchStackPlan: FrontierSwarmPatchStackPlan;
 }): FrontierCodexCollectArtifacts {
   return {
     collectionPath: path.join(input.outDir, 'collection.json'),
     mergeIndexPath: path.join(input.outDir, 'merge-index.json'),
+    hierarchicalMergeQueuePath: path.join(input.outDir, 'hierarchical-merge-queue.json'),
     queueOverlayPath: path.join(input.outDir, 'queue-overlay.json'),
     mergeAdmissionPath: path.join(input.outDir, 'merge-admission.json'),
     reviewerLanePlanPath: path.join(input.outDir, 'reviewer-lane-plan.json'),
@@ -2555,6 +2606,14 @@ function createCollectArtifacts(input: {
       patchStackCount: input.patchStackPlan.summary.stackCount,
       patchStackJobCount: input.patchStackPlan.summary.jobCount,
       conflictedPatchStackCount: input.patchStackPlan.summary.conflictedStackCount,
+      mergeQueueScopeCount: input.hierarchicalMergeQueue.summary.scopeCount,
+      mergeQueueApplyLocalCount: input.hierarchicalMergeQueue.summary.applyLocalCount,
+      mergeQueueQueueLocalCount: input.hierarchicalMergeQueue.summary.queueLocalCount,
+      mergeQueuePromoteCount: input.hierarchicalMergeQueue.summary.promoteCount,
+      mergeQueueRerunCount: input.hierarchicalMergeQueue.summary.rerunCount,
+      mergeQueueRejectCount: input.hierarchicalMergeQueue.summary.rejectCount,
+      mergeQueueBlockCount: input.hierarchicalMergeQueue.summary.blockCount,
+      mergeQueueRecordOnlyCount: input.hierarchicalMergeQueue.summary.recordOnlyCount,
       patchCount: Object.values(input.patchStatuses).filter((status) => status !== 'missing').length
     }
   };
@@ -2564,6 +2623,7 @@ function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): Fr
   return collection.artifacts ?? {
     collectionPath: path.join(collection.outDir, 'collection.json'),
     mergeIndexPath: path.join(collection.outDir, 'merge-index.json'),
+    hierarchicalMergeQueuePath: path.join(collection.outDir, 'hierarchical-merge-queue.json'),
     queueOverlayPath: path.join(collection.outDir, 'queue-overlay.json'),
     mergeAdmissionPath: path.join(collection.outDir, 'merge-admission.json'),
     reviewerLanePlanPath: path.join(collection.outDir, 'reviewer-lane-plan.json'),
@@ -2587,6 +2647,14 @@ function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): Fr
       patchStackCount: collection.summary.patchStackCount ?? 0,
       patchStackJobCount: collection.patchStackPlan?.summary.jobCount ?? 0,
       conflictedPatchStackCount: collection.patchStackPlan?.summary.conflictedStackCount ?? 0,
+      mergeQueueScopeCount: collection.hierarchicalMergeQueue?.summary.scopeCount ?? collection.summary.mergeQueueScopeCount ?? 0,
+      mergeQueueApplyLocalCount: collection.hierarchicalMergeQueue?.summary.applyLocalCount ?? collection.summary.mergeQueueApplyLocalCount ?? 0,
+      mergeQueueQueueLocalCount: collection.hierarchicalMergeQueue?.summary.queueLocalCount ?? collection.summary.mergeQueueQueueLocalCount ?? 0,
+      mergeQueuePromoteCount: collection.hierarchicalMergeQueue?.summary.promoteCount ?? collection.summary.mergeQueuePromoteCount ?? 0,
+      mergeQueueRerunCount: collection.hierarchicalMergeQueue?.summary.rerunCount ?? 0,
+      mergeQueueRejectCount: collection.hierarchicalMergeQueue?.summary.rejectCount ?? 0,
+      mergeQueueBlockCount: collection.hierarchicalMergeQueue?.summary.blockCount ?? 0,
+      mergeQueueRecordOnlyCount: collection.hierarchicalMergeQueue?.summary.recordOnlyCount ?? 0,
       patchCount: 0
     }
   };
@@ -2609,6 +2677,7 @@ function createAutoDrainArtifactMetadata(input: {
       index: iteration.index,
       collectionPath: collectionArtifacts.collectionPath,
       mergeIndexPath: collectionArtifacts.mergeIndexPath,
+      hierarchicalMergeQueuePath: collectionArtifacts.hierarchicalMergeQueuePath,
       queueOverlayPath: collectionArtifacts.queueOverlayPath,
       mergeAdmissionPath: collectionArtifacts.mergeAdmissionPath,
       reviewerLanePlanPath: collectionArtifacts.reviewerLanePlanPath,
@@ -2631,13 +2700,23 @@ function createAutoDrainArtifactMetadata(input: {
       reviewerTaskCount: collectionArtifacts.counts.reviewerTaskCount,
       patchStackCount: collectionArtifacts.counts.patchStackCount,
       patchStackJobCount: collectionArtifacts.counts.patchStackJobCount,
-      conflictedPatchStackCount: collectionArtifacts.counts.conflictedPatchStackCount
+      conflictedPatchStackCount: collectionArtifacts.counts.conflictedPatchStackCount,
+      mergeQueueScopeCount: collectionArtifacts.counts.mergeQueueScopeCount,
+      mergeQueueApplyLocalCount: collectionArtifacts.counts.mergeQueueApplyLocalCount,
+      mergeQueueQueueLocalCount: collectionArtifacts.counts.mergeQueueQueueLocalCount,
+      mergeQueuePromoteCount: collectionArtifacts.counts.mergeQueuePromoteCount,
+      mergeQueueRerunCount: collectionArtifacts.counts.mergeQueueRerunCount,
+      mergeQueueRejectCount: collectionArtifacts.counts.mergeQueueRejectCount,
+      mergeQueueBlockCount: collectionArtifacts.counts.mergeQueueBlockCount,
+      mergeQueueRecordOnlyCount: collectionArtifacts.counts.mergeQueueRecordOnlyCount
     };
   });
   const admissionPaths = compactArtifactPaths(iterations.map((iteration) => iteration.mergeAdmissionPath));
+  const mergeQueuePaths = compactArtifactPaths(iterations.map((iteration) => iteration.hierarchicalMergeQueuePath));
   const groupingPaths = compactArtifactPaths(iterations.flatMap((iteration) => [
     iteration.collectionPath,
     iteration.mergeIndexPath,
+    iteration.hierarchicalMergeQueuePath,
     iteration.queueOverlayPath,
     iteration.groupingPath
   ]));
@@ -2690,11 +2769,24 @@ function createAutoDrainArtifactMetadata(input: {
       conflictedStackCount: sum((iteration) => iteration.conflictedPatchStackCount),
       patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length
     },
+    mergeQueue: {
+      paths: mergeQueuePaths,
+      count: mergeQueuePaths.length,
+      scopeCount: sum((iteration) => iteration.mergeQueueScopeCount),
+      applyLocalCount: sum((iteration) => iteration.mergeQueueApplyLocalCount),
+      queueLocalCount: sum((iteration) => iteration.mergeQueueQueueLocalCount),
+      promoteCount: sum((iteration) => iteration.mergeQueuePromoteCount),
+      rerunCount: sum((iteration) => iteration.mergeQueueRerunCount),
+      rejectCount: sum((iteration) => iteration.mergeQueueRejectCount),
+      blockCount: sum((iteration) => iteration.mergeQueueBlockCount),
+      recordOnlyCount: sum((iteration) => iteration.mergeQueueRecordOnlyCount)
+    },
     iterations,
     summary: {
       pathCount: compactArtifactPaths([
         input.autoDrainPath,
         ...admissionPaths,
+        ...mergeQueuePaths,
         ...groupingPaths,
         ...reviewerPaths,
         ...patchStackPaths
@@ -2703,6 +2795,7 @@ function createAutoDrainArtifactMetadata(input: {
       collectionCount: iterations.length,
       applyCount: iterations.filter((iteration) => !!iteration.applyPath).length,
       admissionCount: admissionPaths.length,
+      mergeQueuePlanCount: mergeQueuePaths.length,
       reviewerPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.reviewerLanePlanPath)).length,
       patchStackPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.patchStackPlanPath)).length,
       decisionCount: sum((iteration) => iteration.decisionCount),
