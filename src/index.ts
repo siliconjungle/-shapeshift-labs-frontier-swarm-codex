@@ -913,6 +913,7 @@ export interface FrontierCodexAutonomousApplyResult {
   lockKeys: string[];
   lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
   queueOverlay: FrontierSwarmQueueOverlay;
+  rerunManifest?: FrontierCodexAutoDrainRerunManifest;
   finalGateSummary: FrontierCodexAutonomousFinalGateRunSummary;
   summary: Record<FrontierCodexAutonomousDecisionStatus, number> & {
     total: number;
@@ -925,6 +926,8 @@ export interface FrontierCodexAutonomousApplyResult {
     skippedRequiredGateCount: number;
     finalGateContinuationDecisionCount: number;
     finalGateContinuationSkippedRequiredGateCount: number;
+    rerunManifestCount: number;
+    rerunTaskCount: number;
   };
 }
 
@@ -1420,6 +1423,7 @@ export interface FrontierCodexAutoDrainRerunManifest {
   sourceHead?: string;
   sourceHeads: string[];
   items: FrontierCodexAutoDrainRerunTask[];
+  tasks: FrontierCodexAutoDrainRerunTask[];
   sourcePatchPaths: string[];
   targetRefs: string[];
   taskIds: string[];
@@ -7751,9 +7755,15 @@ export interface FrontierCodexAutoDrainRerunManifestInput {
   manifestPath: string;
   generatedAt: number;
   currentHead?: string;
-  iterations: readonly FrontierCodexSwarmAutoDrainIteration[];
+  iterations: readonly FrontierCodexAutoDrainRerunManifestIterationInput[];
   terminalJobIds: readonly string[];
   blockedJobIds: readonly string[];
+}
+
+export interface FrontierCodexAutoDrainRerunManifestIterationInput {
+  collection: FrontierCodexCollectResult;
+  postApplyCollection?: FrontierCodexCollectResult;
+  apply?: FrontierCodexAutonomousApplyResult;
 }
 
 export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainRerunManifestInput): FrontierCodexAutoDrainRerunManifest {
@@ -7926,6 +7936,7 @@ export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainR
     ...(sourceHeads.length === 1 ? { sourceHead: sourceHeads[0] } : {}),
     sourceHeads,
     items: tasks,
+    tasks,
     sourcePatchPaths,
     targetRefs,
     taskIds,
@@ -8218,9 +8229,10 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
       ? path.join(path.resolve(cwd, input.collection), 'autonomous-apply')
       : path.join(await resolveRunDirectory(String(input.run ?? '')), 'autonomous-apply')
   ));
+  let sourceCollection: FrontierCodexCollectResult | undefined;
   const collectionDir = input.collection
     ? path.resolve(cwd, input.collection)
-    : (await collectCodexSwarmRun({
+    : (sourceCollection = await collectCodexSwarmRun({
       run: String(input.run ?? ''),
       cwd,
       outDir: path.join(baseOutDir, 'collection'),
@@ -8231,6 +8243,7 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
       promotionGlobalCommands: input.globalCommands,
       promotionGlobalGlobs: input.globalGlobs
     })).outDir;
+  sourceCollection ??= await readCodexCollectResult(collectionDir);
   const outDir = baseOutDir;
   const decisionLogPath = path.resolve(cwd, input.decisionLogPath ?? path.join(outDir, 'autonomous-merge-decisions.jsonl'));
   const lockPath = input.lockPath
@@ -8295,7 +8308,7 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
   const summary = Object.fromEntries(statuses.map((status) => [status, decisions.filter((decision) => decision.status === status).length])) as Record<FrontierCodexAutonomousDecisionStatus, number>;
   const decisionProof = summarizeAutonomousDecisionProof(decisions);
   const finalGateSummary = summarizeAutonomousFinalGateRun(decisions);
-  const result: FrontierCodexAutonomousApplyResult = {
+  const applyForRerunManifest: FrontierCodexAutonomousApplyResult = {
     kind: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND,
     version: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_VERSION,
     ok: decisions.every((decision) => (
@@ -8326,12 +8339,188 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
       failedRequiredGateCount: finalGateSummary.failedRequiredGateCount,
       skippedRequiredGateCount: finalGateSummary.skippedRequiredGateCount,
       finalGateContinuationDecisionCount: finalGateSummary.continuationDecisionCount,
-      finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount
+      finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount,
+      rerunManifestCount: 0,
+      rerunTaskCount: 0
     }
   };
-  await fs.writeFile(path.join(outDir, 'autonomous-apply.json'), JSON.stringify(result, null, 2) + '\n');
+  sourceCollection ??= await synthesizeCodexCollectResultForAutonomousApply({
+    collectionDir,
+    decisions,
+    generatedAt
+  });
+  const autonomousApplyPath = path.join(outDir, 'autonomous-apply.json');
+  const rerunManifest = await writeExplicitDrainRerunManifest({
+    cwd,
+    outDir,
+    autonomousApplyPath,
+    generatedAt,
+    collection: sourceCollection,
+    apply: applyForRerunManifest
+  });
+  const result: FrontierCodexAutonomousApplyResult = {
+    ...applyForRerunManifest,
+    ...(rerunManifest ? { rerunManifest } : {}),
+    summary: {
+      ...applyForRerunManifest.summary,
+      rerunManifestCount: rerunManifest ? 1 : 0,
+      rerunTaskCount: rerunManifest?.summary.taskCount ?? 0
+    }
+  };
+  await fs.writeFile(autonomousApplyPath, JSON.stringify(result, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'autonomous-queue-overlay.json'), JSON.stringify(queueOverlay, null, 2) + '\n');
   return result;
+}
+
+async function readCodexCollectResult(collectionDir: string): Promise<FrontierCodexCollectResult | undefined> {
+  const collectionPath = path.join(collectionDir, 'collection.json');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(collectionPath, 'utf8'));
+  } catch {
+    return undefined;
+  }
+  if (!isObject(parsed) || parsed.kind !== FRONTIER_SWARM_CODEX_COLLECTION_KIND) return undefined;
+  return parsed as unknown as FrontierCodexCollectResult;
+}
+
+async function synthesizeCodexCollectResultForAutonomousApply(input: {
+  collectionDir: string;
+  decisions: readonly FrontierCodexAutonomousMergeDecision[];
+  generatedAt: number;
+}): Promise<FrontierCodexCollectResult> {
+  const buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]> = {
+    'ready-to-apply': [],
+    'needs-human-port': [],
+    'failed-evidence': [],
+    'stale-against-head': []
+  };
+  const bundles: FrontierSwarmMergeBundle[] = [];
+  for (const decision of input.decisions) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await fs.readFile(decision.bundlePath, 'utf8'));
+    } catch {
+      continue;
+    }
+    const bundle = normalizeCollectedMergeBundle(raw, decision.bundlePath);
+    bundles.push(bundle);
+    buckets['ready-to-apply'].push({
+      bucket: 'ready-to-apply',
+      jobId: bundle.jobId,
+      mergePath: decision.bundlePath,
+      outputDir: path.dirname(decision.bundlePath),
+      bundle
+    });
+  }
+  const runId = readRunIdFromDecisions(input.decisions) ?? path.basename(path.dirname(input.collectionDir));
+  const patchStatuses = Object.fromEntries(bundles.map((bundle) => [bundle.jobId, bundle.patchPath ? 'unknown' : 'missing'])) as Record<string, 'unknown' | 'applies' | 'missing' | 'stale'>;
+  const mergeIndex = createSwarmMergeIndex({ runId, bundles, patchStatuses });
+  const mergeAdmission = createSwarmMergeAdmission({
+    index: mergeIndex,
+    maxReady: buckets['ready-to-apply'].length,
+    allowRisks: ['low', 'medium', 'unknown'],
+    generatedAt: input.generatedAt,
+    metadata: { source: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND }
+  });
+  const hierarchicalMergeQueue = createSwarmHierarchicalMergeQueue({
+    index: mergeIndex,
+    admission: mergeAdmission,
+    generatedAt: input.generatedAt,
+    metadata: { source: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND }
+  });
+  const reviewerLanePlan = createSwarmReviewerLanePlan({
+    index: mergeIndex,
+    admission: mergeAdmission,
+    generatedAt: input.generatedAt,
+    metadata: { source: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND }
+  });
+  const patchStackPlan = createSwarmPatchStackPlan({
+    index: mergeIndex,
+    generatedAt: input.generatedAt,
+    metadata: { source: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND }
+  });
+  const queueOverlay = createSwarmQueueOverlay({ runId, bundles });
+  const summary = {
+    total: bundles.length,
+    'ready-to-apply': buckets['ready-to-apply'].length,
+    'needs-human-port': 0,
+    'failed-evidence': 0,
+    'stale-against-head': 0,
+    admittedCount: mergeAdmission.summary.admittedCount,
+    deferredCount: mergeAdmission.summary.deferredCount,
+    reviewerAssignmentCount: reviewerLanePlan.summary.assignmentCount,
+    reviewerTaskCount: reviewerLanePlan.summary.taskCount,
+    patchStackCount: patchStackPlan.summary.stackCount,
+    mergeQueueScopeCount: hierarchicalMergeQueue.summary.scopeCount,
+    mergeQueueApplyLocalCount: hierarchicalMergeQueue.summary.applyLocalCount,
+    mergeQueueQueueLocalCount: hierarchicalMergeQueue.summary.queueLocalCount,
+    mergeQueuePromoteCount: hierarchicalMergeQueue.summary.promoteCount,
+    mergeQueueRerunCount: hierarchicalMergeQueue.summary.rerunCount,
+    mergeQueueRejectCount: hierarchicalMergeQueue.summary.rejectCount,
+    mergeQueueBlockCount: hierarchicalMergeQueue.summary.blockCount,
+    mergeQueueRecordOnlyCount: hierarchicalMergeQueue.summary.recordOnlyCount,
+    promotedPatchCandidateCount: 0,
+    patchOnlyCount: 0
+  };
+  const artifacts = createCollectArtifacts({
+    outDir: input.collectionDir,
+    summary,
+    patchStatuses,
+    mergeAdmission,
+    hierarchicalMergeQueue,
+    reviewerLanePlan,
+    patchStackPlan
+  });
+  return {
+    kind: FRONTIER_SWARM_CODEX_COLLECTION_KIND,
+    version: FRONTIER_SWARM_CODEX_COLLECTION_VERSION,
+    ok: true,
+    runDir: path.dirname(input.collectionDir),
+    outDir: input.collectionDir,
+    generatedAt: input.generatedAt,
+    buckets,
+    mergeIndex,
+    hierarchicalMergeQueue,
+    mergeAdmission,
+    reviewerLanePlan,
+    patchStackPlan,
+    queueOverlay,
+    summary,
+    artifacts
+  };
+}
+
+async function writeExplicitDrainRerunManifest(input: {
+  cwd: string;
+  outDir: string;
+  autonomousApplyPath: string;
+  generatedAt: number;
+  collection: FrontierCodexCollectResult;
+  apply: FrontierCodexAutonomousApplyResult;
+}): Promise<FrontierCodexAutoDrainRerunManifest | undefined> {
+  const manifestPath = path.join(input.outDir, 'rerun-manifest.json');
+  const currentHead = await readCurrentGitHead(input.cwd);
+  const manifest = createCodexAutoDrainRerunManifest({
+    outDir: input.outDir,
+    autoDrainPath: input.autonomousApplyPath,
+    manifestPath,
+    generatedAt: input.generatedAt,
+    currentHead,
+    iterations: [{
+      collection: input.collection,
+      apply: input.apply
+    }],
+    terminalJobIds: input.apply.decisions
+      .filter((decision) => autonomousDecisionIsTerminal(decision.status))
+      .map((decision) => decision.jobId),
+    blockedJobIds: input.apply.decisions
+      .filter((decision) => autonomousDecisionBlocksAutoDrain(decision.status))
+      .map((decision) => decision.jobId)
+  });
+  if (manifest.summary.taskCount === 0) return undefined;
+  await writeJsonAtomic(manifestPath, manifest);
+  return manifest;
 }
 
 export async function scoreCodexSwarmPatches(input: FrontierCodexPatchScoreInput): Promise<FrontierCodexPatchScoreResult> {

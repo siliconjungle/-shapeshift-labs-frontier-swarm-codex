@@ -2946,6 +2946,168 @@ assert.strictEqual(cliAutonomousPromoteCollection.summary.promotedPatchCandidate
 assert.strictEqual(cliAutonomousPromoteCollection.summary['ready-to-apply'], 1);
 assert.strictEqual(cliAutonomousPromoteCollection.summary['needs-human-port'], 0);
 
+const explicitDrainRerunRepo = await createApplyFixtureRepo(tmp, 'explicit-drain-rerun-repo');
+await fs.writeFile(path.join(explicitDrainRerunRepo, 'src', 'stale.ts'), 'old-stale\n');
+await execFileP('git', ['add', '--', 'src/stale.ts'], { cwd: explicitDrainRerunRepo });
+await execFileP('git', ['commit', '-m', 'Add explicit drain stale fixture'], { cwd: explicitDrainRerunRepo });
+const explicitDrainRerunPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'explicit-drain-rerun',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }],
+    layers: [{ id: 'merge' }]
+  },
+  tasks: {
+    items: [{
+      id: 'explicit-commit-task',
+      lane: 'apply',
+      layer: 'merge',
+      compute: 'codex.deep',
+      priority: 29,
+      concurrencyKey: 'explicit-drain-rerun:explicit-commit-task',
+      ownedFiles: ['src/apply.ts'],
+      ownedRegions: ['src/apply.ts#apply'],
+      changedRegions: ['src/apply.ts#apply'],
+      acceptance: ['explicit drain commits current work'],
+      verification: [{
+        name: 'worker-sees-explicit-commit',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='explicit-commit\\n') process.exit(1);"]
+      }]
+    }, {
+      id: 'explicit-stale-task',
+      lane: 'apply',
+      layer: 'merge',
+      compute: 'codex.deep',
+      priority: 31,
+      concurrencyKey: 'explicit-drain-rerun:explicit-stale-task',
+      ownedFiles: ['src/stale.ts'],
+      ownedRegions: ['src/stale.ts#stale'],
+      changedRegions: ['src/stale.ts#stale'],
+      acceptance: ['explicit drain rerun preserves scheduling metadata'],
+      verification: [{
+        name: 'worker-sees-explicit-stale',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/stale.ts','utf8')!=='worker-stale\\n') process.exit(1);"]
+      }]
+    }]
+  }
+});
+const explicitDrainRerunOutDir = path.join(explicitDrainRerunRepo, 'agent-runs', 'explicit-drain-rerun-run');
+const explicitDrainRerunRun = await runCodexSwarm(explicitDrainRerunPlan, {
+  outDir: explicitDrainRerunOutDir,
+  cwd: explicitDrainRerunRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(explicitDrainRerunOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: false,
+  executor: async (input) => {
+    if (input.job.taskId === 'explicit-commit-task') {
+      await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'explicit-commit\n');
+      await fs.writeFile(input.paths.lastMessagePath, 'explicit commit worker\n');
+      return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'explicit commit worker' };
+    }
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'stale.ts'), 'worker-stale\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'explicit stale worker\n');
+    return { exitCode: 0, changedPaths: ['src/stale.ts'], lastMessage: 'explicit stale worker' };
+  }
+});
+assert.strictEqual(explicitDrainRerunRun.ok, true);
+await fs.writeFile(path.join(explicitDrainRerunRepo, 'src', 'stale.ts'), 'coordinator-stale\n');
+await execFileP('git', ['add', '--', 'src/stale.ts'], { cwd: explicitDrainRerunRepo });
+await execFileP('git', ['commit', '-m', 'Advance stale fixture before explicit drain'], { cwd: explicitDrainRerunRepo });
+const explicitDrainRerunApplyOutDir = path.join(explicitDrainRerunRepo, 'agent-runs', 'explicit-drain-rerun-apply');
+const cliExplicitDrainRerun = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'drain',
+  '--run',
+  explicitDrainRerunOutDir,
+  '--outDir',
+  explicitDrainRerunApplyOutDir,
+  '--allow-dirty',
+  '--commit',
+  '--focused-command',
+  "node -e \"const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='explicit-commit\\n') process.exit(1);\""
+], { cwd: explicitDrainRerunRepo });
+const cliExplicitDrainRerunResult = JSON.parse(cliExplicitDrainRerun.stdout);
+assert.strictEqual(cliExplicitDrainRerunResult.ok, true);
+assert.strictEqual(cliExplicitDrainRerunResult.summary.committed, 1);
+assert.strictEqual(cliExplicitDrainRerunResult.summary.rerunManifestCount, 1);
+assert.strictEqual(cliExplicitDrainRerunResult.summary.rerunTaskCount, 1);
+assert.ok(cliExplicitDrainRerunResult.rerunManifest);
+const explicitDrainRerunManifestPath = path.join(explicitDrainRerunApplyOutDir, 'rerun-manifest.json');
+assert.strictEqual(cliExplicitDrainRerunResult.rerunManifest.path, explicitDrainRerunManifestPath);
+assert.ok(await exists(explicitDrainRerunManifestPath));
+const explicitDrainRerunApplyArtifact = JSON.parse(await fs.readFile(path.join(explicitDrainRerunApplyOutDir, 'autonomous-apply.json'), 'utf8'));
+assert.strictEqual(explicitDrainRerunApplyArtifact.rerunManifest.path, explicitDrainRerunManifestPath);
+assert.strictEqual(explicitDrainRerunApplyArtifact.summary.rerunTaskCount, 1);
+const explicitDrainRerunManifest = JSON.parse(await fs.readFile(explicitDrainRerunManifestPath, 'utf8'));
+const explicitDrainRerunHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: explicitDrainRerunRepo })).stdout.trim();
+assert.strictEqual(explicitDrainRerunManifest.kind, FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND);
+assert.strictEqual(explicitDrainRerunManifest.currentHead, explicitDrainRerunHead);
+assert.strictEqual(explicitDrainRerunManifest.sourceHead, explicitDrainRerunHead);
+assert.deepStrictEqual(explicitDrainRerunManifest.sourceHeads, [explicitDrainRerunHead]);
+assert.deepStrictEqual(explicitDrainRerunManifest.tasks, explicitDrainRerunManifest.items);
+assert.strictEqual(explicitDrainRerunManifest.items.length, 1);
+assert.strictEqual(explicitDrainRerunManifest.summary.taskCount, 1);
+assert.strictEqual(explicitDrainRerunManifest.summary.staleAgainstHeadCount, 1);
+assert.strictEqual(explicitDrainRerunManifest.summary.queueRerunCount, 1);
+assert.strictEqual(explicitDrainRerunManifest.summary.conflictBlockedCount, 0);
+assert.strictEqual(explicitDrainRerunManifest.summary.decisionRerunCount, 0);
+const explicitDrainRerunTask = explicitDrainRerunManifest.items[0];
+assert.strictEqual(explicitDrainRerunTask.id, 'explicit-stale-task-rerun-current-head');
+assert.strictEqual(explicitDrainRerunTask.lane, 'apply');
+assert.strictEqual(explicitDrainRerunTask.layer, 'merge');
+assert.strictEqual(explicitDrainRerunTask.compute, 'codex.deep');
+assert.strictEqual(explicitDrainRerunTask.priority, 31);
+assert.strictEqual(explicitDrainRerunTask.concurrencyKey, 'explicit-drain-rerun:explicit-stale-task');
+assert.deepStrictEqual(explicitDrainRerunTask.targetRefs, ['src/stale.ts']);
+assert.deepStrictEqual(explicitDrainRerunTask.allowedWrites, ['src/stale.ts']);
+assert.deepStrictEqual(explicitDrainRerunTask.ownedRegions, ['src/stale.ts#stale']);
+assert.deepStrictEqual(explicitDrainRerunTask.acceptance, ['explicit drain rerun preserves scheduling metadata']);
+assert.deepStrictEqual(explicitDrainRerunTask.verification, [{
+  name: 'worker-sees-explicit-stale',
+  command: 'node',
+  args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/stale.ts','utf8')!=='worker-stale\\n') process.exit(1);"],
+  required: true
+}]);
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.originalTaskId, 'explicit-stale-task');
+assert.deepStrictEqual(explicitDrainRerunTask.metadata.rerun.queueItemIds, ['explicit-stale-task']);
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.currentHead, explicitDrainRerunHead);
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.sourceHead, explicitDrainRerunHead);
+assert.deepStrictEqual(explicitDrainRerunTask.metadata.rerun.sourceHeads, [explicitDrainRerunHead]);
+assert.ok(explicitDrainRerunTask.metadata.rerun.sourceKinds.includes('stale-against-head'));
+assert.ok(explicitDrainRerunTask.metadata.rerun.sourceKinds.includes('queue-rerun'));
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.sourceTask.id, 'explicit-stale-task');
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.sourceTask.lane, 'apply');
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.sourceTask.layer, 'merge');
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.sourceTask.compute, 'codex.deep');
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.sourceTask.priority, 31);
+assert.strictEqual(explicitDrainRerunTask.metadata.rerun.sourceTask.concurrencyKey, 'explicit-drain-rerun:explicit-stale-task');
+assert.ok(explicitDrainRerunTask.metadata.rerun.sourcePatchPaths.some((entry) => entry.endsWith('changes.patch')));
+assert.ok(explicitDrainRerunTask.sourceRefs.some((entry) => entry.endsWith('changes.patch')));
+assert.ok(explicitDrainRerunTask.sourceRefs.includes(path.join(cliExplicitDrainRerunResult.collectionDir, 'queue-overlay.json')));
+assert.ok(explicitDrainRerunTask.sourceRefs.includes(path.join(cliExplicitDrainRerunResult.collectionDir, 'hierarchical-merge-queue.json')));
+const explicitDrainContinuationTasks = coerceCodexSwarmTasksInput(explicitDrainRerunManifest);
+assert.deepStrictEqual(explicitDrainContinuationTasks.map((task) => task.id), ['explicit-stale-task-rerun-current-head']);
+assert.strictEqual(explicitDrainContinuationTasks[0].lane, 'apply');
+assert.strictEqual(explicitDrainContinuationTasks[0].compute, 'codex.deep');
+assert.strictEqual(explicitDrainContinuationTasks[0].priority, 31);
+assert.strictEqual(explicitDrainContinuationTasks[0].concurrencyKey, 'explicit-drain-rerun:explicit-stale-task');
+assert.deepStrictEqual(explicitDrainContinuationTasks[0].verification, [{
+  name: 'worker-sees-explicit-stale',
+  command: 'node',
+  args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/stale.ts','utf8')!=='worker-stale\\n') process.exit(1);"],
+  required: true
+}]);
+assert.strictEqual(await fs.readFile(path.join(explicitDrainRerunRepo, 'src', 'apply.ts'), 'utf8'), 'explicit-commit\n');
+assert.strictEqual(await fs.readFile(path.join(explicitDrainRerunRepo, 'src', 'stale.ts'), 'utf8'), 'coordinator-stale\n');
+
 const autoDrainDirtyRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dirty-run-repo');
 await fs.writeFile(path.join(autoDrainDirtyRepo, 'src', 'dirty.ts'), 'dirty\n');
 const autoDrainDirtyOutDir = path.join(autoDrainDirtyRepo, 'agent-runs', 'auto-drain-dirty-run');
