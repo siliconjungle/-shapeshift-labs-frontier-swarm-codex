@@ -795,6 +795,15 @@ assert.strictEqual(await fs.readFile(path.join(cliAutonomousRepo, 'src', 'apply.
 
 const autoDrainRepo = await createApplyFixtureRepo(tmp, 'auto-drain-run-repo');
 const autoDrainOutDir = path.join(autoDrainRepo, 'agent-runs', 'auto-drain-run');
+await fs.mkdir(autoDrainOutDir, { recursive: true });
+const autoDrainAnswerLogPath = path.join(autoDrainOutDir, 'human-action-answers.jsonl');
+await fs.writeFile(autoDrainAnswerLogPath, JSON.stringify({
+  id: 'answer-apply-task',
+  queueItemId: 'apply-task',
+  status: 'answered',
+  answer: 'No human action needed for already-applied coordinator work.',
+  evidencePath: 'operator-answer.md'
+}) + '\n');
 const autoDrainPlan = createCodexSwarmPlan({
   manifest: {
     id: 'auto-drain',
@@ -857,6 +866,14 @@ const autoDrainDashboard = JSON.parse(await fs.readFile(path.join(autoDrainOutDi
 assert.strictEqual(autoDrainDashboard.autoDrain.summary.terminalCount, 1);
 assert.strictEqual(autoDrainDashboard.queueMetadata.kind, 'frontier.swarm-codex.dashboard-queue-metadata');
 assert.strictEqual(autoDrainDashboard.queueMetadata.available, true);
+assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.available, true);
+assert.deepStrictEqual(autoDrainRun.autoDrain.humanAnswers.paths, [autoDrainAnswerLogPath]);
+assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.count, 1);
+assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.consumedCount, 0);
+assert.strictEqual(autoDrainRun.autoDrain.humanAnswers.routedDecisionCount, 0);
+assert.strictEqual(autoDrainDashboard.humanAnswers.available, true);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.humanAnswers, autoDrainRun.autoDrain.humanAnswers);
+assert.ok(await exists(path.join(autoDrainOutDir, 'auto-drain', 'human-answer-routing.json')));
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.applyLocalCount, 1);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.queueLocalCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.actionCounts.promoteCount, 0);
@@ -2072,6 +2089,19 @@ assert.strictEqual(collapsedDecisionCards.get('true-blockers').value, 0);
 const explicitHumanQuestionOutDir = path.join(tmp, 'explicit-human-question-dashboard');
 const explicitHumanQuestionArtifacts = createSyntheticAutoDrainArtifacts(explicitHumanQuestionOutDir);
 explicitHumanQuestionArtifacts.summary.decisionCount = 5;
+await fs.mkdir(explicitHumanQuestionOutDir, { recursive: true });
+const explicitHumanQuestionAnswerLogPath = path.join(explicitHumanQuestionOutDir, 'human-action-answers.jsonl');
+const explicitHumanQuestionAnswerEvidencePath = path.join(explicitHumanQuestionOutDir, 'answer-evidence.md');
+await fs.writeFile(explicitHumanQuestionAnswerLogPath, JSON.stringify({
+  id: 'answer-prefixed-human-question',
+  questionId: 'prefixed-human-question',
+  questionCode: 'queue:prefixed-human-question-task',
+  queueItemId: 'prefixed-human-question-task',
+  route: 'approve-parent-assignment',
+  answer: 'Approve the parent coordinator ownership exception.',
+  evidencePath: explicitHumanQuestionAnswerEvidencePath
+}) + '\n');
+await fs.writeFile(explicitHumanQuestionAnswerEvidencePath, 'approved\n');
 const explicitHumanQuestionAutoDrain = {
   kind: 'frontier.swarm-codex.auto-drain',
   version: 1,
@@ -2157,6 +2187,54 @@ const explicitHumanQuestionAutoDrain = {
   lockScopeCounts: { semantic: 0, path: 0, repo: 0 },
   terminalJobIds: ['coordinator-review-job', 'failed-apply-job'],
   blockedJobIds: ['generic-human-blocked-job', 'prefixed-human-question-job', 'question-mark-human-question-job'],
+  humanAnswers: {
+    kind: 'frontier.swarm-codex.human-answer-routing',
+    version: 1,
+    source: 'human-action-answers.jsonl',
+    available: true,
+    paths: [explicitHumanQuestionAnswerLogPath],
+    routingPath: path.join(explicitHumanQuestionOutDir, 'human-answer-routing.json'),
+    count: 1,
+    consumedCount: 1,
+    routedDecisionCount: 1,
+    ignoredCount: 0,
+    parseErrorCount: 0,
+    answeredQuestionIds: ['prefixed-human-question'],
+    answeredQuestionCodes: ['queue:prefixed-human-question-task'],
+    routedDecisionIds: ['prefixed-human-question'],
+    routedJobIds: ['prefixed-human-question-job'],
+    routedTaskIds: ['prefixed-human-question-task'],
+    routedQueueItemIds: ['prefixed-human-question-task'],
+    evidencePaths: [explicitHumanQuestionAnswerEvidencePath],
+    answers: [{
+      id: 'answer-prefixed-human-question',
+      sourcePath: explicitHumanQuestionAnswerLogPath,
+      line: 1,
+      consumed: true,
+      questionIds: ['prefixed-human-question'],
+      questionCodes: ['queue:prefixed-human-question-task'],
+      decisionIds: [],
+      jobIds: [],
+      taskIds: [],
+      queueItemIds: ['prefixed-human-question-task'],
+      routes: ['approve-parent-assignment'],
+      evidencePaths: [explicitHumanQuestionAnswerEvidencePath],
+      answer: 'Approve the parent coordinator ownership exception.'
+    }],
+    routedDecisions: [{
+      decisionId: 'prefixed-human-question',
+      jobId: 'prefixed-human-question-job',
+      taskId: 'prefixed-human-question-task',
+      queueItemIds: ['prefixed-human-question-task'],
+      questionIds: ['prefixed-human-question'],
+      questionCodes: ['queue:prefixed-human-question-task'],
+      reason: 'human-question: Should the parent coordinator approve this ownership exception',
+      answerIds: ['answer:answer-prefixed-human-question'],
+      answerRoutes: ['approve-parent-assignment'],
+      answerEvidencePaths: [explicitHumanQuestionAnswerEvidencePath]
+    }],
+    parseErrors: []
+  },
   artifacts: explicitHumanQuestionArtifacts,
   summary: {
     iterationCount: 1,
@@ -2191,30 +2269,45 @@ await writeSwarmCoordinatorSnapshot(explicitHumanQuestionDashboardPath, {
 });
 const explicitHumanQuestionDashboard = JSON.parse(await fs.readFile(explicitHumanQuestionDashboardPath, 'utf8'));
 assert.strictEqual(explicitHumanQuestionDashboard.autoDrain.summary.humanBlockedCount, 3);
-assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.count, 2);
-assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.decisionCount, 2);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.humanAnswers, explicitHumanQuestionAutoDrain.humanAnswers);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanAnswers, explicitHumanQuestionAutoDrain.humanAnswers);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.count, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.decisionCount, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answeredCount, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedDecisionCount, 1);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.questionIds, [
+  'question-mark-human-question'
+]);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.questionCodes, [
+  'queue:question-mark-human-question-task'
+]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds, [
-  'prefixed-human-question-job',
   'question-mark-human-question-job'
 ]);
 assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.includes('generic-human-blocked-job'));
+assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.includes('prefixed-human-question-job'));
 assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.includes('failed-apply-job'));
 assert.ok(!explicitHumanQuestionDashboard.queueMetadata.humanQuestions.jobIds.includes('coordinator-review-job'));
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.taskIds, [
-  'prefixed-human-question-task',
   'question-mark-human-question-task'
 ]);
 assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.reasons, [
-  'Can the parent coordinator assign this cross-lane surface?',
-  'human-question: Should the parent coordinator approve this ownership exception'
+  'Can the parent coordinator assign this cross-lane surface?'
 ]);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedDecisionIds, ['prefixed-human-question']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedJobIds, ['prefixed-human-question-job']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedTaskIds, ['prefixed-human-question-task']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedQuestionIds, ['prefixed-human-question']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.routedQuestionCodes, ['queue:prefixed-human-question-task']);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answerLogPaths, [explicitHumanQuestionAnswerLogPath]);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.queueMetadata.humanQuestions.answerEvidencePaths, [explicitHumanQuestionAnswerEvidencePath]);
 assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.operatorSummary.status, 'blocked');
-assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 2);
-assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 2);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 1);
 const explicitHumanQuestionCards = new Map(explicitHumanQuestionDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
-assert.strictEqual(explicitHumanQuestionCards.get('true-blockers').value, 2);
+assert.strictEqual(explicitHumanQuestionCards.get('true-blockers').value, 1);
 assert.strictEqual(explicitHumanQuestionCards.get('true-blockers').status, 'blocked');
-assert.match(explicitHumanQuestionCards.get('true-blockers').detail, /2 explicit human questions/);
+assert.match(explicitHumanQuestionCards.get('true-blockers').detail, /1 explicit human question/);
 
 const autoDrainDryRunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dry-run-repo');
 const autoDrainDryRun = await runCodexSwarm(autoDrainPlan, {

@@ -68,6 +68,8 @@ After a run, use `coordinator-dashboard.json.operatorSummary` for human-facing q
 
 `humanQuestions` is intentionally narrower than every blocked-looking artifact. A dashboard human question must come from the latest autonomous decision for that queue item, have `status: "human-blocked"`, and carry an explicit question-shaped `reason`: either start it with `human-question:`, `human question:`, `human/authority question:`, `question:`, or phrase it with a `?`. Generic ownership notes, stale/rerun records, `conflict-blocked`, failed/rejected applies, coordinator review tasks, discovery evidence, and generated evidence stay in their queue buckets and must not populate `humanQuestions`.
 
+Human answers feed back through `human-action-answers.jsonl` at the run root by default; `human-answers.jsonl` and `operator-answers.jsonl` are also recognized, or API callers can pass `humanAnswerLogPath` in auto-drain options. Each JSONL answer should identify the question by `questionId`, `questionCode`, `decisionId`, `queueItemId`, `taskId`, or `jobId`, and may include `answer`, `route`, and `evidencePath`/`evidencePaths`. Auto-drain writes `auto-drain/human-answer-routing.json` when an answer log exists. Answered question ids/codes are removed from open `humanQuestions` and appear as routed answers in `humanQuestions.routed*`, `humanQuestions.answerLogPaths`, `humanQuestions.answerEvidencePaths`, and `queueMetadata.humanAnswers`; the original autonomous decision ledger remains append-only.
+
 If auto-drain is disabled or you want to drain a previous run explicitly, use `autonomous-apply`:
 
 ```sh
