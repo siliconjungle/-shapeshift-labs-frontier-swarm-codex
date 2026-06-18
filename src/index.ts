@@ -4016,6 +4016,37 @@ function revalidateAutonomousHeadMoveCandidate(input: {
   return { ok: true };
 }
 
+async function replayAutonomousPatchAtCollectionHead(input: {
+  cwd: string;
+  jobId: string;
+  collectionHead: string;
+  patchPath: string;
+  commands: FrontierCodexAutonomousMergeDecision['commands'];
+}): Promise<{ status: 'applies' | 'conflict' | 'unavailable'; reason: string }> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), `frontier-swarm-current-head-${slug(input.jobId)}-`));
+  const workspace = path.join(root, 'workspace');
+  let added = false;
+  try {
+    const add = await runLoggedProcess('git', ['worktree', 'add', '--detach', workspace, input.collectionHead], input.cwd);
+    input.commands.push(add);
+    if (add.status !== 0) {
+      return { status: 'unavailable', reason: 'collection-head replay workspace unavailable; rerun against current head' };
+    }
+    added = true;
+    const check = await runLoggedProcess('git', ['apply', '--check', path.resolve(input.patchPath)], workspace);
+    input.commands.push(check);
+    return check.status === 0
+      ? { status: 'applies', reason: 'patch applies at collection head but not current head; rerun against current head' }
+      : { status: 'conflict', reason: 'patch does not apply at collection head or current head' };
+  } finally {
+    if (added) {
+      const remove = await runLoggedProcess('git', ['worktree', 'remove', '--force', workspace], input.cwd);
+      input.commands.push(remove);
+    }
+    await fs.rm(root, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 function autonomousCommittedHeadMoveChain(
   decisions: readonly FrontierCodexAutonomousMergeDecision[],
   collectionHead: string,
@@ -9150,6 +9181,20 @@ async function applyCodexMergeBundleAutonomously(input: {
   commands.push(check);
   if (collectionHead && collectionHead !== headBefore) {
     if (check.status !== 0) {
+      const replay = await replayAutonomousPatchAtCollectionHead({
+        cwd: input.cwd,
+        jobId: input.bundle.jobId,
+        collectionHead,
+        patchPath,
+        commands
+      });
+      if (replay.status !== 'conflict') {
+        return finish(
+          'rerun',
+          `repository head changed since bundle collection and ${replay.reason}`,
+          { headBefore: collectionHead, headAfter: headBefore, leaseHead: headBefore }
+        );
+      }
       return finish(
         'conflict-blocked',
         'repository head changed since bundle collection and git apply --check failed',

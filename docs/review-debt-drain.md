@@ -18,7 +18,7 @@ This policy applies to `frontier-swarm-codex` collection buckets, reviewer lane 
 1. Drain existing terminal overlays first. If `autonomous-queue-overlay.json`, `auto-drain.json`, or a collection already records applied, committed, checked, rejected, skipped, or rerun outcomes, mirror those outcomes into the project queue and remove the matching `coordinator-review` item.
 2. Admit low-risk `ready-to-apply` bundles next. Re-run `git apply --check`, focused gates, and any matching global gates under the auto-drain lock. If the patch applies and gates pass, mark the item satisfied. If gates fail, reject it with failed evidence unless the failure exposes a precise new task.
 3. Review `needs-human-port` bundles only when they contain a useful patch or source map that cannot safely be auto-applied. Port the smallest defensible hunk, run the same gates, and then mark the original worker result satisfied, rejected, or rerun. Do not keep the worker result open after a manual port decision.
-4. Collapse stale and conflicting work before reading it deeply. If the patch is stale against head, touches superseded files, depends on an already rejected approach, conflicts with accepted or queued work, or cannot apply cleanly because accepted work moved the surface, mark it `stale-against-head`, reject it, or queue a narrower rerun. Queue a fresh shard only when the original objective is still valuable.
+4. Collapse stale and conflicting work before reading it deeply. If the patch is stale against head, touches superseded files, depends on an already rejected approach, conflicts with accepted or queued work, or cannot apply cleanly because accepted work moved the surface, mark it `stale-against-head`, reject it, or queue a narrower rerun. When autonomous apply can prove a head-moved patch still applied at its collected source head, prefer a current-head rerun continuation over `conflict-blocked`. Queue a fresh shard only when the original objective is still valuable.
 5. Collapse failed evidence and evidence-poor results. Missing patches, failed required commands, contradictory handoffs, unproven claims, or logs without enough context are not coordinator blockers. Mark them failed evidence or discovery-only, then spawn a narrower rerun only if there is a concrete hypothesis worth testing.
 6. Escalate true human blockers last and rarely. A blocked result should name the human decision, owner, file or package surface, and exact question that the coordinator cannot answer locally.
 
@@ -50,7 +50,8 @@ Do not call these cases blocked:
 - The worker crashed, timed out, or exited nonzero. That is failed evidence.
 - A required gate failed after applying the patch. That is failed evidence, usually a rejection.
 - The patch is missing, malformed, or lacks changed paths. That is failed evidence or discovery-only.
-- The patch no longer applies to current head. That is stale work.
+- The patch no longer applies to current head, but replay at the collected head proves the patch was valid when collected. That is current-head rerun work.
+- The patch no longer applies to current head and cannot be proven valid at the collected head. That is stale or conflict retry work.
 - The patch conflicts with current accepted work or another queued candidate. That is queue pressure for the coordinator to reject, mark stale, promote, or rerun.
 - The handoff claims success but omits commands, evidence files, changed paths, or acceptance mapping. That is evidence-poor failed evidence.
 - The worker changed disallowed files. That is failed evidence unless the parent explicitly expands ownership.

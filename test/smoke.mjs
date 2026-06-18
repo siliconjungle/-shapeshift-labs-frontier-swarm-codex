@@ -1599,12 +1599,16 @@ const staleConflictBeforeApplyResult = await autonomousApplyCodexSwarmRun({
 });
 const staleConflictBeforeApplyDecision = staleConflictBeforeApplyResult.decisions[0];
 assert.strictEqual(staleConflictBeforeApplyResult.ok, false);
-assert.strictEqual(staleConflictBeforeApplyResult.summary['conflict-blocked'], 1);
-assert.strictEqual(staleConflictBeforeApplyDecision.status, 'conflict-blocked');
-assert.strictEqual(staleConflictBeforeApplyDecision.reason, 'repository head changed since bundle collection and git apply --check failed');
+assert.strictEqual(staleConflictBeforeApplyResult.summary.rerun, 1);
+assert.strictEqual(staleConflictBeforeApplyResult.summary['conflict-blocked'], 0);
+assert.strictEqual(staleConflictBeforeApplyDecision.status, 'rerun');
+assert.strictEqual(
+  staleConflictBeforeApplyDecision.reason,
+  'repository head changed since bundle collection and patch applies at collection head but not current head; rerun against current head'
+);
 assert.strictEqual(staleConflictBeforeApplyDecision.headBefore, staleConflictBeforeApplyCollectedHead);
 assert.strictEqual(staleConflictBeforeApplyDecision.headAfter, staleConflictBeforeApplyAdvancedHead);
-assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.status, 'conflict-blocked');
+assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.status, 'rerun');
 assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.collectionHead, staleConflictBeforeApplyCollectedHead);
 assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.leaseHead, staleConflictBeforeApplyAdvancedHead);
 assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.currentHead, staleConflictBeforeApplyAdvancedHead);
@@ -1612,6 +1616,20 @@ assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.movedSinc
 assert.strictEqual(staleConflictBeforeApplyDecision.leaseReadback.head.movedDuringDecision, false);
 assert.deepStrictEqual(staleConflictBeforeApplyResult.decisionReadbacks, [staleConflictBeforeApplyDecision.leaseReadback]);
 assert.strictEqual(staleConflictBeforeApplyResult.queueOverlay.entries[0].status, 'stale-against-head');
+assert.ok(staleConflictBeforeApplyDecision.commands.some((entry) => entry.command.slice(0, 4).join(' ') === 'git worktree add --detach'));
+assert.ok(staleConflictBeforeApplyDecision.commands.some((entry) => entry.command.join(' ') === `git apply --check ${staleConflictBeforeApplyDecision.patchPath}`));
+assert.ok(staleConflictBeforeApplyResult.rerunManifest);
+assert.strictEqual(staleConflictBeforeApplyResult.rerunManifest.summary.taskCount, 1);
+assert.strictEqual(staleConflictBeforeApplyResult.rerunManifest.summary.decisionRerunCount, 1);
+assert.strictEqual(staleConflictBeforeApplyResult.rerunManifest.summary.conflictBlockedCount, 0);
+const staleConflictBeforeApplyRerunTask = staleConflictBeforeApplyResult.rerunManifest.items[0];
+assert.strictEqual(staleConflictBeforeApplyRerunTask.id, 'stale-conflict-before-apply-task-rerun-current-head');
+assert.strictEqual(staleConflictBeforeApplyRerunTask.lane, 'queue-metadata');
+assert.deepStrictEqual(staleConflictBeforeApplyRerunTask.metadata.rerun.sourceKinds, ['decision-rerun']);
+assert.deepStrictEqual(staleConflictBeforeApplyRerunTask.metadata.rerun.decisionStatuses, ['rerun']);
+assert.strictEqual(staleConflictBeforeApplyRerunTask.metadata.rerun.currentHead, staleConflictBeforeApplyAdvancedHead);
+assert.deepStrictEqual(staleConflictBeforeApplyRerunTask.metadata.rerun.conflictHeadBefore, [staleConflictBeforeApplyCollectedHead]);
+assert.deepStrictEqual(staleConflictBeforeApplyRerunTask.metadata.rerun.conflictHeadAfter, [staleConflictBeforeApplyAdvancedHead]);
 assert.strictEqual(await fs.readFile(path.join(staleConflictBeforeApplyRepo, 'src', 'apply.ts'), 'utf8'), 'other\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: staleConflictBeforeApplyRepo })).stdout, '');
 
