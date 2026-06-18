@@ -162,6 +162,7 @@ export interface FrontierCodexSwarmAutoDrainOptions {
   maxChangedRegions?: number;
   maxHighRisk?: number;
   allowRisks?: readonly FrontierSwarmRiskLevel[];
+  admitConflictLeaders?: boolean;
   checkStale?: boolean;
   focusedCommands?: readonly (string | FrontierSwarmCommand)[];
   globalCommands?: readonly (string | FrontierSwarmCommand)[];
@@ -1328,7 +1329,7 @@ function buildAutoDrainAdmission(input: {
   candidateJobIds?: readonly string[];
 }): FrontierSwarmMergeAdmission {
   const index = input.candidateJobIds ? filterMergeIndexForJobIds(input.collection.mergeIndex, input.candidateJobIds) : input.collection.mergeIndex;
-  return createSwarmMergeAdmission({
+  const admission = createSwarmMergeAdmission({
     index,
     maxReady: input.options.maxReady ?? index.entries.length,
     ...(input.options.maxChangedPaths !== undefined ? { maxChangedPaths: input.options.maxChangedPaths } : {}),
@@ -1343,6 +1344,132 @@ function buildAutoDrainAdmission(input: {
       runDir: input.runDir
     }
   });
+  return input.options.admitConflictLeaders === false
+    ? admission
+    : admitAutoDrainConflictLeaders({ index, admission });
+}
+
+function admitAutoDrainConflictLeaders(input: {
+  index: FrontierSwarmMergeIndex;
+  admission: FrontierSwarmMergeAdmission;
+}): FrontierSwarmMergeAdmission {
+  const admitted = new Set(input.admission.admitted);
+  const maxReady = input.admission.budget.maxReady;
+  const remainingSlots = Math.max(0, maxReady - admitted.size);
+  if (remainingSlots === 0) return input.admission;
+  const entriesByJobId = new Map(input.index.entries.map((entry) => [entry.jobId, entry]));
+  const deferralsByJobId = new Map(input.admission.deferred.map((entry) => [entry.jobId, entry.reasons]));
+  const eligible = input.index.entries.filter((entry) => {
+    const reasons = deferralsByJobId.get(entry.jobId) ?? [];
+    return !admitted.has(entry.jobId)
+      && reasons.length === 1
+      && reasons[0] === 'conflicting-changes'
+      && entry.disposition === 'auto-mergeable'
+      && entry.autoMergeable
+      && !entry.staleAgainstHead
+      && entry.ownershipViolations.length === 0;
+  });
+  if (!eligible.length) return input.admission;
+  const eligibleIds = new Set(eligible.map((entry) => entry.jobId));
+  const selected: string[] = [];
+  const visited = new Set<string>();
+  for (const entry of eligible.sort(compareAutoDrainConflictLeaders)) {
+    if (visited.has(entry.jobId) || selected.length >= remainingSlots) continue;
+    const component = collectAutoDrainConflictComponent(entry, entriesByJobId, eligibleIds, visited);
+    const leader = component.sort(compareAutoDrainConflictLeaders)[0];
+    if (!leader) continue;
+    const nextAdmitted = [...admitted, ...selected, leader.jobId];
+    if (!autoDrainAdmissionBudgetAllows(input.index, input.admission, nextAdmitted)) continue;
+    selected.push(leader.jobId);
+  }
+  if (!selected.length) return input.admission;
+  const nextAdmitted = uniqueStrings([...input.admission.admitted, ...selected]);
+  const selectedSet = new Set(selected);
+  const nextDeferred = input.admission.deferred.filter((entry) => !selectedSet.has(entry.jobId));
+  const changedPaths = new Set<string>();
+  const changedRegions = new Set<string>();
+  let highRiskCount = 0;
+  for (const jobId of nextAdmitted) {
+    const entry = entriesByJobId.get(jobId);
+    if (!entry) continue;
+    for (const file of entry.changedPaths) changedPaths.add(file);
+    for (const region of entry.changedRegions) changedRegions.add(region);
+    if (entry.riskLevel === 'high') highRiskCount += 1;
+  }
+  return {
+    ...input.admission,
+    id: `${input.admission.id}:conflict-leaders:${stableHash(selected)}`,
+    admitted: nextAdmitted,
+    deferred: nextDeferred,
+    metadata: {
+      ...(input.admission.metadata ?? {}),
+      conflictLeaderAdmission: {
+        enabled: true,
+        selectedJobIds: selected
+      }
+    },
+    summary: {
+      admittedCount: nextAdmitted.length,
+      deferredCount: nextDeferred.length,
+      changedPathCount: changedPaths.size,
+      changedRegionCount: changedRegions.size,
+      highRiskCount
+    }
+  };
+}
+
+function collectAutoDrainConflictComponent(
+  seed: FrontierSwarmMergeIndex['entries'][number],
+  entriesByJobId: Map<string, FrontierSwarmMergeIndex['entries'][number]>,
+  eligibleIds: Set<string>,
+  visited: Set<string>
+): FrontierSwarmMergeIndex['entries'] {
+  const component: FrontierSwarmMergeIndex['entries'] = [];
+  const stack = [seed.jobId];
+  while (stack.length) {
+    const jobId = stack.pop();
+    if (!jobId || visited.has(jobId) || !eligibleIds.has(jobId)) continue;
+    visited.add(jobId);
+    const entry = entriesByJobId.get(jobId);
+    if (!entry) continue;
+    component.push(entry);
+    for (const conflictingJobId of entry.conflictingJobIds) {
+      if (eligibleIds.has(conflictingJobId) && !visited.has(conflictingJobId)) stack.push(conflictingJobId);
+    }
+  }
+  return component;
+}
+
+function autoDrainAdmissionBudgetAllows(
+  index: FrontierSwarmMergeIndex,
+  admission: FrontierSwarmMergeAdmission,
+  jobIds: readonly string[]
+): boolean {
+  const entriesByJobId = new Map(index.entries.map((entry) => [entry.jobId, entry]));
+  const changedPaths = new Set<string>();
+  const changedRegions = new Set<string>();
+  let highRiskCount = 0;
+  for (const jobId of jobIds) {
+    const entry = entriesByJobId.get(jobId);
+    if (!entry) continue;
+    for (const file of entry.changedPaths) changedPaths.add(file);
+    for (const region of entry.changedRegions) changedRegions.add(region);
+    if (entry.riskLevel === 'high') highRiskCount += 1;
+  }
+  if (admission.budget.maxChangedPaths !== undefined && changedPaths.size > admission.budget.maxChangedPaths) return false;
+  if (admission.budget.maxChangedRegions !== undefined && changedRegions.size > admission.budget.maxChangedRegions) return false;
+  if (admission.budget.maxHighRisk !== undefined && highRiskCount > admission.budget.maxHighRisk) return false;
+  return jobIds.length <= admission.budget.maxReady;
+}
+
+function compareAutoDrainConflictLeaders(
+  left: FrontierSwarmMergeIndex['entries'][number],
+  right: FrontierSwarmMergeIndex['entries'][number]
+): number {
+  return left.changedPaths.length - right.changedPaths.length
+    || left.changedRegions.length - right.changedRegions.length
+    || left.conflictingJobIds.length - right.conflictingJobIds.length
+    || left.jobId.localeCompare(right.jobId);
 }
 
 function filterMergeIndexForJobIds(index: FrontierSwarmMergeIndex, jobIds: readonly string[]): FrontierSwarmMergeIndex {

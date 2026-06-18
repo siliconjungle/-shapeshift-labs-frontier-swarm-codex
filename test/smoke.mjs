@@ -657,6 +657,65 @@ assert.deepStrictEqual(autoDrainBudgetRun.autoDrain.iterations.map((iteration) =
 assert.strictEqual(await fs.readFile(path.join(autoDrainBudgetRepo, 'src', 'one.ts'), 'utf8'), 'new-one\n');
 assert.strictEqual(await fs.readFile(path.join(autoDrainBudgetRepo, 'src', 'two.ts'), 'utf8'), 'new-two\n');
 
+const autoDrainConflictRepo = await createApplyFixtureRepo(tmp, 'auto-drain-conflict-repo');
+const autoDrainConflictPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-conflict',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'apply-first-task',
+      lane: 'apply',
+      ownedFiles: ['src/apply.ts'],
+      verification: [{
+        name: 'worker-sees-first',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='first\\n') process.exit(1);"]
+      }]
+    }, {
+      id: 'apply-second-task',
+      lane: 'apply',
+      ownedFiles: ['src/apply.ts'],
+      verification: [{
+        name: 'worker-sees-second',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='second\\n') process.exit(1);"]
+      }]
+    }]
+  }
+});
+const autoDrainConflictRun = await runCodexSwarm(autoDrainConflictPlan, {
+  outDir: path.join(autoDrainConflictRepo, 'agent-runs', 'auto-drain-conflict-run'),
+  cwd: autoDrainConflictRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainConflictRepo, 'agent-runs', 'auto-drain-conflict-run', 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    maxIterations: 3
+  },
+  executor: async (input) => {
+    const value = input.job.taskId === 'apply-first-task' ? 'first\n' : 'second\n';
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), value);
+    await fs.writeFile(input.paths.lastMessagePath, `${input.job.taskId} changed\n`);
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: `${input.job.taskId} changed` };
+  }
+});
+assert.strictEqual(autoDrainConflictRun.ok, true);
+assert.strictEqual(autoDrainConflictRun.autoDrain.iterations[0].admittedJobIds.length, 1);
+assert.strictEqual(autoDrainConflictRun.autoDrain.iterations[0].deferredJobIds.length, 1);
+assert.strictEqual(autoDrainConflictRun.autoDrain.iterations[0].admission.metadata.conflictLeaderAdmission.enabled, true);
+assert.strictEqual(autoDrainConflictRun.autoDrain.iterations[0].admission.metadata.conflictLeaderAdmission.selectedJobIds.length, 1);
+assert.strictEqual(autoDrainConflictRun.autoDrain.summary.applyCount >= 1, true);
+assert.strictEqual(autoDrainConflictRun.autoDrain.summary.terminalCount >= 1, true);
+assert.ok(['first\n', 'second\n'].includes(await fs.readFile(path.join(autoDrainConflictRepo, 'src', 'apply.ts'), 'utf8')));
+
 const autoDrainDryRunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dry-run-repo');
 const autoDrainDryRun = await runCodexSwarm(autoDrainPlan, {
   outDir: path.join(autoDrainDryRunRepo, 'agent-runs', 'auto-drain-dry-run'),
