@@ -2,6 +2,8 @@
 
 This workflow is for a human coordinator running Frontier swarm jobs in any repository that has a swarm manifest, a task queue, and ownership rules. It assumes workers write merge bundles, patches, verification output, and evidence under a run directory.
 
+The normal path is self-draining: `run` starts workers, then coordinator-agent drain collects their bundles, builds scoped queues, and applies only admitted patches under the repo lock and configured gates. Queue pressure is pending coordinator work, not landed code, until autonomous apply records `applied` or `committed`. Human blockers are rare explicit questions, not ordinary stale, queued, conflicted, or reviewable work.
+
 ## Start a Run
 
 Pick an output directory that names the run, then launch with the smallest workspace that still contains the files workers need:
@@ -48,7 +50,7 @@ The run directory is the operator console. Check these files while the run is ac
 - `auto-drain/apply-*/autonomous-merge-decisions.jsonl`: append-only decisions from autonomous apply.
 - Worker directories: `last-message.md`, `merge.json`, `changes.patch`, verification output, and evidence artifacts.
 
-After a run, use `coordinator-dashboard.json.operatorSummary` for human-facing queue status. It is the display contract for the top-line status, headline, cards, and counts; use lower-level queue metadata only when drilling into diagnostics.
+After a run, use `coordinator-dashboard.json.operatorSummary` for human-facing queue status. It is the display contract for the top-line status, headline, cards, and counts; use lower-level queue metadata only when drilling into diagnostics. Treat blocker UI as reserved for `operatorSummary.status === "blocked"`, the true-blockers card, or explicit `humanQuestions`.
 
 If auto-drain is disabled or you want to drain a previous run explicitly, use `autonomous-apply`:
 
@@ -67,11 +69,11 @@ frontier-swarm-codex autonomous-apply \
 Collection sorts worker output into buckets before apply:
 
 - `ready-to-apply`: verified, ownership-clean bundles that can be considered for autonomous apply.
-- `needs-human-port`: useful patches or findings that need a human to port or review.
-- `failed-evidence`: failed workers, blockers, ownership violations, or failed required commands.
+- `needs-human-port`: useful patches or findings that need manual porting, review, or coordinator promotion. This is queue pressure, not a blocker by itself.
+- `failed-evidence`: failed workers, ownership violations, failed required commands, or evidence-poor output. Reject or rerun from the evidence unless it names an explicit missing-authority question.
 - `stale-against-head`: patches that no longer apply to the current head.
 
-Auto-drain may defer a ready bundle because of limits such as changed paths, changed regions, high-risk flags, or per-iteration caps. Deferred is not the same as rejected; it means the coordinator should review the admission record or run another drain with adjusted limits.
+Auto-drain may defer a ready bundle because of limits such as changed paths, changed regions, high-risk flags, or per-iteration caps. Deferred is not the same as rejected, blocked, or applied; it means the coordinator should review the admission record or run another drain with adjusted limits.
 
 Autonomous apply decisions are the final source of truth for a bundle:
 
@@ -81,7 +83,7 @@ Autonomous apply decisions are the final source of truth for a bundle:
 - `rejected`: the patch was applied, a required gate failed, and the patch was rolled back. Inspect the decision commands and worker evidence before asking for a narrower fix.
 - `rerun`: the bundle was stale against the current head or the head changed during checking. Rerun that task against the updated base.
 - `conflict-blocked`: `git apply --check` failed. Port manually or rerun the worker with current source refs.
-- `human-blocked`: the bundle was not marked auto-mergeable or violated ownership. A human coordinator must decide whether to port, split, or reject it.
+- `human-blocked`: the bundle needs a human decision because the recorded reason names missing authority, parent assignment, ownership, or policy/risk approval. A human coordinator must decide whether to port, split, or reject it.
 - `skipped`: there was no source patch to apply, usually a discovery-only result.
 - `failed`: apply infrastructure failed, such as git, lock, branch, rollback, or commit operations. Inspect the recorded command output before retrying.
 

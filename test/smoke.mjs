@@ -605,8 +605,8 @@ assert.deepStrictEqual(autoDrainDashboard.humanQuestions, autoDrainDashboard.que
 assert.deepStrictEqual(autoDrainDashboard.operatorSummary, autoDrainDashboard.queueMetadata.operatorSummary);
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.kind, 'frontier.swarm-codex.dashboard-queue-health');
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.available, true);
-assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount, autoDrainRun.autoDrainArtifacts.mergeQueue.count);
-assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.leaseCount, autoDrainRun.autoDrainArtifacts.mergeQueue.scopeCount);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount, 0);
+assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.leaseCount, 0);
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.lockKeyCount, 1);
 assert.deepStrictEqual(autoDrainDashboard.queueMetadata.queueHealth.lockScopeCounts, { semantic: 1, path: 0, repo: 0 });
 assert.strictEqual(autoDrainDashboard.queueMetadata.queueHealth.localQueueCount, 0);
@@ -652,6 +652,90 @@ assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.patchStackPlanCount, 
 assert.strictEqual(autoDrainRun.autoDrain.iterations[0].grouping.summary.readyCount, 1);
 assert.strictEqual(typeof autoDrainRun.autoDrainArtifacts.generatedAt, 'number');
 const autoDrainArtifactIteration = autoDrainRun.autoDrainArtifacts.iterations[0];
+const autoDrainCoordinatorDrainPath = autoDrainRun.autoDrain.iterations[0].coordinatorAgentDrainPath;
+const autoDrainCoordinatorDrainWorkPath = autoDrainRun.autoDrain.iterations[0].coordinatorAgentDrainWorkPath;
+assert.ok(await exists(autoDrainCoordinatorDrainPath));
+assert.ok(await exists(autoDrainCoordinatorDrainWorkPath));
+assert.strictEqual(autoDrainArtifactIteration.coordinatorAgentDrainPath, autoDrainCoordinatorDrainPath);
+assert.strictEqual(autoDrainArtifactIteration.coordinatorAgentDrainWorkPath, autoDrainCoordinatorDrainWorkPath);
+assert.deepStrictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgent.paths, [autoDrainCoordinatorDrainPath]);
+assert.deepStrictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgentDrainWork.paths, [autoDrainCoordinatorDrainWorkPath]);
+assert.deepStrictEqual(autoDrainDashboard.autoDrainArtifacts.coordinatorAgent.paths, [autoDrainCoordinatorDrainPath]);
+assert.deepStrictEqual(autoDrainDashboard.autoDrainArtifacts.coordinatorAgentDrainWork.paths, [autoDrainCoordinatorDrainWorkPath]);
+assert.deepStrictEqual(autoDrainDashboard.queueMetadata.paths.coordinatorAgentDrainWork, [autoDrainCoordinatorDrainWorkPath]);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgent.count, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgent.assignmentCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgent.selectedCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgent.deferredCount, 0);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgent.promoteCount, 0);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgent.queueLocalCount, 0);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.coordinatorAgentDrainCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgentDrainWork.count, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgentDrainWork.assignmentCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgentDrainWork.terminalCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgentDrainWork.nonTerminalCount, 0);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgentDrainWork.promotedWorkCount, 0);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.coordinatorAgentDrainWork.appliedCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.coordinatorAgentDrainWorkCount, 1);
+const autoDrainCoordinatorDrainArtifact = JSON.parse(await fs.readFile(autoDrainCoordinatorDrainPath, 'utf8'));
+const autoDrainCoordinatorDrainWorkArtifact = JSON.parse(await fs.readFile(autoDrainCoordinatorDrainWorkPath, 'utf8'));
+assert.strictEqual(autoDrainCoordinatorDrainArtifact.kind, FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND);
+assert.strictEqual(autoDrainCoordinatorDrainWorkArtifact.kind, 'frontier.swarm.coordinator-agent-drain-work');
+assert.strictEqual(autoDrainCoordinatorDrainArtifact.workArtifactId, autoDrainCoordinatorDrainWorkArtifact.id);
+assert.strictEqual(autoDrainCoordinatorDrainArtifact.workArtifactPath, autoDrainCoordinatorDrainWorkPath);
+assert.strictEqual(autoDrainCoordinatorDrainArtifact.iteration, 1);
+assert.deepStrictEqual(autoDrainCoordinatorDrainArtifact.readyJobIds, [autoDrainRun.run.results[0].jobId]);
+assert.deepStrictEqual(autoDrainCoordinatorDrainArtifact.admittedJobIds, [autoDrainRun.run.results[0].jobId]);
+assert.deepStrictEqual(autoDrainCoordinatorDrainArtifact.deferredJobIds, []);
+assert.strictEqual(autoDrainCoordinatorDrainArtifact.summary.assignmentCount, 1);
+assert.strictEqual(autoDrainCoordinatorDrainArtifact.summary.selectedCount, 1);
+assert.strictEqual(autoDrainCoordinatorDrainArtifact.summary.deferredCount, 0);
+assert.strictEqual(autoDrainCoordinatorDrainArtifact.summary.applyLocalCount, 1);
+const autoDrainCoordinatorDrainAssignment = autoDrainCoordinatorDrainArtifact.assignments[0];
+assert.strictEqual(autoDrainCoordinatorDrainAssignment.jobId, autoDrainRun.run.results[0].jobId);
+assert.strictEqual(autoDrainCoordinatorDrainAssignment.taskId, 'apply-task');
+assert.strictEqual(autoDrainCoordinatorDrainAssignment.queueAction, 'apply-local');
+assert.strictEqual(autoDrainCoordinatorDrainAssignment.decision, 'selected');
+assert.strictEqual(autoDrainCoordinatorDrainAssignment.selected, true);
+assert.deepStrictEqual(autoDrainCoordinatorDrainAssignment.queueItemIds, ['apply-task']);
+assert.deepStrictEqual(autoDrainCoordinatorDrainAssignment.changedPaths, ['src/apply.ts']);
+assert.deepStrictEqual(autoDrainCoordinatorDrainAssignment.changedRegions, ['src/apply.ts#apply']);
+assert.deepStrictEqual(autoDrainCoordinatorDrainAssignment.serializesAfterJobIds, []);
+assert.deepStrictEqual(autoDrainCoordinatorDrainAssignment.leaderJobIds, [autoDrainRun.run.results[0].jobId]);
+assert.strictEqual(autoDrainCoordinatorDrainAssignment.selectionReason, 'ready-local-drain-leader');
+assert.ok(autoDrainCoordinatorDrainAssignment.reasons.includes('coordinator-agent-drain-selected'));
+assert.strictEqual(autoDrainCoordinatorDrainWorkArtifact.summary.assignmentCount, 1);
+assert.strictEqual(autoDrainCoordinatorDrainWorkArtifact.summary.terminalCount, 1);
+assert.strictEqual(autoDrainCoordinatorDrainWorkArtifact.summary.appliedCount, 1);
+assert.strictEqual(autoDrainCoordinatorDrainWorkArtifact.summary.promotedWorkCount, 0);
+assert.deepStrictEqual(autoDrainCoordinatorDrainWorkArtifact.assignments[0].queueItemIds, ['apply-task']);
+assert.deepStrictEqual(autoDrainCoordinatorDrainWorkArtifact.terminalDecisions[0].queueItemIds, ['apply-task']);
+assert.strictEqual(autoDrainDashboard.autoDrain.summary.remainingReadyCount, 0);
+assert.deepStrictEqual(autoDrainDashboard.autoDrain.terminalJobIds, [autoDrainCoordinatorDrainAssignment.jobId]);
+assert.deepStrictEqual(autoDrainDashboard.autoDrain.blockedJobIds, []);
+assert.strictEqual(autoDrainDashboard.autoDrain.iterations[0].postApplyCollection.buckets['ready-to-apply'].length, 0);
+assert.strictEqual(autoDrainDashboard.autoDrain.summary.blockedCount, 0);
+assert.strictEqual(autoDrainDashboard.autoDrain.summary.conflictBlockedCount, 0);
+assert.strictEqual(autoDrainDashboard.autoDrain.summary.humanBlockedCount, 0);
+assert.deepStrictEqual({
+  remainingReady: autoDrainDashboard.autoDrain.summary.remainingReadyCount,
+  activeQueues: autoDrainDashboard.queueMetadata.queueHealth.activeCoordinatorQueueCount,
+  leases: autoDrainDashboard.queueMetadata.queueHealth.leaseCount,
+  localQueued: autoDrainDashboard.queueMetadata.queueHealth.localQueueCount,
+  promoted: autoDrainDashboard.queueMetadata.queueHealth.promotedCount,
+  staleOrRerun: autoDrainDashboard.queueMetadata.queueHealth.staleOrRerunCount,
+  trueBlockers: autoDrainDashboard.queueMetadata.queueHealth.trueBlockerCount,
+  humanQuestions: autoDrainDashboard.humanQuestions.count
+}, {
+  remainingReady: 0,
+  activeQueues: 0,
+  leases: 0,
+  localQueued: 0,
+  promoted: 0,
+  staleOrRerun: 0,
+  trueBlockers: 0,
+  humanQuestions: 0
+});
 assert.strictEqual(autoDrainArtifactIteration.hierarchicalMergeQueuePath, path.join(autoDrainOutDir, 'auto-drain', 'collection-01', 'hierarchical-merge-queue.json'));
 assert.ok(autoDrainRun.autoDrainArtifacts.mergeQueue.paths.includes(autoDrainArtifactIteration.hierarchicalMergeQueuePath));
 assert.strictEqual(autoDrainArtifactIteration.mergeQueueApplyLocalCount, autoDrainRun.autoDrainArtifacts.mergeQueue.applyLocalCount);

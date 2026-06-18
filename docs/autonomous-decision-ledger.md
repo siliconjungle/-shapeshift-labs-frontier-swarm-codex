@@ -49,6 +49,36 @@ The same apply run also writes `autonomous-apply.json` and
 `autonomous-queue-overlay.json`. The JSONL ledger is the durable decision source; the
 overlay is a derived coordinator view.
 
+## Relationship To Coordinator-Agent Drain
+
+Coordinator-agent drain artifacts describe queue work before or around apply. The
+autonomous decision ledger records the terminal result of an apply attempt. Keep those
+layers separate:
+
+- `frontier.swarm.coordinator-agent-drain-work` is the generic queue contract. It
+  contains scope leases, queue assignments, terminal queue decisions, and promoted work.
+- `frontier.swarm-codex.coordinator-agent-drain` is the Codex auto-drain iteration
+  contract. It records ready assignments that were `selected` or `deferred` for that
+  iteration, plus lease keys, promotion targets, serialization leaders, and selection
+  reasons.
+- `frontier.swarm-codex.autonomous-merge-decision` is the append-only apply decision
+  event. It is the source of truth for whether a selected patch was checked, applied,
+  committed, rejected, rerun, conflict-blocked, failed, skipped, or human-blocked.
+
+A selected coordinator-agent assignment is not a landed patch. It only means the job
+became the local drain leader for the iteration. Match it to a JSONL decision by
+`jobId` or `queueItemIds` before showing a terminal outcome. A deferred assignment,
+`queued` drain decision, or `escalated` promoted work item is still coordinator queue
+work; it is not a human blocker unless a later decision explicitly becomes
+`human-blocked` or the queue assignment is a true `block`.
+
+Generic coordinator-agent terminal decisions can close queue items without a patch
+apply when the queue action is `rerun`, `reject`, `record-only`, or `block`. In Codex
+auto-drain, patch application still uses this ledger for apply attempts. That means a
+dashboard may need both sources: the coordinator-agent drain artifact explains why an
+item was selected, deferred, or promoted; the JSONL ledger explains what happened when
+the coordinator tried to apply it.
+
 ## Decision Statuses
 
 Read a decision `status` as both the observed outcome and the next coordinator action.

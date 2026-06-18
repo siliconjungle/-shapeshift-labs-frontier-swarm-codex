@@ -13,6 +13,7 @@ import {
   FRONTIER_SWARM_QUEUE_OVERLAY_KIND,
   FRONTIER_SWARM_QUEUE_OVERLAY_VERSION,
   createSwarmHierarchicalMergeQueue,
+  createSwarmCoordinatorAgentDrainWork,
   createSwarmMergeAdmission,
   createSwarmMergeBundle,
   createSwarmMergeIndex,
@@ -31,6 +32,7 @@ import {
   recordSwarmEvent,
   routeSwarmEventToMailboxes,
   type FrontierSwarmCommand,
+  type FrontierSwarmCoordinatorAgentDrainWork,
   type FrontierSwarmEventInput,
   type FrontierSwarmEventStream,
   type FrontierSwarmJob,
@@ -564,6 +566,8 @@ export interface FrontierCodexCoordinatorAgentDrainArtifact {
   collectionDir: string;
   mergeQueueId: string;
   admissionId?: string;
+  workArtifactId?: string;
+  workArtifactPath?: string;
   readyJobIds: string[];
   admittedJobIds: string[];
   deferredJobIds: string[];
@@ -851,6 +855,8 @@ export interface FrontierCodexSwarmAutoDrainIteration {
   readyJobIds: string[];
   coordinatorAgentDrainPath: string;
   coordinatorAgentDrain: FrontierCodexCoordinatorAgentDrainArtifact;
+  coordinatorAgentDrainWorkPath: string;
+  coordinatorAgentDrainWork: FrontierSwarmCoordinatorAgentDrainWork;
   groupingPath: string;
   grouping: FrontierCodexSwarmAutoDrainGroupingArtifact;
   apply?: FrontierCodexAutonomousApplyResult;
@@ -872,6 +878,7 @@ export interface FrontierCodexAutoDrainArtifactIteration {
   reviewerLanePlanPath: string;
   patchStackPlanPath: string;
   coordinatorAgentDrainPath?: string;
+  coordinatorAgentDrainWorkPath?: string;
   postApplyCollectionPath?: string;
   groupingPath?: string;
   applyPath?: string;
@@ -938,6 +945,20 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     promoteCount: number;
     queueLocalCount: number;
   };
+  coordinatorAgentDrainWork: FrontierCodexAutoDrainArtifactPathGroup & {
+    leaseCount: number;
+    assignmentCount: number;
+    terminalCount: number;
+    nonTerminalCount: number;
+    promotedWorkCount: number;
+    appliedCount: number;
+    queuedCount: number;
+    escalatedCount: number;
+    rerunCount: number;
+    rejectedCount: number;
+    recordedCount: number;
+    blockedCount: number;
+  };
   patchStack: FrontierCodexAutoDrainArtifactPathGroup & {
     stackCount: number;
     jobCount: number;
@@ -963,6 +984,7 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     applyCount: number;
     admissionCount: number;
     coordinatorAgentDrainCount: number;
+    coordinatorAgentDrainWorkCount: number;
     mergeQueuePlanCount: number;
     reviewerPlanCount: number;
     patchStackPlanCount: number;
@@ -982,6 +1004,7 @@ export interface FrontierCodexDashboardQueueMetadata {
     autoDrain: string[];
     collections: string[];
     mergeQueues: string[];
+    coordinatorAgentDrainWork: string[];
     queueOverlays: string[];
   };
   actionCounts: {
@@ -1382,6 +1405,8 @@ async function runCodexSwarmAutoDrain(input: {
         readyJobIds: allReadyJobIds,
         coordinatorAgentDrainPath: coordinatorAgentDrain.path,
         coordinatorAgentDrain: coordinatorAgentDrain.artifact,
+        coordinatorAgentDrainWorkPath: coordinatorAgentDrain.workPath,
+        coordinatorAgentDrainWork: coordinatorAgentDrain.workArtifact,
         groupingPath: grouping.path,
         grouping: grouping.artifact,
         lockKeys: [],
@@ -1436,6 +1461,8 @@ async function runCodexSwarmAutoDrain(input: {
       readyJobIds: allReadyJobIds,
       coordinatorAgentDrainPath: coordinatorAgentDrain.path,
       coordinatorAgentDrain: coordinatorAgentDrain.artifact,
+      coordinatorAgentDrainWorkPath: coordinatorAgentDrain.workPath,
+      coordinatorAgentDrainWork: coordinatorAgentDrain.workArtifact,
       groupingPath: grouping.path,
       grouping: grouping.artifact,
       apply,
@@ -1511,11 +1538,26 @@ async function writeAutoDrainCoordinatorAgentDrainArtifact(input: {
   readyJobIds: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
-}): Promise<{ path: string; artifact: FrontierCodexCoordinatorAgentDrainArtifact }> {
-  const artifact = createAutoDrainCoordinatorAgentDrainArtifact(input);
+}): Promise<{
+  path: string;
+  artifact: FrontierCodexCoordinatorAgentDrainArtifact;
+  workPath: string;
+  workArtifact: FrontierSwarmCoordinatorAgentDrainWork;
+}> {
   const artifactPath = path.join(input.outDir, `coordinator-agent-drain-${String(input.iteration).padStart(2, '0')}.json`);
+  const workArtifactPath = path.join(input.outDir, `coordinator-agent-drain-work-${String(input.iteration).padStart(2, '0')}.json`);
+  const workArtifact = createAutoDrainCoordinatorAgentDrainWorkArtifact({
+    ...input,
+    artifactPath
+  });
+  const artifact = createAutoDrainCoordinatorAgentDrainArtifact({
+    ...input,
+    workArtifactId: workArtifact.id,
+    workArtifactPath
+  });
   await writeJsonAtomic(artifactPath, artifact);
-  return { path: artifactPath, artifact };
+  await writeJsonAtomic(workArtifactPath, workArtifact);
+  return { path: artifactPath, artifact, workPath: workArtifactPath, workArtifact };
 }
 
 function createAutoDrainCoordinatorAgentDrainArtifact(input: {
@@ -1525,6 +1567,8 @@ function createAutoDrainCoordinatorAgentDrainArtifact(input: {
   readyJobIds: readonly string[];
   admittedJobIds: readonly string[];
   deferredJobIds: readonly string[];
+  workArtifactId?: string;
+  workArtifactPath?: string;
 }): FrontierCodexCoordinatorAgentDrainArtifact {
   const generatedAt = Date.now();
   const readyIndex = filterMergeIndexForJobIds(input.collection.mergeIndex, input.readyJobIds);
@@ -1595,6 +1639,8 @@ function createAutoDrainCoordinatorAgentDrainArtifact(input: {
     collectionDir: input.collection.outDir,
     mergeQueueId: queue.id,
     admissionId: scopedAdmission.id,
+    ...(input.workArtifactId ? { workArtifactId: input.workArtifactId } : {}),
+    ...(input.workArtifactPath ? { workArtifactPath: input.workArtifactPath } : {}),
     readyJobIds: [...input.readyJobIds],
     admittedJobIds: assignments.filter((assignment) => assignment.selected).map((assignment) => assignment.jobId),
     deferredJobIds: assignments.filter((assignment) => !assignment.selected).map((assignment) => assignment.jobId),
@@ -1612,6 +1658,49 @@ function createAutoDrainCoordinatorAgentDrainArtifact(input: {
       scopeCount: uniqueStrings(assignments.map((assignment) => assignment.scopeId)).length
     }
   };
+}
+
+function createAutoDrainCoordinatorAgentDrainWorkArtifact(input: {
+  collection: FrontierCodexCollectResult;
+  iteration: number;
+  artifactPath: string;
+  admission: FrontierSwarmMergeAdmission;
+  readyJobIds: readonly string[];
+  admittedJobIds: readonly string[];
+  deferredJobIds: readonly string[];
+}): FrontierSwarmCoordinatorAgentDrainWork {
+  const generatedAt = Date.now();
+  const readyIndex = filterMergeIndexForJobIds(input.collection.mergeIndex, input.readyJobIds);
+  const scopedAdmission = scopeAutoDrainCoordinatorAdmission({
+    index: readyIndex,
+    admission: input.admission,
+    admittedJobIds: input.admittedJobIds,
+    deferredJobIds: input.deferredJobIds
+  });
+  const queue = createSwarmHierarchicalMergeQueue({
+    index: readyIndex,
+    admission: scopedAdmission,
+    generatedAt,
+    metadata: {
+      source: FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
+      iteration: input.iteration,
+      collectionDir: input.collection.outDir
+    }
+  });
+  return createSwarmCoordinatorAgentDrainWork({
+    queue,
+    coordinatorId: 'frontier-swarm-codex:auto-drain',
+    generatedAt,
+    metadata: {
+      source: FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
+      iteration: input.iteration,
+      collectionDir: input.collection.outDir,
+      selectedDeferredArtifactPath: input.artifactPath,
+      readyJobIds: [...input.readyJobIds],
+      admittedJobIds: [...input.admittedJobIds],
+      deferredJobIds: [...input.deferredJobIds]
+    }
+  });
 }
 
 function scopeAutoDrainCoordinatorAdmission(input: {
@@ -2948,6 +3037,7 @@ function createDashboardQueueMetadata(
   const decisionSummary = summarizeDashboardAutonomousDecisions(autoDrain);
   const collectOnly = createDashboardCollectOnlyMetadata(autoDrain);
   const unresolvedPressure = summarizeDashboardUnresolvedQueuePressure(autoDrain, artifacts);
+  const activePressure = summarizeDashboardActiveQueuePressure(autoDrain, artifacts);
   const staleCount = unresolvedPressure.staleCount;
   const queueRerunCount = unresolvedPressure.queueRerunCount;
   const rerunCount = queueRerunCount + decisionSummary.rerunDecisionCount;
@@ -2970,12 +3060,12 @@ function createDashboardQueueMetadata(
     version: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION,
     source: artifacts ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND : 'not-collected',
     available: !!artifacts,
-    activeCoordinatorQueueCount: artifacts?.mergeQueue.count ?? 0,
-    leaseCount: artifacts?.mergeQueue.scopeCount ?? 0,
+    activeCoordinatorQueueCount: activePressure.activeCoordinatorQueueCount,
+    leaseCount: activePressure.leaseCount,
     lockKeyCount: autoDrain?.lockKeys.length ?? 0,
     lockScopeCounts: autoDrain?.lockScopeCounts ?? { semantic: 0, path: 0, repo: 0 },
-    localQueueCount: artifacts?.mergeQueue.queueLocalCount ?? 0,
-    promotedCount: artifacts?.mergeQueue.promoteCount ?? 0,
+    localQueueCount: activePressure.localQueueCount,
+    promotedCount: activePressure.promotedCount,
     appliedDecisionCount: decisionSummary.appliedDecisionCount,
     committedDecisionCount: decisionSummary.committedDecisionCount,
     staleOrRerunCount,
@@ -3001,6 +3091,7 @@ function createDashboardQueueMetadata(
       autoDrain: artifacts ? [artifacts.autoDrainPath] : [],
       collections: compactArtifactPaths(iterations.map((iteration) => iteration.collectionPath)),
       mergeQueues: artifacts?.mergeQueue.paths ?? [],
+      coordinatorAgentDrainWork: artifacts?.coordinatorAgentDrainWork?.paths ?? [],
       queueOverlays: compactArtifactPaths(iterations.map((iteration) => iteration.queueOverlayPath))
     },
     actionCounts: {
@@ -3024,6 +3115,39 @@ function createDashboardQueueMetadata(
     queueHealth,
     humanQuestions,
     operatorSummary
+  };
+}
+
+function summarizeDashboardActiveQueuePressure(
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null,
+  artifacts: FrontierCodexAutoDrainArtifactMetadata | null
+): {
+  activeCoordinatorQueueCount: number;
+  leaseCount: number;
+  localQueueCount: number;
+  promotedCount: number;
+} {
+  const fallback = {
+    activeCoordinatorQueueCount: artifacts?.mergeQueue.count ?? 0,
+    leaseCount: artifacts?.mergeQueue.scopeCount ?? 0,
+    localQueueCount: artifacts?.mergeQueue.queueLocalCount ?? 0,
+    promotedCount: artifacts?.mergeQueue.promoteCount ?? 0
+  };
+  if (!autoDrain) return fallback;
+  const latestIteration = autoDrain.iterations.at(-1);
+  const latestCollection = latestIteration?.postApplyCollection ?? latestIteration?.collection;
+  if (!latestCollection) return fallback;
+  const assignments = latestCollection?.hierarchicalMergeQueue?.assignments ?? [];
+  const terminalJobIds = new Set(autoDrain.terminalJobIds ?? []);
+  const blockedJobIds = new Set(autoDrain.blockedJobIds ?? []);
+  const activeAssignments = assignments.filter((assignment) => !terminalJobIds.has(assignment.jobId) && !blockedJobIds.has(assignment.jobId));
+  const pressureActions = new Set<FrontierSwarmMergeQueueAssignmentAction>(['apply-local', 'queue-local', 'promote']);
+  const pressureAssignments = activeAssignments.filter((assignment) => pressureActions.has(assignment.action));
+  return {
+    activeCoordinatorQueueCount: pressureAssignments.length,
+    leaseCount: uniqueStrings(pressureAssignments.map((assignment) => assignment.scopeId)).length,
+    localQueueCount: activeAssignments.filter((assignment) => assignment.action === 'queue-local').length,
+    promotedCount: activeAssignments.filter((assignment) => assignment.action === 'promote').length
   };
 }
 
@@ -3537,6 +3661,7 @@ function createAutoDrainArtifactMetadata(input: {
       reviewerLanePlanPath: collectionArtifacts.reviewerLanePlanPath,
       patchStackPlanPath: collectionArtifacts.patchStackPlanPath,
       coordinatorAgentDrainPath: iteration.coordinatorAgentDrainPath,
+      coordinatorAgentDrainWorkPath: iteration.coordinatorAgentDrainWorkPath,
       ...(iteration.postApplyCollectionPath ? { postApplyCollectionPath: iteration.postApplyCollectionPath } : {}),
       groupingPath: iteration.groupingPath,
       ...(applyPath ? { applyPath } : {}),
@@ -3570,6 +3695,7 @@ function createAutoDrainArtifactMetadata(input: {
   });
   const admissionPaths = compactArtifactPaths(iterations.map((iteration) => iteration.mergeAdmissionPath));
   const coordinatorAgentPaths = compactArtifactPaths(iterations.map((iteration) => iteration.coordinatorAgentDrainPath));
+  const coordinatorAgentDrainWorkPaths = compactArtifactPaths(iterations.map((iteration) => iteration.coordinatorAgentDrainWorkPath));
   const mergeQueuePaths = compactArtifactPaths(iterations.map((iteration) => iteration.hierarchicalMergeQueuePath));
   const groupingPaths = compactArtifactPaths(iterations.flatMap((iteration) => [
     iteration.collectionPath,
@@ -3629,6 +3755,22 @@ function createAutoDrainArtifactMetadata(input: {
       promoteCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrain.summary.promoteCount, 0),
       queueLocalCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrain.summary.queueLocalCount, 0)
     },
+    coordinatorAgentDrainWork: {
+      paths: coordinatorAgentDrainWorkPaths,
+      count: coordinatorAgentDrainWorkPaths.length,
+      leaseCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.leaseCount, 0),
+      assignmentCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.assignmentCount, 0),
+      terminalCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.terminalCount, 0),
+      nonTerminalCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.nonTerminalCount, 0),
+      promotedWorkCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.promotedWorkCount, 0),
+      appliedCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.appliedCount, 0),
+      queuedCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.queuedCount, 0),
+      escalatedCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.escalatedCount, 0),
+      rerunCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.rerunCount, 0),
+      rejectedCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.rejectedCount, 0),
+      recordedCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.recordedCount, 0),
+      blockedCount: input.iterations.reduce((total, iteration) => total + iteration.coordinatorAgentDrainWork.summary.blockedCount, 0)
+    },
     patchStack: {
       paths: patchStackPaths,
       count: patchStackPaths.length,
@@ -3656,6 +3798,7 @@ function createAutoDrainArtifactMetadata(input: {
         input.autoDrainPath,
         ...admissionPaths,
         ...coordinatorAgentPaths,
+        ...coordinatorAgentDrainWorkPaths,
         ...mergeQueuePaths,
         ...groupingPaths,
         ...reviewerPaths,
@@ -3666,6 +3809,7 @@ function createAutoDrainArtifactMetadata(input: {
       applyCount: iterations.filter((iteration) => !!iteration.applyPath).length,
       admissionCount: admissionPaths.length,
       coordinatorAgentDrainCount: coordinatorAgentPaths.length,
+      coordinatorAgentDrainWorkCount: coordinatorAgentDrainWorkPaths.length,
       mergeQueuePlanCount: mergeQueuePaths.length,
       reviewerPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.reviewerLanePlanPath)).length,
       patchStackPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.patchStackPlanPath)).length,

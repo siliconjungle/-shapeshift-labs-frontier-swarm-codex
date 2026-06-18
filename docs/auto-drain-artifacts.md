@@ -8,7 +8,9 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 2. Read `coordinator-dashboard.json` when a UI needs the dashboard-shaped snapshot with lane counts, merge readiness counts, `queueMetadata`, `queueHealth`, `humanQuestions`, `operatorSummary`, proof, event stream, PID manifest path, and the same auto-drain summaries.
 3. Read `auto-drain/auto-drain.json` for the canonical auto-drain ledger, including every iteration, admission result, grouping result, apply result, lock summary, terminal jobs, blocked jobs, and aggregate counts.
 4. Use the `autoDrainArtifacts` object from either `swarm-results.json`, `coordinator-dashboard.json`, or `auto-drain/auto-drain.json` as the compact path index for per-iteration artifacts.
-5. Drill into `auto-drain/collection-NN/*`, `auto-drain/auto-drain-groups-NN.json`, and `auto-drain/apply-NN/*` only when a dashboard needs per-iteration details.
+5. Read `auto-drain/coordinator-agent-drain-work-NN.json` when a dashboard or coordinator agent needs the generic coordinator-agent work contract for one iteration: leases, queue assignments, terminal queue decisions, and promoted work.
+6. Read `auto-drain/coordinator-agent-drain-NN.json` when a dashboard needs the Codex selected/deferred layer for one iteration: selected drain leaders, deferred local work, scope leases, promotion targets, and serialization leaders.
+7. Drill into `auto-drain/collection-NN/*`, `auto-drain/auto-drain-groups-NN.json`, and `auto-drain/apply-NN/*` only when a dashboard needs per-iteration details.
 
 ## Top-Level Run Artifacts
 
@@ -42,10 +44,14 @@ It is the preferred machine-readable index for dashboards because it groups arti
 | `admission.paths` | Per-iteration `merge-admission.json` files | Show which jobs were admitted or deferred by each iteration. |
 | `grouping.paths` | Per-iteration `collection.json`, `merge-index.json`, `queue-overlay.json`, and `auto-drain-groups-NN.json` files | Show the candidate pool, buckets, queue status, and compatible apply groups. |
 | `mergeQueue.paths` | Per-iteration `hierarchical-merge-queue.json` files | Show scoped queue assignments, local apply pressure, queued overflow, promotions, stale reruns, invalid evidence rejections, discovery records, and true blockers. |
+| `coordinatorAgent.paths` | Per-iteration `coordinator-agent-drain-NN.json` files | Show the Codex selected/deferred layer: selected or deferred local queue assignments, lease keys, queue actions, promotions, and serialization leaders. |
+| `coordinatorAgentDrainWork.paths` | Per-iteration `coordinator-agent-drain-work-NN.json` files | Show the generic coordinator-agent work contract: scope leases, queue assignments, terminal queue decisions, promoted work, and action/queue indexes. |
 | `reviewer.paths` | Per-iteration `reviewer-lane-plan.json` files and decision logs | Show human-review queues and apply decisions. |
 | `patchStack.paths` | Per-iteration `patch-stack-plan.json`, `autonomous-apply.json`, `autonomous-queue-overlay.json`, and patch files | Show patch stack ordering, conflicts, apply ledgers, patch files, and remaining work. |
 | `iterations[]` | One compact row per auto-drain iteration | Render timelines without opening every detailed artifact first. |
 | `summary` | Aggregate counts | Render top-line totals such as iteration count, apply count, admission count, reviewer plan count, patch stack plan count, decision count, and patch count. |
+
+`autoDrainArtifacts.coordinatorAgentDrainWork` summarizes all generic drain-work artifacts. Its `assignmentCount`, `terminalCount`, `nonTerminalCount`, `promotedWorkCount`, and decision counts describe coordinator-agent queue work before source mutation. `autoDrainArtifacts.coordinatorAgent` summarizes the Codex selected/deferred layer for auto-drain iterations. Its `assignmentCount`, `selectedCount`, `deferredCount`, `promoteCount`, and `queueLocalCount` are queue-work counts. They do not mean patches landed. A selected assignment means that the coordinator-agent drain selected the local queue leader for this iteration; the matching `autonomous-apply.json` or `autonomous-merge-decisions.jsonl` still owns the terminal outcome.
 
 `autoDrainArtifacts.mergeQueue.promotedPatchCandidateCount`, `autoDrainArtifacts.summary.promotedPatchCandidateCount`, and `coordinator-dashboard.json.queueMetadata.bucketCounts.promotedPatchCandidateCount` count patch candidates that were promoted by auto-drain because coordinator gates were configured. These are not worker-verified bundles and should not be shown as landed work; inspect `metadata.coordinatorPatchCandidatePromotion` on the collected `merge.json` to see the original `needs-port` classification. Promotion writes a `ready-to-apply` collection copy before apply, so treat the count as coordinator-gated queue pressure until the matching apply decision is `applied` or `committed`; a required coordinator gate failure records `rejected` and rolls the patch back.
 
@@ -61,6 +67,37 @@ Auto-drain emits workflow states, queue actions, and apply decisions. Dashboards
 | Queue true blocker | `autoDrainArtifacts.mergeQueue.blockCount`, `coordinator-dashboard.json.queueMetadata.actionCounts.trueBlockerCount`, and `coordinator-dashboard.json.queueMetadata.queueHealth.trueBlockerCount` | `auto-drain/collection-NN/hierarchical-merge-queue.json` assignments with `action === "block"` and reasons including `true-blocker` | Show separately from conflict-blocked. This is a pre-apply queue/planner blocker based on an already blocked bundle state. |
 
 `needs-human-port` is also a workflow bucket, not automatically a human blocker. Use `autoDrainArtifacts.grouping.needsHumanPortCount` and `auto-drain/collection-NN/needs-human-port/<job>/merge.json` to show work that may need manual porting or review, but only `human-blocked` decisions and queue `block` actions should feed blocker badges.
+
+## Coordinator-Agent Drain Contract
+
+Each auto-drain iteration writes `auto-drain/coordinator-agent-drain-work-NN.json` with kind `frontier.swarm.coordinator-agent-drain-work` and version `1`. This is the generic per-iteration contract that lets autonomous coordinator agents drain local queues without relying on prose handoffs. The same iteration also writes `auto-drain/coordinator-agent-drain-NN.json` with kind `frontier.swarm-codex.coordinator-agent-drain` and version `1`; that Codex artifact records the selected/deferred subset that auto-drain will attempt in this iteration.
+
+The artifact is scoped to ready work only. It derives a narrowed hierarchical merge queue from the iteration's ready job ids, merge admission, and collection. It then records which ready jobs were selected for this iteration and which ready jobs were deferred behind a local queue leader or admission cap.
+
+The top-level fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `collectionDir` | Collection directory that provided the merge bundles and queue evidence. |
+| `mergeQueueId` and `admissionId` | Source queue and scoped admission records used to create the drain assignment set. |
+| `readyJobIds` | Ready jobs considered by coordinator-agent drain before selection. |
+| `admittedJobIds` | Selected local queue leaders for this iteration. These are candidates for grouping and apply, not landed work. |
+| `deferredJobIds` | Ready jobs left in the coordinator queue for a later iteration. |
+| `assignments[]` | One coordinator-agent assignment per ready queue item whose queue action is `apply-local`, `queue-local`, or `promote`. |
+| `summary` | Counts for assignments, selected/deferred work, `apply-local`, `queue-local`, promoted work, selected promotions, deferred promotions, and distinct scopes. |
+
+Each `assignments[]` entry records the local queue contract:
+
+| Field | Meaning |
+| --- | --- |
+| `queueAction` | Source hierarchical queue action: `apply-local`, `queue-local`, or `promote`. |
+| `decision` and `selected` | Iteration selection result: `selected`/`true` means this job is the current local drain leader; `deferred`/`false` means it stays queued. |
+| `scopeId`, `parentScopeIds`, `leaseKey`, and `promoteToScopeId` | Queue scope and lease information the coordinator uses to serialize local drain work or route promoted work upward. |
+| `changedPaths`, `changedRegions`, and `conflictingJobIds` | Conflict surface copied from the merge queue. |
+| `serializesAfterJobIds` and `leaderJobIds` | Deterministic local serialization relationship. Deferred assignments should wait for their listed leaders before being selected. |
+| `reasons` and `selectionReason` | Machine-readable reasons for selection, deferral, queue locality, promotion, or serialization. |
+
+The generic `frontier.swarm.coordinator-agent-drain-work` contract maps every hierarchical queue action to a durable coordinator-agent decision and exposes `leases`, `assignments`, `terminalDecisions`, and `promotedWork`. The Codex artifact is narrower: it records auto-drain's per-iteration selected/deferred work before autonomous apply writes terminal decisions, and links back to the generic work artifact with `workArtifactId` and `workArtifactPath`.
 
 ## Operator Summary Contract
 
@@ -110,7 +147,7 @@ It contains:
 
 - `readyJobIds`, `admittedJobIds`, and `deferredJobIds`
 - `groups[]` with compatible job groups, changed paths, changed regions, scope keys, and serialization requirements
-- `jobs[]` with each admitted or deferred job placement
+- `jobs[]` with each admitted or deferred job placement and its embedded `coordinatorAgent` assignment when available
 - `conflicts[]` for path, region, or unscoped conflicts
 - `summary` counts for ready, admitted, deferred, group, serialized job, and conflict totals
 
@@ -137,6 +174,7 @@ In dirty collect-only runs, no `apply-NN` directory is written. The matching `au
 | Run summary card | `swarm-results.json` or `coordinator-dashboard.json` | `auto-drain/auto-drain.json` for terminal/blocked details. |
 | Auto-drain timeline | `autoDrainArtifacts.iterations[]` | Numbered `collection-NN`, `auto-drain-groups-NN.json`, and `apply-NN` paths for expanded rows. |
 | Queue dashboard | `coordinator-dashboard.json` | `auto-drain/collection-NN/queue-overlay.json` before apply and `auto-drain/apply-NN/autonomous-queue-overlay.json` after apply. |
+| Coordinator-agent work view | `autoDrainArtifacts.coordinatorAgentDrainWork` | `auto-drain/coordinator-agent-drain-work-NN.json`, then `auto-drain/coordinator-agent-drain-NN.json`, `auto-drain/auto-drain-groups-NN.json`, and `auto-drain/apply-NN/autonomous-apply.json` for selection, grouping, and terminal outcomes. |
 | Merge admission review | `auto-drain/merge-admission.json` for latest state | `auto-drain/collection-NN/merge-admission.json` for historical iteration state. |
 | Reviewer assignment view | `auto-drain/reviewer-lane-plan.json` for latest state | `auto-drain/collection-NN/reviewer-lane-plan.json` and decision logs. |
 | Patch-stack view | `auto-drain/patch-stack-plan.json` for latest state | `auto-drain/collection-NN/patch-stack-plan.json`, `auto-drain/apply-NN/autonomous-apply.json`, and copied `changes.patch` files. |
@@ -146,6 +184,6 @@ In dirty collect-only runs, no `apply-NN` directory is written. The matching `au
 
 - Treat `swarm-results.json`, `coordinator-dashboard.json`, `auto-drain/auto-drain.json`, and `autoDrainArtifacts` as whole-run summaries.
 - Treat `auto-drain/merge-admission.json`, `auto-drain/reviewer-lane-plan.json`, `auto-drain/patch-stack-plan.json`, and `auto-drain/merge-index.json` as latest auto-drain snapshots.
-- Treat `auto-drain/collection-NN/*`, `auto-drain/auto-drain-groups-NN.json`, and `auto-drain/apply-NN/*` as per-iteration artifacts.
+- Treat `auto-drain/collection-NN/*`, `auto-drain/coordinator-agent-drain-work-NN.json`, `auto-drain/coordinator-agent-drain-NN.json`, `auto-drain/auto-drain-groups-NN.json`, and `auto-drain/apply-NN/*` as per-iteration artifacts.
 - Prefer `autoDrainArtifacts.iterations[]` for navigation because it records the exact paths and counts that existed for each iteration.
 - Prefer per-iteration artifacts when explaining why a job was admitted, deferred, grouped, serialized, applied, rejected, or left for human review.

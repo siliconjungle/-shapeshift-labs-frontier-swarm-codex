@@ -42,6 +42,34 @@ Hierarchical queue assignments collapse worker output into concrete operator act
 
 These actions reduce the single coordinator bottleneck because most work stops at the scope that can prove it. Root review becomes an exception path instead of the default path.
 
+## Coordinator-Agent Drain Work Contract
+
+Coordinator-agent drain work is a machine-readable contract over a hierarchical merge queue. It is not a worker handoff and it is not a prose review checklist. A coordinator agent should be able to read the queue, acquire the relevant queue lease, perform the assigned action, and write a terminal decision or promoted work record without guessing what "needs review" means.
+
+The generic `frontier.swarm.coordinator-agent-drain-work` artifact contains:
+
+| Field | Meaning |
+| --- | --- |
+| `leases[]` | One lease candidate per queue scope. Each lease records the queue id, scope kind, lease scope/key, parent queue, changed paths/regions, queued job ids, and action buckets. |
+| `assignments[]` | One assignment per merge queue item. It binds a job to a queue, lease, assigned action, decision, classification, evidence reasons, risk/readiness/disposition, changed paths/regions, and conflicts. |
+| `terminalDecisions[]` | Assignments whose action already has a terminal coordinator-agent decision. These can be mirrored into queue overlays without another human review pass. |
+| `promotedWork[]` | Non-terminal work that moved from a child queue to a parent queue because local proof was insufficient. |
+| `byAction`, `byQueueId`, and `summary` | Compact indexes for dashboards and queue runners. |
+
+The action-to-decision mapping is stable:
+
+| Queue action | Drain decision | Classification | Meaning |
+| --- | --- | --- | --- |
+| `apply-local` | `applied` | `terminal` | The local queue owns a clean admitted item. The coordinator still re-checks and applies under the apply lock before source changes are retained. |
+| `queue-local` | `queued` | `non-terminal` | Clean work stays in the same queue behind a local capacity or leader decision. |
+| `promote` | `escalated` | `non-terminal` | Work moves to a parent queue; it is not blocked just because it left the child queue. |
+| `rerun` | `rerun` | `terminal` | The existing bundle is stale and should be replaced by a fresh worker result. |
+| `reject` | `rejected` | `terminal` | Evidence, ownership, patch shape, or required gates invalidated the bundle. |
+| `record-only` | `recorded` | `terminal` | Discovery or diagnostics were captured without a source patch. |
+| `block` | `blocked` | `terminal` | A true human or policy blocker exists. The reasons must name the missing authority, owner, surface, or question. |
+
+`frontier-swarm-codex` also writes `auto-drain/coordinator-agent-drain-NN.json` during auto-drain. That artifact is a per-iteration selection layer for ready work. It records `selected` versus `deferred` assignments, local `leaseKey` values, promotion targets, serialization leaders, and selection reasons before `autonomous-apply` writes terminal apply decisions. Treat selected coordinator-agent assignments as drain candidates for the iteration, not as landed patches.
+
 ## Real Run Flow
 
 1. Define lanes and ownership in the swarm manifest. Keep lanes narrow enough that a queue can make local decisions: one subsystem, service, feature area, test harness, or doc surface is easier to drain than a catch-all lane.
@@ -79,6 +107,8 @@ frontier-swarm collect --run agent-runs/my-run
 ```
 
 Read `hierarchical-merge-queue.json` before reading large handoffs. It tells you how many bundles are `apply-local`, `queue-local`, `promote`, `rerun`, `reject`, `record-only`, or `block`, and which scope owns each assignment.
+
+Read `coordinator-agent-drain-NN.json` after the queue when auto-drain is enabled. It tells you which local queue leaders were selected for this iteration, which ready items stayed deferred, and which promoted assignments were serialized behind a leader.
 
 5. Drain local queues. Auto-drain or `autonomous-apply` re-checks admitted bundles under a lock, applies only ready work, runs gates, and writes append-only decisions:
 
@@ -124,6 +154,7 @@ The semantic sidecar improves queue placement. It does not replace `git apply --
 - `coordinator-dashboard.json`: whole-run counts and current queue health.
 - `auto-drain/auto-drain.json`: iteration ledger with terminal and blocked jobs.
 - `auto-drain/collection-NN/hierarchical-merge-queue.json`: per-iteration scoped queue assignments.
+- `auto-drain/coordinator-agent-drain-NN.json`: per-iteration coordinator-agent selected/deferred assignments, lease keys, promotions, and serialization leaders.
 - `auto-drain/collection-NN/merge-index.json`: changed paths, changed regions, conflicts, and readiness.
 - `auto-drain/collection-NN/merge-admission.json`: admitted and deferred jobs.
 - `auto-drain/apply-NN/autonomous-merge-decisions.jsonl`: append-only apply decisions.
