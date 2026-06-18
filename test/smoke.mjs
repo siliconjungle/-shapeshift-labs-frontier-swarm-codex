@@ -1241,6 +1241,9 @@ const autonomousResult = await autonomousApplyCodexSwarmRun({
 assert.strictEqual(autonomousResult.ok, true);
 assert.strictEqual(autonomousResult.dryRun, false);
 assert.strictEqual(autonomousResult.summary.applied, 1);
+assert.strictEqual(autonomousResult.summary.rerunManifestCount, 1);
+assert.strictEqual(autonomousResult.summary.rerunTaskCount, 0);
+assert.strictEqual(autonomousResult.summary.rerunManifestTerminalState, 'drained');
 assert.strictEqual(autonomousResult.decisions[0].status, 'applied');
 assert.strictEqual(autonomousResult.decisions[0].lockScope, 'path');
 assert.deepStrictEqual(autonomousResult.decisions[0].lockKeys, ['path:src/apply.ts']);
@@ -1270,6 +1273,14 @@ assert.deepStrictEqual(autonomousResult.decisionReadbacks, [autonomousReadback])
 assert.strictEqual(autonomousResult.queueOverlay.entries[0].status, 'satisfied');
 assert.strictEqual(await fs.readFile(path.join(autonomousRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
 assert.strictEqual(await exists(autonomousResult.lockPath), false);
+const autonomousRerunManifestPath = path.join(tmp, 'autonomous-apply-out', 'rerun-manifest.json');
+assert.ok(autonomousResult.rerunManifest);
+assert.strictEqual(autonomousResult.rerunManifest.path, autonomousRerunManifestPath);
+assert.strictEqual(autonomousResult.rerunManifest.summary.taskCount, 0);
+assert.strictEqual(autonomousResult.rerunManifest.summary.terminalState, 'drained');
+assert.deepStrictEqual(autonomousResult.rerunManifest.items, []);
+assert.deepStrictEqual(autonomousResult.rerunManifest.tasks, []);
+assert.ok(await exists(autonomousRerunManifestPath));
 const autonomousDecisionLines = (await fs.readFile(autonomousResult.decisionLogPath, 'utf8')).trim().split(/\r?\n/);
 assert.strictEqual(autonomousDecisionLines.length, 1);
 const autonomousDecisionLogEntry = JSON.parse(autonomousDecisionLines[0]);
@@ -1282,6 +1293,16 @@ assert.deepStrictEqual(autonomousApplyArtifact.lockKeys, ['path:src/apply.ts']);
 assert.deepStrictEqual(autonomousApplyArtifact.decisionReadbacks, [autonomousReadback]);
 assert.deepStrictEqual(autonomousApplyArtifact.lockRecoveries, []);
 assert.strictEqual(autonomousApplyArtifact.summary.lockRecoveryCount, 0);
+assert.strictEqual(autonomousApplyArtifact.rerunManifest.path, autonomousRerunManifestPath);
+assert.strictEqual(autonomousApplyArtifact.summary.rerunManifestCount, 1);
+assert.strictEqual(autonomousApplyArtifact.summary.rerunTaskCount, 0);
+assert.strictEqual(autonomousApplyArtifact.summary.rerunManifestTerminalState, 'drained');
+const autonomousRerunManifest = JSON.parse(await fs.readFile(autonomousRerunManifestPath, 'utf8'));
+assert.strictEqual(autonomousRerunManifest.kind, FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND);
+assert.strictEqual(autonomousRerunManifest.summary.taskCount, 0);
+assert.strictEqual(autonomousRerunManifest.summary.terminalState, 'drained');
+assert.deepStrictEqual(autonomousRerunManifest.items, []);
+assert.deepStrictEqual(autonomousRerunManifest.tasks, []);
 
 const staleApplyLockRepo = await createApplyFixtureRepo(tmp, 'autonomous-stale-apply-lock-repo');
 const staleApplyLockPath = path.join(tmp, 'autonomous-stale-apply.lock');
@@ -2086,8 +2107,15 @@ const autoDrainRerunManifestPath = path.join(autoDrainOutDir, 'auto-drain', 'rer
 assert.deepStrictEqual(autoDrainRun.autoDrainArtifacts.rerunManifest.paths, [autoDrainRerunManifestPath]);
 assert.deepStrictEqual(autoDrainDashboard.queueMetadata.paths.rerunManifests, [autoDrainRerunManifestPath]);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.rerunManifest.taskCount, 0);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.rerunManifest.terminalState, 'drained');
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.rerunManifestCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.rerunTaskCount, 0);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.rerunManifestTerminalState, 'drained');
+const autoDrainRerunManifest = JSON.parse(await fs.readFile(autoDrainRerunManifestPath, 'utf8'));
+assert.strictEqual(autoDrainRerunManifest.summary.taskCount, 0);
+assert.strictEqual(autoDrainRerunManifest.summary.terminalState, 'drained');
+assert.deepStrictEqual(autoDrainRerunManifest.items, []);
+assert.deepStrictEqual(autoDrainRerunManifest.tasks, []);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.collectionCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.admissionCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.mergeQueuePlanCount, 1);
@@ -3418,6 +3446,7 @@ assert.strictEqual(cliExplicitDrainRerunResult.ok, true);
 assert.strictEqual(cliExplicitDrainRerunResult.summary.committed, 1);
 assert.strictEqual(cliExplicitDrainRerunResult.summary.rerunManifestCount, 1);
 assert.strictEqual(cliExplicitDrainRerunResult.summary.rerunTaskCount, 1);
+assert.strictEqual(cliExplicitDrainRerunResult.summary.rerunManifestTerminalState, 'rerun-required');
 assert.ok(cliExplicitDrainRerunResult.rerunManifest);
 const explicitDrainRerunManifestPath = path.join(explicitDrainRerunApplyOutDir, 'rerun-manifest.json');
 assert.strictEqual(cliExplicitDrainRerunResult.rerunManifest.path, explicitDrainRerunManifestPath);
@@ -3425,6 +3454,7 @@ assert.ok(await exists(explicitDrainRerunManifestPath));
 const explicitDrainRerunApplyArtifact = JSON.parse(await fs.readFile(path.join(explicitDrainRerunApplyOutDir, 'autonomous-apply.json'), 'utf8'));
 assert.strictEqual(explicitDrainRerunApplyArtifact.rerunManifest.path, explicitDrainRerunManifestPath);
 assert.strictEqual(explicitDrainRerunApplyArtifact.summary.rerunTaskCount, 1);
+assert.strictEqual(explicitDrainRerunApplyArtifact.summary.rerunManifestTerminalState, 'rerun-required');
 const explicitDrainRerunManifest = JSON.parse(await fs.readFile(explicitDrainRerunManifestPath, 'utf8'));
 const explicitDrainRerunHead = (await execFileP('git', ['rev-parse', 'HEAD'], { cwd: explicitDrainRerunRepo })).stdout.trim();
 assert.strictEqual(explicitDrainRerunManifest.kind, FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND);
@@ -3434,6 +3464,7 @@ assert.deepStrictEqual(explicitDrainRerunManifest.sourceHeads, [explicitDrainRer
 assert.deepStrictEqual(explicitDrainRerunManifest.tasks, explicitDrainRerunManifest.items);
 assert.strictEqual(explicitDrainRerunManifest.items.length, 1);
 assert.strictEqual(explicitDrainRerunManifest.summary.taskCount, 1);
+assert.strictEqual(explicitDrainRerunManifest.summary.terminalState, 'rerun-required');
 assert.strictEqual(explicitDrainRerunManifest.summary.staleAgainstHeadCount, 1);
 assert.strictEqual(explicitDrainRerunManifest.summary.queueRerunCount, 1);
 assert.strictEqual(explicitDrainRerunManifest.summary.conflictBlockedCount, 0);
@@ -5774,6 +5805,7 @@ function createSyntheticAutoDrainArtifacts(outDir) {
       paths: [],
       count: 0,
       taskCount: 0,
+      terminalState: 'missing',
       conflictBlockedCount: 0,
       decisionRerunCount: 0,
       staleAgainstHeadCount: 0,
@@ -5798,7 +5830,8 @@ function createSyntheticAutoDrainArtifacts(outDir) {
       promotedPatchCandidateCount: 0,
       patchCount: 0,
       rerunManifestCount: 0,
-      rerunTaskCount: 0
+      rerunTaskCount: 0,
+      rerunManifestTerminalState: 'missing'
     }
   };
 }

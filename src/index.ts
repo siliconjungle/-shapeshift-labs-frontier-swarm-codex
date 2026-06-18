@@ -1202,6 +1202,7 @@ export interface FrontierCodexAutonomousApplyResult {
     finalGateContinuationSkippedRequiredGateCount: number;
     rerunManifestCount: number;
     rerunTaskCount: number;
+    rerunManifestTerminalState: FrontierCodexAutoDrainRerunManifestTerminalState;
     lockRecoveryCount: number;
   };
 }
@@ -1695,6 +1696,8 @@ export interface FrontierCodexAutoDrainRerunTask extends FrontierSwarmTaskInput 
   };
 }
 
+export type FrontierCodexAutoDrainRerunManifestTerminalState = 'missing' | 'drained' | 'rerun-required';
+
 export interface FrontierCodexAutoDrainRerunManifest {
   kind: typeof FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND;
   version: typeof FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION;
@@ -1715,6 +1718,7 @@ export interface FrontierCodexAutoDrainRerunManifest {
   jobIds: string[];
   summary: {
     taskCount: number;
+    terminalState: FrontierCodexAutoDrainRerunManifestTerminalState;
     conflictBlockedCount: number;
     decisionRerunCount: number;
     staleAgainstHeadCount: number;
@@ -1788,6 +1792,7 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
   };
   rerunManifest: FrontierCodexAutoDrainArtifactPathGroup & {
     taskCount: number;
+    terminalState: FrontierCodexAutoDrainRerunManifestTerminalState;
     conflictBlockedCount: number;
     decisionRerunCount: number;
     staleAgainstHeadCount: number;
@@ -1826,6 +1831,7 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     patchCount: number;
     rerunManifestCount: number;
     rerunTaskCount: number;
+    rerunManifestTerminalState: FrontierCodexAutoDrainRerunManifestTerminalState;
   };
 }
 
@@ -2504,6 +2510,7 @@ export interface FrontierCodexSwarmAutoDrainResult {
     finalGateContinuationSkippedRequiredGateCount: number;
     remainingReadyCount: number;
     rerunTaskCount: number;
+    rerunManifestTerminalState: FrontierCodexAutoDrainRerunManifestTerminalState;
     admittedCount: number;
     deferredCount: number;
     reviewerAssignmentCount: number;
@@ -2990,6 +2997,7 @@ async function runCodexSwarmAutoDrain(input: {
       finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount,
       remainingReadyCount: finalRemainingReadyCount,
       rerunTaskCount: rerunManifest.summary.taskCount,
+      rerunManifestTerminalState: rerunManifest.summary.terminalState,
       admittedCount,
       deferredCount,
       reviewerAssignmentCount: latestCollection?.reviewerLanePlan?.summary.assignmentCount ?? 0,
@@ -8195,6 +8203,7 @@ function createAutoDrainArtifactMetadata(input: {
     ...iteration.patchPaths
   ]));
   const rerunManifestPaths = compactArtifactPaths([input.rerunManifest?.path]);
+  const rerunManifestTerminalState = input.rerunManifest?.summary.terminalState ?? 'missing';
   const sum = (select: (iteration: FrontierCodexAutoDrainArtifactIteration) => number): number =>
     iterations.reduce((total, iteration) => total + select(iteration), 0);
   const finalGateSummary = summarizeAutonomousFinalGateRun(input.iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
@@ -8277,6 +8286,7 @@ function createAutoDrainArtifactMetadata(input: {
       paths: rerunManifestPaths,
       count: rerunManifestPaths.length,
       taskCount: input.rerunManifest?.summary.taskCount ?? 0,
+      terminalState: rerunManifestTerminalState,
       conflictBlockedCount: input.rerunManifest?.summary.conflictBlockedCount ?? 0,
       decisionRerunCount: input.rerunManifest?.summary.decisionRerunCount ?? 0,
       staleAgainstHeadCount: input.rerunManifest?.summary.staleAgainstHeadCount ?? 0,
@@ -8324,7 +8334,8 @@ function createAutoDrainArtifactMetadata(input: {
       promotedPatchCandidateCount: sum((iteration) => iteration.promotedPatchCandidateCount),
       patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length,
       rerunManifestCount: rerunManifestPaths.length,
-      rerunTaskCount: input.rerunManifest?.summary.taskCount ?? 0
+      rerunTaskCount: input.rerunManifest?.summary.taskCount ?? 0,
+      rerunManifestTerminalState
     }
   };
 }
@@ -8560,8 +8571,10 @@ export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainR
   const targetRefs = uniqueWorkspacePaths(tasks.flatMap((task) => task.targetRefs)).sort();
   const taskIds = uniqueStrings(tasks.map((task) => task.metadata.rerun.originalTaskId ?? task.id)).sort();
   const jobIds = uniqueStrings(tasks.map((task) => task.metadata.rerun.originalJobId)).sort();
+  const terminalState: FrontierCodexAutoDrainRerunManifestTerminalState = tasks.length > 0 ? 'rerun-required' : 'drained';
   const summary = {
     taskCount: tasks.length,
+    terminalState,
     conflictBlockedCount: tasks.filter((task) => task.metadata.rerun.sourceKinds.includes('conflict-blocked')).length,
     decisionRerunCount: tasks.filter((task) => task.metadata.rerun.sourceKinds.includes('decision-rerun')).length,
     staleAgainstHeadCount: tasks.filter((task) => task.metadata.rerun.sourceKinds.includes('stale-against-head')).length,
@@ -9015,6 +9028,7 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
       finalGateContinuationSkippedRequiredGateCount: finalGateSummary.continuationSkippedRequiredGateCount,
       rerunManifestCount: 0,
       rerunTaskCount: 0,
+      rerunManifestTerminalState: 'missing',
       lockRecoveryCount: lock.recoveries.length
     }
   };
@@ -9034,11 +9048,12 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
   });
   const result: FrontierCodexAutonomousApplyResult = {
     ...applyForRerunManifest,
-    ...(rerunManifest ? { rerunManifest } : {}),
+    rerunManifest,
     summary: {
       ...applyForRerunManifest.summary,
-      rerunManifestCount: rerunManifest ? 1 : 0,
-      rerunTaskCount: rerunManifest?.summary.taskCount ?? 0
+      rerunManifestCount: 1,
+      rerunTaskCount: rerunManifest.summary.taskCount,
+      rerunManifestTerminalState: rerunManifest.summary.terminalState
     }
   };
   await fs.writeFile(autonomousApplyPath, JSON.stringify(result, null, 2) + '\n');
@@ -9172,7 +9187,7 @@ async function writeExplicitDrainRerunManifest(input: {
   generatedAt: number;
   collection: FrontierCodexCollectResult;
   apply: FrontierCodexAutonomousApplyResult;
-}): Promise<FrontierCodexAutoDrainRerunManifest | undefined> {
+}): Promise<FrontierCodexAutoDrainRerunManifest> {
   const manifestPath = path.join(input.outDir, 'rerun-manifest.json');
   const currentHead = await readCurrentGitHead(input.cwd);
   const manifest = createCodexAutoDrainRerunManifest({
@@ -9192,7 +9207,6 @@ async function writeExplicitDrainRerunManifest(input: {
       .filter((decision) => autonomousDecisionBlocksAutoDrain(decision.status))
       .map((decision) => decision.jobId)
   });
-  if (manifest.summary.taskCount === 0) return undefined;
   await writeJsonAtomic(manifestPath, manifest);
   return manifest;
 }
