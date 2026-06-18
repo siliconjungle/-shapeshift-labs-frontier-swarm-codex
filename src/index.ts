@@ -56,6 +56,12 @@ import {
 
 export const FRONTIER_SWARM_CODEX_DEFAULT_MODEL = FRONTIER_SWARM_DEFAULT_MODEL;
 export const FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT = FRONTIER_SWARM_DEFAULT_REASONING_EFFORT;
+export const FRONTIER_SWARM_CODEX_SUPPORTED_MODELS = [
+  'gpt-5.5',
+  'gpt-5.4-mini',
+  'o4-mini',
+  'gpt-4.1-mini'
+] as const;
 export const FRONTIER_SWARM_CODEX_WORKSPACE_MANIFEST_KIND = 'frontier.swarm-codex.workspace-manifest';
 export const FRONTIER_SWARM_CODEX_WORKSPACE_MANIFEST_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_WORKSPACE_PROOF_KIND = 'frontier.swarm-codex.workspace-proof';
@@ -110,6 +116,9 @@ const DEFAULT_WORKSPACE_EXCLUDES = [
   'target'
 ];
 const AUTONOMOUS_APPLY_REPO_LOCK_KEY = 'repo:*';
+const SUPPORTED_CODEX_MODEL_BY_NORMALIZED = new Map(
+  FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.map((model) => [model.toLowerCase(), model])
+);
 const pidManifestWriteQueues = new Map<string, Promise<void>>();
 
 export type FrontierCodexSwarmWorkspaceMode = 'current' | 'git-worktree' | 'snapshot' | 'copy';
@@ -2707,7 +2716,14 @@ export function normalizeCodexModelFlag(model: string | false | null | undefined
   if (normalized === 'auto' || normalized === 'default' || normalized === 'config' || normalized === 'config-default') {
     return undefined;
   }
-  return value;
+  const supported = SUPPORTED_CODEX_MODEL_BY_NORMALIZED.get(normalized);
+  if (!supported) {
+    throw new Error(
+      `unsupported Codex model "${value}"; supported models: ${FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.join(', ')}. ` +
+      'Use default/config-default or omit --model to use the local Codex config.'
+    );
+  }
+  return supported;
 }
 
 export function normalizeCodexApprovalPolicy(

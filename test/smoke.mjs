@@ -14,6 +14,7 @@ import {
   createCodexSwarmPlan,
   FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
   FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND,
+  FRONTIER_SWARM_CODEX_SUPPORTED_MODELS,
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
   createCodexResourceAllocation,
@@ -135,6 +136,36 @@ assert.ok(forwardedArgs.includes('--model'));
 assert.ok(forwardedArgs.includes('gpt-5.5'));
 assert.ok(forwardedArgs.includes('model_reasoning_effort="xhigh"'));
 assert.strictEqual(normalizeCodexModelFlag('default'), undefined);
+for (const supportedModel of ['gpt-5.5', 'gpt-5.4-mini', 'o4-mini', 'gpt-4.1-mini']) {
+  assert.ok(FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.includes(supportedModel));
+  assert.strictEqual(normalizeCodexModelFlag(supportedModel.toUpperCase()), supportedModel);
+  const supportedArgs = buildCodexArgs(plan.jobs[0], {
+    outDir: tmp,
+    workspacePath: tmp,
+    paths,
+    model: supportedModel
+  });
+  assert.ok(supportedArgs.includes('--model'));
+  assert.ok(supportedArgs.includes(supportedModel));
+}
+const unsupportedModelError = /unsupported Codex model "gpt-5\.1-codex-mini"; supported models: .*gpt-5\.5.*gpt-5\.4-mini.*o4-mini.*gpt-4\.1-mini/;
+assert.throws(() => normalizeCodexModelFlag('gpt-5.1-codex-mini'), unsupportedModelError);
+assert.throws(() => buildCodexArgs(plan.jobs[0], {
+  outDir: tmp,
+  workspacePath: tmp,
+  paths,
+  model: 'gpt-5.1-codex-mini'
+}), unsupportedModelError);
+const unsupportedPlanJob = {
+  ...plan.jobs[0],
+  compute: { ...plan.jobs[0].compute, model: 'gpt-5.1-codex-mini' }
+};
+assert.throws(() => buildCodexArgs(unsupportedPlanJob, {
+  outDir: tmp,
+  workspacePath: tmp,
+  paths,
+  modelPolicy: 'plan'
+}), unsupportedModelError);
 assert.strictEqual(normalizeCodexApprovalPolicy('on_request'), 'on-request');
 const copyArgs = buildCodexArgs(plan.jobs[0], {
   outDir: tmp,
