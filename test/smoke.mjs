@@ -514,6 +514,70 @@ assert.ok(await exists(collection.artifacts.hierarchicalMergeQueuePath));
 const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
 assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
 
+const patchOnlyRepo = await createApplyFixtureRepo(tmp, 'patch-only-repo');
+const patchOnlyRunDir = path.join(tmp, 'patch-only-run');
+await writePatchOnlyJob(patchOnlyRunDir, 'patch-only-ready', [
+  'diff --git a/src/apply.ts b/src/apply.ts',
+  '--- a/src/apply.ts',
+  '+++ b/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'), {
+  taskId: 'patch-only-ready-task',
+  changedFiles: ['src/apply.ts'],
+  changedRegions: ['src/apply.ts#apply']
+});
+await writePatchOnlyJob(patchOnlyRunDir, 'patch-only-stale', [
+  'diff --git a/src/apply.ts b/src/apply.ts',
+  '--- a/src/apply.ts',
+  '+++ b/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-missing',
+  '+stale',
+  ''
+].join('\n'), {
+  taskId: 'patch-only-stale-task',
+  changedFiles: ['src/apply.ts'],
+  changedRegions: ['src/apply.ts#apply']
+});
+const patchOnlyCollection = await collectCodexSwarmRun({
+  run: patchOnlyRunDir,
+  cwd: patchOnlyRepo,
+  outDir: path.join(tmp, 'patch-only-collection'),
+  checkStale: true,
+  promotePatchCandidates: true,
+  promotionFocusedCommands: [{ name: 'coordinator-gate', command: process.execPath, args: ['-e', 'process.exit(0)'] }]
+});
+assert.strictEqual(patchOnlyCollection.summary.total, 2);
+assert.strictEqual(patchOnlyCollection.summary.patchOnlyCount, 2);
+assert.strictEqual(patchOnlyCollection.artifacts.counts.patchOnlyCount, 2);
+assert.strictEqual(patchOnlyCollection.summary['ready-to-apply'], 1);
+assert.strictEqual(patchOnlyCollection.summary['stale-against-head'], 1);
+assert.strictEqual(patchOnlyCollection.summary.mergeQueueApplyLocalCount, 0);
+assert.strictEqual(patchOnlyCollection.summary.mergeQueueQueueLocalCount, 1);
+assert.strictEqual(patchOnlyCollection.summary.mergeQueuePromoteCount, 0);
+assert.strictEqual(patchOnlyCollection.summary.mergeQueueRerunCount, 1);
+assert.strictEqual(patchOnlyCollection.summary.promotedPatchCandidateCount, 1);
+assert.ok(await exists(path.join(patchOnlyCollection.outDir, 'ready-to-apply', 'patch-only-ready', 'merge.json')));
+assert.ok(await exists(path.join(patchOnlyCollection.outDir, 'ready-to-apply', 'patch-only-ready', 'changes.patch')));
+assert.ok(await exists(path.join(patchOnlyCollection.outDir, 'stale-against-head', 'patch-only-stale', 'merge.json')));
+assert.ok(await exists(path.join(patchOnlyCollection.outDir, 'stale-against-head', 'patch-only-stale', 'changes.patch')));
+assert.strictEqual(patchOnlyCollection.buckets['ready-to-apply'][0].patchOnly, true);
+assert.strictEqual(patchOnlyCollection.buckets['stale-against-head'][0].patchOnly, true);
+const patchOnlyReadyBundle = JSON.parse(await fs.readFile(path.join(patchOnlyCollection.outDir, 'ready-to-apply', 'patch-only-ready', 'merge.json'), 'utf8'));
+assert.strictEqual(patchOnlyReadyBundle.metadata.patchOnlyCollection.reason, 'changes.patch existed without merge.json');
+assert.strictEqual(patchOnlyReadyBundle.metadata.patchOnlyCollection.changedPathSource, 'patch');
+assert.strictEqual(patchOnlyReadyBundle.metadata.coordinatorPatchCandidatePromotion.originalDisposition, 'needs-port');
+assert.deepStrictEqual(patchOnlyReadyBundle.changedPaths, ['src/apply.ts']);
+assert.deepStrictEqual(patchOnlyReadyBundle.ownedFilesTouched, ['src/apply.ts']);
+assert.deepStrictEqual(patchOnlyReadyBundle.queueItemIds, ['patch-only-ready-task']);
+const patchOnlyStaleBundle = JSON.parse(await fs.readFile(path.join(patchOnlyCollection.outDir, 'stale-against-head', 'patch-only-stale', 'merge.json'), 'utf8'));
+assert.strictEqual(patchOnlyStaleBundle.staleAgainstHead, true);
+assert.strictEqual(patchOnlyStaleBundle.disposition, 'stale-against-head');
+assert.deepStrictEqual(patchOnlyStaleBundle.queueItemIds, ['patch-only-stale-task']);
+
 const queueMetadataRunDir = path.join(tmp, 'queue-metadata-run');
 await writeSyntheticMergeBundle(queueMetadataRunDir, 'apply-local', {
   disposition: 'auto-mergeable',
@@ -2880,6 +2944,51 @@ async function writeSyntheticMergeBundle(runDir, jobId, overrides = {}) {
     reasons: [],
     ...overrides
   }, null, 2) + '\n');
+}
+
+async function writePatchOnlyJob(runDir, jobId, patchText, overrides = {}) {
+  const taskId = overrides.taskId ?? `${jobId}-task`;
+  const lane = overrides.lane ?? 'patch-only';
+  const changedFiles = Array.isArray(overrides.changedFiles) ? overrides.changedFiles : ['src/apply.ts'];
+  const changedRegions = Array.isArray(overrides.changedRegions) ? overrides.changedRegions : [];
+  const allowedWriteGlobs = Array.isArray(overrides.allowedWriteGlobs) ? overrides.allowedWriteGlobs : ['src/**'];
+  const jobDir = path.join(runDir, jobId);
+  const evidenceDir = path.join(jobDir, 'evidence');
+  await fs.mkdir(evidenceDir, { recursive: true });
+  await fs.writeFile(path.join(evidenceDir, 'changes.patch'), patchText);
+  await fs.writeFile(path.join(evidenceDir, 'evidence.json'), JSON.stringify({
+    kind: 'frontier.swarm-codex.worker-evidence',
+    version: 1,
+    jobId,
+    taskId,
+    lane,
+    status: overrides.status ?? 'passed',
+    changedFiles,
+    changedRegions,
+    allowedWriteGlobs,
+    changedPathsWithinAllowedGlobs: overrides.changedPathsWithinAllowedGlobs ?? true
+  }, null, 2) + '\n');
+  await fs.writeFile(path.join(jobDir, 'last-message.md'), `${jobId} done\n`);
+  await fs.writeFile(path.join(jobDir, 'prompt.md'), [
+    '# Frontier Swarm Codex Job',
+    '',
+    `Job: ${jobId}`,
+    `Task: ${taskId}`,
+    `Lane: ${lane}`,
+    '',
+    'Raw task JSON:',
+    '',
+    JSON.stringify({
+      kind: 'frontier.swarm.task',
+      version: 1,
+      id: taskId,
+      title: jobId,
+      lane,
+      allowedWrites: allowedWriteGlobs,
+      changedRegions,
+      targetRefs: changedFiles
+    }, null, 2)
+  ].join('\n') + '\n');
 }
 
 function createSyntheticAutonomousDecision(status, overrides = {}) {

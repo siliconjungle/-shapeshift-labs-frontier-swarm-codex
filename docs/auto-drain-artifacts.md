@@ -159,6 +159,12 @@ Each auto-drain iteration collects worker merge bundles into `auto-drain/collect
 
 Collection artifacts are per-iteration snapshots. A coordinator should not assume that `collection-01/merge-admission.json` describes the final state after later iterations have applied patches.
 
+### Patch-only outputs
+
+If a worker writes `evidence/changes.patch` but no `merge.json`, collection synthesizes a merge bundle instead of dropping the job. The copied collection entry has `patchOnly: true`, `summary.patchOnlyCount` and `artifacts.counts.patchOnlyCount` include it, and the synthesized `merge.json` records `metadata.patchOnlyCollection.reason === "changes.patch existed without merge.json"`.
+
+Patch-only bundles are conservative. A patch that applies is a `patch-candidate` and normally lands in `needs-human-port` as coordinator-review work; when auto-drain patch-candidate promotion is enabled with required coordinator gates and the worker evidence proves changed paths stayed inside allowed writes, it can be promoted into `ready-to-apply`. A patch that does not pass `git apply --check` is collected under `stale-against-head` and the hierarchical merge queue marks it as `rerun`. Failed or ownership-violating patch-only evidence is collected as `failed-evidence` and the queue marks it as `reject`.
+
 ## Grouping Artifacts
 
 Each iteration writes `auto-drain/auto-drain-groups-NN.json`. This is the grouping artifact for the admitted candidates in that iteration.

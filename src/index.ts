@@ -434,6 +434,8 @@ export interface FrontierCodexCollectedBundle {
   bucket: FrontierCodexCollectBucket;
   jobId: string;
   mergePath: string;
+  patchOnly?: boolean;
+  patchPath?: string;
   outputDir: string;
   bundle: FrontierSwarmMergeBundle;
 }
@@ -469,6 +471,7 @@ export interface FrontierCodexCollectArtifacts {
     mergeQueueBlockCount: number;
     mergeQueueRecordOnlyCount: number;
     promotedPatchCandidateCount: number;
+    patchOnlyCount: number;
     patchCount: number;
   };
 }
@@ -503,8 +506,16 @@ export interface FrontierCodexCollectResult {
     mergeQueueBlockCount?: number;
     mergeQueueRecordOnlyCount?: number;
     promotedPatchCandidateCount?: number;
+    patchOnlyCount?: number;
   };
   artifacts?: FrontierCodexCollectArtifacts;
+}
+
+interface CodexCollectMergeRecord {
+  mergePath: string;
+  bundle: FrontierSwarmMergeBundle;
+  patchOnly?: boolean;
+  patchPath?: string;
 }
 
 export type FrontierCodexApplyStatus = 'checked' | 'applied' | 'committed' | 'skipped' | 'failed';
@@ -4941,25 +4952,36 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   };
   const collectedBundles: FrontierSwarmMergeBundle[] = [];
   const patchStatuses: Record<string, 'unknown' | 'applies' | 'missing' | 'stale'> = {};
+  const ignoredCollectionSegments = [
+    'collected',
+    'patch-scores',
+    'ready-to-apply',
+    'needs-human-port',
+    'failed-evidence',
+    'stale-against-head'
+  ];
   const mergePaths = (await findFilesByName(runDir, 'merge.json'))
-    .filter((mergePath) => !pathHasIgnoredSegment(path.relative(runDir, mergePath), [
-      'collected',
-      'patch-scores',
-      'ready-to-apply',
-      'needs-human-port',
-      'failed-evidence',
-      'stale-against-head'
-    ]));
-  const mergeRecordsByJob = new Map<string, { mergePath: string; bundle: FrontierSwarmMergeBundle }>();
+    .filter((mergePath) => !pathHasIgnoredSegment(path.relative(runDir, mergePath), ignoredCollectionSegments));
+  const mergeRecordsByJob = new Map<string, CodexCollectMergeRecord>();
   for (const mergePath of mergePaths.sort()) {
     const bundle = normalizeCollectedMergeBundle(JSON.parse(await fs.readFile(mergePath, 'utf8')), mergePath);
     const existing = mergeRecordsByJob.get(bundle.jobId);
     const next = { mergePath, bundle };
     if (!existing || mergeRecordScore(next) > mergeRecordScore(existing)) mergeRecordsByJob.set(bundle.jobId, next);
   }
+  const patchOnlyRecords = await collectPatchOnlyMergeRecords({
+    runDir,
+    cwd,
+    ignoredCollectionSegments,
+    existingJobIds: new Set(mergeRecordsByJob.keys())
+  });
+  for (const record of patchOnlyRecords) {
+    if (!mergeRecordsByJob.has(record.bundle.jobId)) mergeRecordsByJob.set(record.bundle.jobId, record);
+  }
+  const patchOnlyJobIds = new Set(patchOnlyRecords.map((record) => record.bundle.jobId));
   const mergeRecords = Array.from(mergeRecordsByJob.values()).sort((left, right) => left.bundle.jobId.localeCompare(right.bundle.jobId));
   let promotedPatchCandidateCount = 0;
-  for (const { mergePath, bundle } of mergeRecords) {
+  for (const { mergePath, bundle, patchOnly } of mergeRecords) {
     const patchPath = resolveBundlePatchPath(bundle, mergePath);
     const patchExists = !!patchPath && await pathExists(patchPath);
     const staleAgainstHead = input.checkStale === false ? false : await bundlePatchIsStale(bundle, mergePath, cwd);
@@ -4982,7 +5004,15 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     await fs.mkdir(outputDir, { recursive: true });
     await fs.writeFile(path.join(outputDir, 'merge.json'), JSON.stringify(nextBundle, null, 2) + '\n');
     if (patchPath && await pathExists(patchPath)) await fs.copyFile(patchPath, path.join(outputDir, 'changes.patch')).catch(() => {});
-    buckets[bucket].push({ bucket, jobId: bundle.jobId, mergePath, outputDir, bundle: nextBundle });
+    buckets[bucket].push({
+      bucket,
+      jobId: bundle.jobId,
+      mergePath,
+      ...(patchOnly ? { patchOnly: true } : {}),
+      ...(patchOnly && patchPath ? { patchPath } : {}),
+      outputDir,
+      bundle: nextBundle
+    });
   }
   const mergeIndex = createSwarmMergeIndex({
     runId: path.basename(runDir),
@@ -5036,7 +5066,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     mergeQueueRejectCount: hierarchicalMergeQueue.summary.rejectCount,
     mergeQueueBlockCount: hierarchicalMergeQueue.summary.blockCount,
     mergeQueueRecordOnlyCount: hierarchicalMergeQueue.summary.recordOnlyCount,
-    promotedPatchCandidateCount
+    promotedPatchCandidateCount,
+    patchOnlyCount: patchOnlyJobIds.size
   };
   const artifacts = createCollectArtifacts({
     outDir,
@@ -5120,6 +5151,7 @@ function createCollectArtifacts(input: {
       mergeQueueBlockCount: input.hierarchicalMergeQueue.summary.blockCount,
       mergeQueueRecordOnlyCount: input.hierarchicalMergeQueue.summary.recordOnlyCount,
       promotedPatchCandidateCount: input.summary.promotedPatchCandidateCount ?? 0,
+      patchOnlyCount: input.summary.patchOnlyCount ?? 0,
       patchCount: Object.values(input.patchStatuses).filter((status) => status !== 'missing').length
     }
   };
@@ -5162,6 +5194,7 @@ function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): Fr
       mergeQueueBlockCount: collection.hierarchicalMergeQueue?.summary.blockCount ?? collection.summary.mergeQueueBlockCount ?? 0,
       mergeQueueRecordOnlyCount: collection.hierarchicalMergeQueue?.summary.recordOnlyCount ?? collection.summary.mergeQueueRecordOnlyCount ?? 0,
       promotedPatchCandidateCount: collection.summary.promotedPatchCandidateCount ?? 0,
+      patchOnlyCount: collection.summary.patchOnlyCount ?? 0,
       patchCount: 0
     }
   };
@@ -7172,6 +7205,269 @@ function resolveBundlePatchPath(bundle: FrontierSwarmMergeBundle, mergePath: str
   return path.isAbsolute(bundle.patchPath) ? bundle.patchPath : path.resolve(path.dirname(mergePath), bundle.patchPath);
 }
 
+async function collectPatchOnlyMergeRecords(input: {
+  runDir: string;
+  cwd: string;
+  ignoredCollectionSegments: readonly string[];
+  existingJobIds: ReadonlySet<string>;
+}): Promise<CodexCollectMergeRecord[]> {
+  const patchPaths = (await findFilesByName(input.runDir, 'changes.patch'))
+    .filter((patchPath) => !pathHasIgnoredSegment(path.relative(input.runDir, patchPath), input.ignoredCollectionSegments))
+    .sort();
+  const records: CodexCollectMergeRecord[] = [];
+  const seenJobIds = new Set(input.existingJobIds);
+  for (const patchPath of patchPaths) {
+    if (await pathExists(path.join(path.dirname(patchPath), 'merge.json'))) continue;
+    const bundle = await synthesizePatchOnlyMergeBundle({
+      runDir: input.runDir,
+      cwd: input.cwd,
+      patchPath
+    });
+    if (seenJobIds.has(bundle.jobId)) continue;
+    seenJobIds.add(bundle.jobId);
+    records.push({ mergePath: patchPath, bundle, patchOnly: true, patchPath });
+  }
+  return records;
+}
+
+async function synthesizePatchOnlyMergeBundle(input: {
+  runDir: string;
+  cwd: string;
+  patchPath: string;
+}): Promise<FrontierSwarmMergeBundle> {
+  const jobDir = inferPatchOnlyJobDir(input.runDir, input.patchPath);
+  const patchText = await fs.readFile(input.patchPath, 'utf8').catch(() => '');
+  const patchChangedPaths = changedPathsFromPatchText(patchText);
+  const evidencePath = await firstExistingPath([
+    path.join(path.dirname(input.patchPath), 'evidence.json'),
+    path.join(jobDir, 'evidence', 'evidence.json')
+  ]);
+  const evidence = evidencePath ? await readJsonObjectFile(evidencePath) : {};
+  const promptPath = await firstExistingPath([path.join(jobDir, 'prompt.md')]);
+  const prompt = promptPath ? await readOptionalText(promptPath) : undefined;
+  const promptTask = prompt ? readPatchOnlyPromptTask(prompt) : {};
+  const evidenceChangedPaths = uniqueStrings([
+    ...stringArray(evidence.changedPaths),
+    ...stringArray(evidence.changedFiles)
+  ]).sort();
+  const changedPaths = uniqueStrings([
+    ...(patchChangedPaths.length ? patchChangedPaths : evidenceChangedPaths)
+  ]).sort();
+  const allowedWriteCheck = isObject(evidence.allowedWriteCheck) ? evidence.allowedWriteCheck : {};
+  const allowedWrites = uniqueStrings([
+    ...stringArray(evidence.allowedWrites),
+    ...stringArray(evidence.allowedWriteGlobs),
+    ...stringArray(allowedWriteCheck.allowedGlobs),
+    ...stringArray(promptTask.allowedWrites)
+  ]).sort();
+  let ownershipViolations = allowedWrites.length
+    ? changedPaths.filter((file) => !allowedWrites.some((glob) => matchesGlob(file, glob))).sort()
+    : [];
+  const allowedWriteOk = readPatchOnlyAllowedWriteOk(evidence, allowedWriteCheck);
+  if (allowedWriteOk === false && ownershipViolations.length === 0) ownershipViolations = changedPaths.length ? [...changedPaths] : ['patch-only-output'];
+  const statusText = readFirstString(evidence.status, evidence.result, evidence.outcome)?.toLowerCase();
+  const evidenceFailed = !!statusText && ['failed', 'fail', 'error', 'errored', 'rejected'].includes(statusText);
+  const evidenceBlocked = !!statusText && ['blocked', 'human-blocked'].includes(statusText);
+  const hasPatchContent = patchText.trim().length > 0;
+  const failedEvidence = evidenceFailed || ownershipViolations.length > 0;
+  const blockedEvidence = !failedEvidence && evidenceBlocked;
+  const discoveryOnly = !failedEvidence && !blockedEvidence && (!hasPatchContent || changedPaths.length === 0);
+  const status: FrontierSwarmMergeBundle['status'] = failedEvidence
+    ? 'failed'
+    : blockedEvidence ? 'blocked' : 'completed';
+  const mergeReadiness: FrontierSwarmMergeBundle['mergeReadiness'] = failedEvidence
+    ? 'rejected'
+    : blockedEvidence ? 'blocked' : discoveryOnly ? 'discovery-only' : 'patch-candidate';
+  const disposition: FrontierSwarmMergeBundle['disposition'] = failedEvidence
+    ? 'rejected'
+    : blockedEvidence ? 'blocked' : discoveryOnly ? 'discovery-only' : 'needs-port';
+  const riskLevel: FrontierSwarmRiskLevel = failedEvidence || blockedEvidence ? 'high' : 'unknown';
+  const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: jobDir }).catch(() => []);
+  const evidencePaths = uniqueStrings([
+    path.dirname(input.patchPath),
+    input.patchPath,
+    ...(evidencePath ? [evidencePath] : []),
+    ...(promptPath ? [promptPath] : []),
+    ...handoffArtifacts.map((artifact) => artifact.path)
+  ]).sort();
+  const jobId = readFirstString(evidence.jobId, promptTask.jobId) ?? inferPatchOnlyJobId(input.runDir, input.patchPath);
+  const taskId = readFirstString(evidence.taskId, promptTask.taskId);
+  const lane = readFirstString(evidence.lane, promptTask.lane);
+  const title = readFirstString(evidence.title, promptTask.title);
+  const changedRegions = uniqueStrings([
+    ...stringArray(evidence.changedRegions),
+    ...stringArray(promptTask.changedRegions)
+  ]).sort();
+  const queueItemIds = uniqueStrings([
+    ...stringArray(evidence.queueItemIds),
+    ...(taskId ? [taskId] : [])
+  ]).sort();
+  return {
+    kind: FRONTIER_SWARM_MERGE_BUNDLE_KIND,
+    version: FRONTIER_SWARM_MERGE_BUNDLE_VERSION,
+    id: `swarm-merge-bundle:${stableHash(['patch-only', jobId, input.patchPath, patchText])}`,
+    runId: path.basename(input.runDir),
+    jobId,
+    ...(taskId ? { taskId } : {}),
+    ...(lane ? { lane } : {}),
+    ...(title ? { title } : {}),
+    generatedAt: Date.now(),
+    status,
+    mergeReadiness,
+    disposition,
+    riskLevel,
+    autoMergeable: false,
+    changedPaths,
+    changedRegions,
+    ownedFilesTouched: allowedWriteOk === true && ownershipViolations.length === 0 ? [...changedPaths] : [],
+    allowedWrites,
+    ownershipViolations,
+    patchPath: input.patchPath,
+    patchHash: stableHash(patchText),
+    evidencePaths,
+    commandsPassed: [],
+    commandsFailed: [],
+    queueItemIds,
+    staleAgainstHead: false,
+    reasons: patchOnlyBundleReasons({ disposition, discoveryOnly, failedEvidence, blockedEvidence, ownershipViolations }),
+    metadata: {
+      patchOnlyCollection: {
+        source: FRONTIER_SWARM_CODEX_COLLECTION_KIND,
+        reason: 'changes.patch existed without merge.json',
+        jobDir,
+        patchPath: input.patchPath,
+        ...(evidencePath ? { evidencePath } : {}),
+        ...(promptPath ? { promptPath } : {}),
+        ...(statusText ? { evidenceStatus: statusText } : {}),
+        changedPathSource: patchChangedPaths.length ? 'patch' : evidenceChangedPaths.length ? 'evidence' : 'unknown',
+        allowedWriteEvidence: allowedWriteOk === undefined ? 'unknown' : allowedWriteOk,
+        cwd: input.cwd
+      }
+    }
+  };
+}
+
+function patchOnlyBundleReasons(input: {
+  disposition: FrontierSwarmMergeBundle['disposition'];
+  discoveryOnly: boolean;
+  failedEvidence: boolean;
+  blockedEvidence: boolean;
+  ownershipViolations: readonly string[];
+}): string[] {
+  if (input.failedEvidence) return uniqueStrings([
+    'rejected',
+    ...input.ownershipViolations.map((file) => `ownership-violation:${file}`)
+  ]).sort();
+  if (input.blockedEvidence) return ['blocked'];
+  if (input.discoveryOnly || input.disposition === 'discovery-only') return ['patch-only-record-only'];
+  return ['needs-human-port'];
+}
+
+function inferPatchOnlyJobDir(runDir: string, patchPath: string): string {
+  const parent = path.dirname(patchPath);
+  if (path.basename(parent) === 'evidence') return path.dirname(parent);
+  const relative = path.relative(runDir, patchPath).replace(/\\/g, '/');
+  const first = relative.split('/').filter(Boolean)[0];
+  return first && first !== path.basename(patchPath) ? path.join(runDir, first) : parent;
+}
+
+function inferPatchOnlyJobId(runDir: string, patchPath: string): string {
+  const relative = path.relative(runDir, patchPath).replace(/\\/g, '/');
+  const parts = relative.split('/').filter(Boolean);
+  const evidenceIndex = parts.lastIndexOf('evidence');
+  if (evidenceIndex > 0) return parts[evidenceIndex - 1];
+  if (parts.length > 1) return parts[0];
+  return path.basename(path.dirname(patchPath));
+}
+
+function changedPathsFromPatchText(text: string): string[] {
+  const paths = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    const diffMatch = /^diff --git (.+?) (.+)$/.exec(line);
+    if (diffMatch) {
+      addPatchChangedPath(paths, diffMatch[1]);
+      addPatchChangedPath(paths, diffMatch[2]);
+      continue;
+    }
+    const fileMatch = /^(?:---|\+\+\+) (.+)$/.exec(line);
+    if (fileMatch) addPatchChangedPath(paths, fileMatch[1]);
+  }
+  return [...paths].sort();
+}
+
+function addPatchChangedPath(paths: Set<string>, value: string): void {
+  const normalized = normalizePatchChangedPath(value);
+  if (normalized) paths.add(normalized);
+}
+
+function normalizePatchChangedPath(value: string): string | undefined {
+  let file = value.trim();
+  if (!file || file === '/dev/null') return undefined;
+  if ((file.startsWith('"') && file.endsWith('"')) || (file.startsWith("'") && file.endsWith("'"))) file = file.slice(1, -1);
+  if (file.startsWith('a/') || file.startsWith('b/')) file = file.slice(2);
+  if (!file || file === '/dev/null') return undefined;
+  const tabIndex = file.indexOf('\t');
+  if (tabIndex >= 0) file = file.slice(0, tabIndex);
+  return file.replace(/\\/g, '/');
+}
+
+async function firstExistingPath(paths: readonly string[]): Promise<string | undefined> {
+  for (const file of paths) {
+    if (await pathExists(file)) return file;
+  }
+  return undefined;
+}
+
+async function readJsonObjectFile(file: string): Promise<Record<string, unknown>> {
+  try {
+    const value = JSON.parse(await fs.readFile(file, 'utf8'));
+    return isObject(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function readPatchOnlyPromptTask(prompt: string): Record<string, unknown> {
+  const marker = 'Raw task JSON:';
+  const markerIndex = prompt.indexOf(marker);
+  const rawTask = markerIndex >= 0 ? parsePromptRawTaskJson(prompt.slice(markerIndex + marker.length)) : {};
+  return {
+    ...rawTask,
+    jobId: readPromptHeader(prompt, 'Job') ?? readStringField(rawTask, ['jobId']),
+    taskId: readPromptHeader(prompt, 'Task') ?? readStringField(rawTask, ['id', 'taskId']),
+    lane: readPromptHeader(prompt, 'Lane') ?? readStringField(rawTask, ['lane']),
+    title: readStringField(rawTask, ['title'])
+  };
+}
+
+function parsePromptRawTaskJson(text: string): Record<string, unknown> {
+  try {
+    const value = JSON.parse(text.trim());
+    return isObject(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function readPromptHeader(prompt: string, name: string): string | undefined {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`^${escaped}:\\s*(.+)$`, 'm').exec(prompt);
+  return match?.[1]?.trim() || undefined;
+}
+
+function readPatchOnlyAllowedWriteOk(evidence: Record<string, unknown>, allowedWriteCheck: Record<string, unknown>): boolean | undefined {
+  for (const value of [
+    evidence.changedPathsWithinAllowedGlobs,
+    evidence.stayedInsideAllowedGlobs,
+    evidence.withinAllowedGlobs,
+    allowedWriteCheck.stayedInsideAllowedGlobs,
+    allowedWriteCheck.changedPathsWithinAllowedGlobs
+  ]) {
+    if (typeof value === 'boolean') return value;
+  }
+  return undefined;
+}
+
 function normalizeCollectedMergeBundle(value: unknown, mergePath: string): FrontierSwarmMergeBundle {
   const input = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
   const jobId = typeof input.jobId === 'string' && input.jobId ? input.jobId : path.basename(path.dirname(mergePath));
@@ -7217,7 +7513,7 @@ function normalizeCollectedMergeBundle(value: unknown, mergePath: string): Front
   };
 }
 
-function mergeRecordScore(record: { mergePath: string; bundle: FrontierSwarmMergeBundle }): number {
+function mergeRecordScore(record: CodexCollectMergeRecord): number {
   return (record.mergePath.includes('/evidence/') ? 100 : 0)
     + record.bundle.changedPaths.length
     + record.bundle.evidencePaths.length
