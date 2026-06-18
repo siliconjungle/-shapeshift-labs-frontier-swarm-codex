@@ -1317,6 +1317,7 @@ export interface FrontierCodexDashboardQueueMetadata {
     mergeQueues: string[];
     coordinatorAgentDrainWork: string[];
     queueOverlays: string[];
+    rerunManifests: string[];
     humanAnswers: string[];
   };
   coordinatorAgentDrainWork: FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata;
@@ -4056,6 +4057,7 @@ function createDashboardQueueMetadata(
       mergeQueues: artifacts?.mergeQueue.paths ?? [],
       coordinatorAgentDrainWork: artifacts?.coordinatorAgentDrainWork?.paths ?? [],
       queueOverlays: compactArtifactPaths(iterations.map((iteration) => iteration.queueOverlayPath)),
+      rerunManifests: artifacts?.rerunManifest.paths ?? [],
       humanAnswers: humanAnswers.paths
     },
     coordinatorAgentDrainWork,
