@@ -102,6 +102,13 @@ const DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIXES = [
   'human/authority question:',
   'question:'
 ];
+const CODEX_WORKER_HUMAN_QUESTION_CONTRACT = [
+  'Ask a human only when repo context, tests, task JSON, ownership rules, and coordinator policy cannot decide the issue.',
+  'Do not ask humans for stale patches, failed applies, routine review, queue classification, or answerable implementation details; produce a patch, rerun/reject/record evidence, or name the concrete follow-up instead.',
+  'Before asking, exhaust local source refs, verification output, allowed write globs, and existing docs; if a reasonable implementation choice exists, make it and document the assumption.',
+  'If still blocked, emit exactly one structured line in the final response and last-message.md: `human-question: owner=<role>; surface=<package/path>; missing-authority=<policy/fact/approval>; question=<single answerable question>; answer-code=<approve|reject|choose:<option-id>|provide:<fact-id>>`.',
+  'The answer-code must describe the allowed human answer shape so the coordinator can unblock the queue with a short stable code.'
+];
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 
@@ -2858,6 +2865,10 @@ export function renderCodexPrompt(
     '',
     'Verification commands:',
     ...bullets(job.verification.map(formatCommand)),
+    '',
+    '## Human Question Contract',
+    '',
+    ...bullets(CODEX_WORKER_HUMAN_QUESTION_CONTRACT),
     '',
     '## Evidence',
     '',

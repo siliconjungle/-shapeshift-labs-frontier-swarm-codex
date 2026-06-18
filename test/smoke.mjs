@@ -181,6 +181,11 @@ assert.ok(prompt.includes('Resource allocation'));
 assert.ok(prompt.includes('src/runtime/action.ts'));
 assert.ok(prompt.includes('git status'));
 assert.ok(prompt.includes('runner snapshot'));
+assert.ok(prompt.includes('## Human Question Contract'));
+assert.ok(prompt.includes('Ask a human only when repo context, tests, task JSON, ownership rules, and coordinator policy cannot decide the issue.'));
+assert.ok(prompt.includes('Do not ask humans for stale patches, failed applies, routine review, queue classification, or answerable implementation details'));
+assert.ok(prompt.includes('human-question: owner=<role>; surface=<package/path>; missing-authority=<policy/fact/approval>; question=<single answerable question>; answer-code=<approve|reject|choose:<option-id>|provide:<fact-id>>'));
+assert.ok(prompt.includes('The answer-code must describe the allowed human answer shape'));
 
 const browserPlan = createCodexSwarmPlan({
   manifest: {
