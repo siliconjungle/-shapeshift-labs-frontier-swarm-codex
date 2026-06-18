@@ -491,6 +491,17 @@ export interface FrontierCodexAutonomousApplyInput {
   lockStaleMs?: number;
 }
 
+export interface FrontierCodexAutonomousDecisionVerification {
+  planned: number;
+  run: number;
+  required: number;
+  passed: number;
+  failed: number;
+  names: string[];
+  passedNames: string[];
+  failedNames: string[];
+}
+
 export interface FrontierCodexAutonomousMergeDecision {
   kind: typeof FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND;
   version: typeof FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_VERSION;
@@ -516,6 +527,7 @@ export interface FrontierCodexAutonomousMergeDecision {
   commit?: string;
   lockPath?: string;
   lockToken?: string;
+  verification: FrontierCodexAutonomousDecisionVerification;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
   error?: string;
 }
@@ -535,7 +547,12 @@ export interface FrontierCodexAutonomousApplyResult {
   lockKeys: string[];
   lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
   queueOverlay: FrontierSwarmQueueOverlay;
-  summary: Record<FrontierCodexAutonomousDecisionStatus, number> & { total: number };
+  summary: Record<FrontierCodexAutonomousDecisionStatus, number> & {
+    total: number;
+    gatedDecisionCount: number;
+    verificationGateCount: number;
+    requiredVerificationGateCount: number;
+  };
 }
 
 export type FrontierCodexSwarmAutoDrainGroupingConflictKind = 'path' | 'region' | 'unscoped';
@@ -899,6 +916,10 @@ export interface FrontierCodexAutoDrainArtifactIteration {
   failedEvidenceCount: number;
   staleAgainstHeadCount: number;
   decisionCount: number;
+  committedDecisionCount: number;
+  gatedDecisionCount: number;
+  verificationGateCount: number;
+  requiredVerificationGateCount: number;
   admittedCount: number;
   deferredCount: number;
   reviewerAssignmentCount: number;
@@ -996,6 +1017,10 @@ export interface FrontierCodexAutoDrainArtifactMetadata {
     reviewerPlanCount: number;
     patchStackPlanCount: number;
     decisionCount: number;
+    committedDecisionCount: number;
+    gatedDecisionCount: number;
+    verificationGateCount: number;
+    requiredVerificationGateCount: number;
     promotedPatchCandidateCount: number;
     patchCount: number;
   };
@@ -1161,6 +1186,10 @@ export interface FrontierCodexSwarmAutoDrainResult {
     blockedCount: number;
     conflictBlockedCount: number;
     humanBlockedCount: number;
+    committedDecisionCount: number;
+    gatedDecisionCount: number;
+    verificationGateCount: number;
+    requiredVerificationGateCount: number;
     remainingReadyCount: number;
     admittedCount: number;
     deferredCount: number;
@@ -1514,6 +1543,7 @@ async function runCodexSwarmAutoDrain(input: {
   const admittedCount = uniqueStrings(iterations.flatMap((iteration) => iteration.admittedJobIds)).length;
   const deferredCount = latestIteration?.deferredJobIds.length ?? 0;
   const decisions = iterations.flatMap((iteration) => iteration.apply?.decisions ?? []);
+  const decisionProof = summarizeAutonomousDecisionProof(decisions);
   const conflictBlockedCount = decisions.filter((decision) => decision.status === 'conflict-blocked').length;
   const humanBlockedCount = decisions.filter((decision) => decision.status === 'human-blocked').length;
   const result: FrontierCodexSwarmAutoDrainResult = {
@@ -1541,6 +1571,10 @@ async function runCodexSwarmAutoDrain(input: {
       blockedCount: blockedJobIds.size,
       conflictBlockedCount,
       humanBlockedCount,
+      committedDecisionCount: decisionProof.committedDecisionCount,
+      gatedDecisionCount: decisionProof.gatedDecisionCount,
+      verificationGateCount: decisionProof.verificationGateCount,
+      requiredVerificationGateCount: decisionProof.requiredVerificationGateCount,
       remainingReadyCount,
       admittedCount,
       deferredCount,
@@ -2304,6 +2338,24 @@ function summarizeAutonomousDecisionLockScopes(decisions: readonly FrontierCodex
   return {
     lockKeys: uniqueStrings(decisions.flatMap((decision) => decision.lockKeys)).sort(),
     lockScopeCounts
+  };
+}
+
+function summarizeAutonomousDecisionProof(decisions: readonly FrontierCodexAutonomousMergeDecision[]): {
+  committedDecisionCount: number;
+  gatedDecisionCount: number;
+  verificationGateCount: number;
+  requiredVerificationGateCount: number;
+} {
+  return {
+    committedDecisionCount: decisions.filter((decision) => decision.status === 'committed').length,
+    gatedDecisionCount: decisions.filter((decision) => (
+      decision.verification.required > 0
+        && decision.verification.run >= decision.verification.required
+        && decision.verification.failed === 0
+    )).length,
+    verificationGateCount: decisions.reduce((total, decision) => total + decision.verification.run, 0),
+    requiredVerificationGateCount: decisions.reduce((total, decision) => total + decision.verification.required, 0)
   };
 }
 
@@ -3841,6 +3893,7 @@ function createAutoDrainArtifactMetadata(input: {
     const collectionArtifacts = collectArtifactsForSnapshot(iteration.collection);
     const applyPath = iteration.apply ? path.join(iteration.apply.outDir, 'autonomous-apply.json') : undefined;
     const autonomousQueueOverlayPath = iteration.apply ? path.join(iteration.apply.outDir, 'autonomous-queue-overlay.json') : undefined;
+    const decisionProof = summarizeAutonomousDecisionProof(iteration.apply?.decisions ?? []);
     const patchPaths = uniqueStrings((iteration.apply?.decisions ?? [])
       .map((decision) => decision.patchPath)
       .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0));
@@ -3868,6 +3921,10 @@ function createAutoDrainArtifactMetadata(input: {
       failedEvidenceCount: collectionArtifacts.counts.failedEvidenceCount,
       staleAgainstHeadCount: collectionArtifacts.counts.staleAgainstHeadCount,
       decisionCount: iteration.apply?.decisions.length ?? 0,
+      committedDecisionCount: decisionProof.committedDecisionCount,
+      gatedDecisionCount: decisionProof.gatedDecisionCount,
+      verificationGateCount: decisionProof.verificationGateCount,
+      requiredVerificationGateCount: decisionProof.requiredVerificationGateCount,
       admittedCount: iteration.admittedJobIds.length,
       deferredCount: iteration.deferredJobIds.length,
       reviewerAssignmentCount: collectionArtifacts.counts.reviewerAssignmentCount,
@@ -4007,6 +4064,10 @@ function createAutoDrainArtifactMetadata(input: {
       reviewerPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.reviewerLanePlanPath)).length,
       patchStackPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.patchStackPlanPath)).length,
       decisionCount: sum((iteration) => iteration.decisionCount),
+      committedDecisionCount: sum((iteration) => iteration.committedDecisionCount),
+      gatedDecisionCount: sum((iteration) => iteration.gatedDecisionCount),
+      verificationGateCount: sum((iteration) => iteration.verificationGateCount),
+      requiredVerificationGateCount: sum((iteration) => iteration.requiredVerificationGateCount),
       promotedPatchCandidateCount: sum((iteration) => iteration.promotedPatchCandidateCount),
       patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length
     }
@@ -4155,6 +4216,7 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
     'failed'
   ];
   const summary = Object.fromEntries(statuses.map((status) => [status, decisions.filter((decision) => decision.status === status).length])) as Record<FrontierCodexAutonomousDecisionStatus, number>;
+  const decisionProof = summarizeAutonomousDecisionProof(decisions);
   const result: FrontierCodexAutonomousApplyResult = {
     kind: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND,
     version: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_VERSION,
@@ -4170,7 +4232,13 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
     lockKeys: lockSummary.lockKeys,
     lockScopeCounts: lockSummary.lockScopeCounts,
     queueOverlay,
-    summary: { ...summary, total: decisions.length }
+    summary: {
+      ...summary,
+      total: decisions.length,
+      gatedDecisionCount: decisionProof.gatedDecisionCount,
+      verificationGateCount: decisionProof.verificationGateCount,
+      requiredVerificationGateCount: decisionProof.requiredVerificationGateCount
+    }
   };
   await fs.writeFile(path.join(outDir, 'autonomous-apply.json'), JSON.stringify(result, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'autonomous-queue-overlay.json'), JSON.stringify(queueOverlay, null, 2) + '\n');
@@ -4293,6 +4361,8 @@ async function applyCodexMergeBundleAutonomously(input: {
   const patchPath = await resolveApplyPatchPath(input.bundle, input.mergePath);
   const queueItemIds = input.bundle.queueItemIds.length ? [...input.bundle.queueItemIds] : [input.bundle.taskId ?? input.bundle.jobId];
   const lockKeys = deriveCodexAutonomousApplyLockKeys(input.bundle);
+  const plannedVerificationCommands = autonomousVerificationCommands(input.bundle, input.input);
+  const verificationRuns: Array<{ name: string; required: boolean; status: number }> = [];
   const finish = (
     status: FrontierCodexAutonomousDecisionStatus,
     reason: string,
@@ -4327,6 +4397,7 @@ async function applyCodexMergeBundleAutonomously(input: {
     ...(extra.commit ? { commit: extra.commit } : {}),
     lockPath: input.lock.lockPath,
     lockToken: input.lock.token,
+    verification: summarizeAutonomousDecisionVerification(plannedVerificationCommands, verificationRuns),
     commands,
     ...(extra.error ? { error: extra.error } : {})
   });
@@ -4368,11 +4439,12 @@ async function applyCodexMergeBundleAutonomously(input: {
   commands.push(apply);
   if (apply.status !== 0) return finish('failed', 'git apply failed', { headBefore });
 
-  const gates = autonomousVerificationCommands(input.bundle, input.input);
+  const gates = plannedVerificationCommands;
   for (const gate of gates) {
     const gateCwd = gate.cwd ? path.resolve(input.cwd, gate.cwd) : input.cwd;
     const run = await runLoggedProcess(gate.command, gate.args, gateCwd);
     commands.push(run);
+    verificationRuns.push({ name: autonomousVerificationCommandName(gate), required: gate.required !== false, status: run.status });
     if (run.status !== 0 && gate.required !== false) {
       const rollback = await runLoggedProcess('git', ['apply', '-R', patchPath], input.cwd);
       commands.push(rollback);
@@ -4507,6 +4579,29 @@ function autonomousVerificationCommands(bundle: FrontierSwarmMergeBundle, input:
     ? normalizeScoreCommands(input.globalCommands ?? [])
     : [];
   return [...focused, ...global];
+}
+
+function summarizeAutonomousDecisionVerification(
+  planned: readonly FrontierSwarmCommand[],
+  runs: readonly { name: string; required: boolean; status: number }[]
+): FrontierCodexAutonomousDecisionVerification {
+  const failedRuns = runs.filter((run) => run.required && run.status !== 0);
+  const passedRuns = runs.filter((run) => run.status === 0);
+  return {
+    planned: planned.length,
+    run: runs.length,
+    required: planned.filter((command) => command.required !== false).length,
+    passed: passedRuns.length,
+    failed: failedRuns.length,
+    names: planned.map(autonomousVerificationCommandName),
+    passedNames: uniqueStrings(passedRuns.map((run) => run.name)).sort(),
+    failedNames: uniqueStrings(failedRuns.map((run) => run.name)).sort()
+  };
+}
+
+function autonomousVerificationCommandName(command: FrontierSwarmCommand): string {
+  const named = command.name?.trim();
+  return named || [command.command, ...command.args].join(' ');
 }
 
 async function readGitHead(cwd: string, commands: FrontierCodexAutonomousMergeDecision['commands']): Promise<string | undefined> {

@@ -457,10 +457,11 @@ const cliHelp = await execFileP(process.execPath, [
 ], { cwd: tmp });
 assert.ok(cliHelp.stdout.includes('Default run auto-drain is autonomous coordinator drain work.'));
 assert.ok(cliHelp.stdout.includes('frontier.swarm.coordinator-agent-drain-work contract'));
-assert.ok(cliHelp.stdout.includes('--auto-drain-commit (run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)'));
+assert.ok(cliHelp.stdout.includes('--auto-drain-commit (after required gates pass, run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)'));
 assert.ok(cliHelp.stdout.includes('Terminal coordinator decisions such as applied, committed, checked,'));
 assert.ok(cliHelp.stdout.includes('queue outcomes, not\nhuman blockers.'));
 assert.ok(cliHelp.stdout.includes('--no-auto-drain (raw worker diagnostics only; skips coordinator drain-work)'));
+assert.ok(cliHelp.stdout.includes('--focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)'));
 await assert.rejects(
   () => applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo, dryRun: false }),
   /dirty worktree/
@@ -833,9 +834,26 @@ const autoDrainCommitRun = await runCodexSwarm(autoDrainPlan, {
 assert.strictEqual(autoDrainCommitRun.ok, true);
 assert.strictEqual(autoDrainCommitRun.autoDrain.summary.applyCount, 1);
 assert.strictEqual(autoDrainCommitRun.autoDrain.summary.terminalCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.summary.committedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.summary.gatedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.summary.verificationGateCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.summary.requiredVerificationGateCount, 1);
 const autoDrainCommitDecision = autoDrainCommitRun.autoDrain.iterations[0].apply.decisions[0];
 assert.strictEqual(autoDrainCommitDecision.status, 'committed');
 assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.committed, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.gatedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.verificationGateCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrain.iterations[0].apply.summary.requiredVerificationGateCount, 1);
+assert.deepStrictEqual(autoDrainCommitDecision.verification, {
+  planned: 1,
+  run: 1,
+  required: 1,
+  passed: 1,
+  failed: 0,
+  names: ['coordinator-sees-new'],
+  passedNames: ['coordinator-sees-new'],
+  failedNames: []
+});
 assert.match(autoDrainCommitDecision.headAfter, /^[0-9a-f]{40}$/);
 assert.strictEqual(autoDrainCommitDecision.commit, autoDrainCommitDecision.headAfter);
 assert.notStrictEqual(autoDrainCommitDecision.headAfter, autoDrainCommitDecision.headBefore);
@@ -858,14 +876,27 @@ assert.ok(autoDrainCommitLog.includes('Lock keys:\n- region:src/apply.ts#apply')
 assert.ok(!autoDrainCommitLog.includes('Apply swarm bundle'));
 const autoDrainCommitApplyArtifact = JSON.parse(await fs.readFile(path.join(autoDrainCommitOutDir, 'auto-drain', 'apply-01', 'autonomous-apply.json'), 'utf8'));
 assert.strictEqual(autoDrainCommitApplyArtifact.summary.committed, 1);
+assert.strictEqual(autoDrainCommitApplyArtifact.summary.gatedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitApplyArtifact.summary.verificationGateCount, 1);
+assert.strictEqual(autoDrainCommitApplyArtifact.summary.requiredVerificationGateCount, 1);
 assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].status, 'committed');
 assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].headAfter, autoDrainCommitDecision.headAfter);
 assert.strictEqual(autoDrainCommitApplyArtifact.decisions[0].commit, autoDrainCommitDecision.headAfter);
+assert.deepStrictEqual(autoDrainCommitApplyArtifact.decisions[0].verification, autoDrainCommitDecision.verification);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.iterations[0].committedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.iterations[0].gatedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.iterations[0].verificationGateCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.iterations[0].requiredVerificationGateCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.committedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.gatedDecisionCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.verificationGateCount, 1);
+assert.strictEqual(autoDrainCommitRun.autoDrainArtifacts.summary.requiredVerificationGateCount, 1);
 
 const cliAutoDrainCommitRepo = await createApplyFixtureRepo(tmp, 'cli-auto-drain-commit-run-repo');
 const cliAutoDrainCommitOutDir = path.join(tmp, 'cli-auto-drain-commit-run-out');
 const cliAutoDrainCommitPlanPath = path.join(tmp, 'cli-auto-drain-commit-plan.json');
 const cliAutoDrainCommitCodex = await writeFakeCodexApplyScript(tmp);
+const cliAutoDrainCommitFocusedCommand = "node -e \"const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\"";
 await fs.writeFile(cliAutoDrainCommitPlanPath, JSON.stringify(autoDrainPlan, null, 2) + '\n');
 const cliAutoDrainCommit = await execFileP(process.execPath, [
   new URL('../dist/cli.js', import.meta.url).pathname,
@@ -890,16 +921,33 @@ const cliAutoDrainCommit = await execFileP(process.execPath, [
   '--auto-drain-max-iterations',
   '2',
   '--focused-command',
-  "node -e \"const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
+  cliAutoDrainCommitFocusedCommand
 ], { cwd: cliAutoDrainCommitRepo, maxBuffer: 8 * 1024 * 1024 });
 const cliAutoDrainCommitRun = JSON.parse(cliAutoDrainCommit.stdout);
 assert.strictEqual(cliAutoDrainCommitRun.ok, true);
 assert.strictEqual(cliAutoDrainCommitRun.autoDrain.summary.applyCount, 1);
 assert.strictEqual(cliAutoDrainCommitRun.autoDrain.summary.terminalCount, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.summary.committedDecisionCount, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.summary.gatedDecisionCount, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.summary.verificationGateCount, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.summary.requiredVerificationGateCount, 1);
 assert.strictEqual(cliAutoDrainCommitRun.autoDrain.iterations[0].apply.summary.committed, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.iterations[0].apply.summary.gatedDecisionCount, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.iterations[0].apply.summary.verificationGateCount, 1);
+assert.strictEqual(cliAutoDrainCommitRun.autoDrain.iterations[0].apply.summary.requiredVerificationGateCount, 1);
 const cliAutoDrainCommitDecision = cliAutoDrainCommitRun.autoDrain.iterations[0].apply.decisions[0];
 assert.strictEqual(cliAutoDrainCommitDecision.status, 'committed');
 assert.strictEqual(cliAutoDrainCommitDecision.reason, 'patch committed and verification passed');
+assert.deepStrictEqual(cliAutoDrainCommitDecision.verification, {
+  planned: 1,
+  run: 1,
+  required: 1,
+  passed: 1,
+  failed: 0,
+  names: [cliAutoDrainCommitFocusedCommand],
+  passedNames: [cliAutoDrainCommitFocusedCommand],
+  failedNames: []
+});
 assert.strictEqual(cliAutoDrainCommitDecision.jobId, cliAutoDrainCommitRun.run.results[0].jobId);
 assert.deepStrictEqual(cliAutoDrainCommitDecision.queueItemIds, ['apply-task']);
 assert.match(cliAutoDrainCommitDecision.commit, /^[0-9a-f]{40}$/);
@@ -908,6 +956,10 @@ assert.strictEqual(await fs.readFile(path.join(cliAutoDrainCommitRepo, 'src', 'a
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: cliAutoDrainCommitRepo })).stdout, '');
 assert.strictEqual((await execFileP('git', ['rev-parse', 'HEAD'], { cwd: cliAutoDrainCommitRepo })).stdout.trim(), cliAutoDrainCommitDecision.commit);
 const cliAutoDrainCommitDashboard = JSON.parse(await fs.readFile(path.join(cliAutoDrainCommitOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(cliAutoDrainCommitDashboard.autoDrain.summary.committedDecisionCount, 1);
+assert.strictEqual(cliAutoDrainCommitDashboard.autoDrain.summary.gatedDecisionCount, 1);
+assert.strictEqual(cliAutoDrainCommitDashboard.autoDrainArtifacts.summary.committedDecisionCount, 1);
+assert.strictEqual(cliAutoDrainCommitDashboard.autoDrainArtifacts.summary.gatedDecisionCount, 1);
 assert.strictEqual(cliAutoDrainCommitDashboard.queueMetadata.queueHealth.appliedDecisionCount, 1);
 assert.strictEqual(cliAutoDrainCommitDashboard.queueMetadata.queueHealth.committedDecisionCount, 1);
 assert.strictEqual(cliAutoDrainCommitDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 1);
@@ -919,6 +971,7 @@ assert.strictEqual(cliAutoDrainCommitDecisionEntry.status, 'committed');
 assert.strictEqual(cliAutoDrainCommitDecisionEntry.commit, cliAutoDrainCommitDecision.commit);
 assert.deepStrictEqual(cliAutoDrainCommitDecisionEntry.queueItemIds, ['apply-task']);
 assert.deepStrictEqual(cliAutoDrainCommitDecisionEntry.lockKeys, ['region:src/apply.ts#apply']);
+assert.deepStrictEqual(cliAutoDrainCommitDecisionEntry.verification, cliAutoDrainCommitDecision.verification);
 
 const autoDrainCandidateRepo = await createApplyFixtureRepo(tmp, 'auto-drain-candidate-run-repo');
 const autoDrainCandidateOutDir = path.join(autoDrainCandidateRepo, 'agent-runs', 'auto-drain-candidate-run');
@@ -2004,7 +2057,7 @@ assert.ok(cliSource.includes('--auto-drain-allow-dirty'));
 assert.ok(cliSource.includes('--auto-drain-check-stale'));
 assert.ok(cliSource.includes('--auto-drain-branch-prefix <prefix>'));
 assert.ok(cliSource.includes('--auto-drain-dry-run'));
-assert.ok(cliSource.includes('--auto-drain-commit (run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)'));
+assert.ok(cliSource.includes('--auto-drain-commit (after required gates pass, run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)'));
 assert.ok(cliSource.includes('--auto-drain-limit <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-iterations <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-ready <n>'));
@@ -2027,6 +2080,7 @@ assert.ok(cliSource.includes('frontier.swarm.coordinator-agent-drain-work contra
 assert.ok(cliSource.includes('Terminal coordinator decisions such as applied, committed, checked'));
 assert.ok(cliSource.includes('queue outcomes, not'));
 assert.ok(cliSource.includes('human/authority question'));
+assert.ok(cliSource.includes('--focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)'));
 assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
 
 const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
