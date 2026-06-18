@@ -3422,7 +3422,7 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
   humanQuestionTaskIds: string[];
   humanQuestionReasons: string[];
 } {
-  const decisions = (autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []);
+  const decisions = latestDashboardAutonomousDecisions((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
   const humanQuestionDecisions = decisions.filter((decision) => decision.status === 'human-blocked');
   return {
     appliedDecisionCount: decisions.filter((decision) => decision.status === 'applied' || decision.status === 'committed').length,
@@ -3434,6 +3434,34 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
     humanQuestionTaskIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.taskId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
     humanQuestionReasons: uniqueStrings(humanQuestionDecisions.map((decision) => decision.reason).filter((entry) => entry.length > 0)).sort()
   };
+}
+
+function latestDashboardAutonomousDecisions(
+  decisions: readonly FrontierCodexAutonomousMergeDecision[]
+): FrontierCodexAutonomousMergeDecision[] {
+  // The ledger is append-only; dashboard debt is derived from the latest event per queue key.
+  const latestByQueueKey = new Map<string, { decision: FrontierCodexAutonomousMergeDecision; index: number }>();
+  decisions.forEach((decision, index) => {
+    for (const key of dashboardAutonomousDecisionQueueKeys(decision)) {
+      latestByQueueKey.set(key, { decision, index });
+    }
+  });
+
+  const latestByDecisionId = new Map<string, { decision: FrontierCodexAutonomousMergeDecision; index: number }>();
+  for (const entry of latestByQueueKey.values()) {
+    const existing = latestByDecisionId.get(entry.decision.id);
+    if (!existing || entry.index > existing.index) latestByDecisionId.set(entry.decision.id, entry);
+  }
+  return [...latestByDecisionId.values()]
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => entry.decision);
+}
+
+function dashboardAutonomousDecisionQueueKeys(decision: FrontierCodexAutonomousMergeDecision): string[] {
+  const queueItemIds = uniqueStrings(decision.queueItemIds.filter((entry) => entry.length > 0)).sort();
+  if (queueItemIds.length) return queueItemIds.map((queueItemId) => `queue:${queueItemId}`);
+  if (decision.taskId && decision.taskId.length > 0) return [`task:${decision.taskId}`];
+  return [`job:${decision.jobId}`];
 }
 
 export async function appendCodexPidManifest(file: string, entry: FrontierCodexPidEntry, runId?: string): Promise<void> {

@@ -25,7 +25,8 @@ import {
   renderCodexPrompt,
   runCodexSwarm,
   scoreCodexSwarmPatches,
-  stopCodexSwarmRun
+  stopCodexSwarmRun,
+  writeSwarmCoordinatorSnapshot
 } from '../dist/index.js';
 
 const manifestInput = {
@@ -345,8 +346,8 @@ assert.deepStrictEqual({
   recordOnlyCount: queueMetadataCollection.summary.mergeQueueRecordOnlyCount
 }, {
   applyLocalCount: 1,
-  queueLocalCount: 1,
-  promoteCount: 1,
+  queueLocalCount: 0,
+  promoteCount: 2,
   rerunCount: 1,
   rejectCount: 1,
   blockCount: 1,
@@ -362,8 +363,8 @@ assert.deepStrictEqual({
   recordOnlyCount: queueMetadataCollection.artifacts.counts.mergeQueueRecordOnlyCount
 }, {
   applyLocalCount: 1,
-  queueLocalCount: 1,
-  promoteCount: 1,
+  queueLocalCount: 0,
+  promoteCount: 2,
   rerunCount: 1,
   rejectCount: 1,
   blockCount: 1,
@@ -1238,23 +1239,25 @@ assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.kind, FRONTIER_S
 assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.assignmentCount, 2);
 assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.selectedCount, 1);
 assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.deferredCount, 1);
-assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.promoteCount, 2);
-assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.selectedPromoteCount, 1);
-assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.deferredPromoteCount, 1);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.queueLocalCount, 2);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.promoteCount, 0);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.selectedQueueLocalCount, 1);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.selectedPromoteCount, 0);
+assert.strictEqual(conflictDrainIteration.coordinatorAgentDrain.summary.deferredPromoteCount, 0);
 const selectedConflictDrain = conflictDrainIteration.coordinatorAgentDrain.assignments.find((assignment) => assignment.selected);
 const deferredConflictDrain = conflictDrainIteration.coordinatorAgentDrain.assignments.find((assignment) => !assignment.selected);
 assert.ok(selectedConflictDrain);
 assert.ok(deferredConflictDrain);
-assert.strictEqual(selectedConflictDrain.queueAction, 'promote');
-assert.strictEqual(deferredConflictDrain.queueAction, 'promote');
-assert.strictEqual(selectedConflictDrain.selectionReason, 'deterministic-promoted-queue-leader');
-assert.strictEqual(deferredConflictDrain.selectionReason, 'serialized-behind-promoted-queue-leader');
+assert.strictEqual(selectedConflictDrain.queueAction, 'queue-local');
+assert.strictEqual(deferredConflictDrain.queueAction, 'queue-local');
+assert.strictEqual(selectedConflictDrain.selectionReason, 'queue-local-drain-leader');
+assert.strictEqual(deferredConflictDrain.selectionReason, 'waiting-for-local-queue-leader');
 assert.strictEqual(selectedConflictDrain.jobId < deferredConflictDrain.jobId, true);
 assert.deepStrictEqual(deferredConflictDrain.serializesAfterJobIds, [selectedConflictDrain.jobId]);
 const deferredConflictGroupingJob = conflictDrainIteration.grouping.jobs.find((job) => job.jobId === deferredConflictDrain.jobId);
 assert.ok(deferredConflictGroupingJob);
 assert.strictEqual(deferredConflictGroupingJob.placement, 'deferred');
-assert.strictEqual(deferredConflictGroupingJob.coordinatorAgent.queueAction, 'promote');
+assert.strictEqual(deferredConflictGroupingJob.coordinatorAgent.queueAction, 'queue-local');
 assert.deepStrictEqual(deferredConflictGroupingJob.coordinatorAgent.leaderJobIds, [selectedConflictDrain.jobId]);
 assert.strictEqual(autoDrainConflictRun.autoDrainArtifacts.coordinatorAgent.count >= 1, true);
 assert.strictEqual(autoDrainConflictRun.autoDrainArtifacts.summary.coordinatorAgentDrainCount >= 1, true);
@@ -1332,6 +1335,129 @@ assert.strictEqual(autoDrainConflictBlockedCards.get('stale-rerun').value, 1);
 assert.strictEqual(autoDrainConflictBlockedCards.get('stale-rerun').status, 'warning');
 assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').value, 0);
 assert.strictEqual(autoDrainConflictBlockedCards.get('true-blockers').status, 'ok');
+
+const collapsedDecisionOutDir = path.join(tmp, 'collapsed-decision-dashboard');
+const collapsedDecisionArtifacts = createSyntheticAutoDrainArtifacts(collapsedDecisionOutDir);
+const collapsedDecisionAutoDrain = {
+  kind: 'frontier.swarm-codex.auto-drain',
+  version: 1,
+  ok: true,
+  enabled: true,
+  cwd: tmp,
+  runDir: tmp,
+  outDir: collapsedDecisionOutDir,
+  generatedAt: collapsedDecisionArtifacts.generatedAt,
+  iterations: [{
+    index: 1,
+    coordinatorAgentDrainWork: {
+      summary: {
+        leaseCount: 0,
+        assignmentCount: 0,
+        terminalCount: 0,
+        nonTerminalCount: 0,
+        promotedWorkCount: 0,
+        appliedCount: 0,
+        queuedCount: 0,
+        escalatedCount: 0,
+        rerunCount: 0,
+        rejectedCount: 0,
+        recordedCount: 0,
+        blockedCount: 0
+      }
+    },
+    apply: {
+      decisions: [
+        createSyntheticAutonomousDecision('rerun', {
+          id: 'collapsed-rerun-old',
+          jobId: 'collapsed-rerun-old-job',
+          taskId: 'collapsed-rerun-task',
+          queueItemIds: ['collapsed-rerun-task'],
+          reason: 'bundle is stale against the current repository head',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 1
+        }),
+        createSyntheticAutonomousDecision('conflict-blocked', {
+          id: 'collapsed-conflict-old',
+          jobId: 'collapsed-conflict-old-job',
+          taskId: 'collapsed-conflict-task',
+          queueItemIds: ['collapsed-conflict-task'],
+          reason: 'git apply --check failed',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 2
+        }),
+        createSyntheticAutonomousDecision('applied', {
+          id: 'collapsed-rerun-fresh',
+          jobId: 'collapsed-rerun-fresh-job',
+          taskId: 'collapsed-rerun-task',
+          queueItemIds: ['collapsed-rerun-task'],
+          reason: 'fresh bundle applied',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 3
+        }),
+        createSyntheticAutonomousDecision('committed', {
+          id: 'collapsed-conflict-fresh',
+          jobId: 'collapsed-conflict-fresh-job',
+          taskId: 'collapsed-conflict-task',
+          queueItemIds: ['collapsed-conflict-task'],
+          reason: 'fresh conflict-resolution bundle committed',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 4
+        })
+      ]
+    }
+  }],
+  lockKeys: [],
+  lockScopeCounts: { semantic: 0, path: 0, repo: 0 },
+  terminalJobIds: [
+    'collapsed-conflict-fresh-job',
+    'collapsed-conflict-old-job',
+    'collapsed-rerun-fresh-job',
+    'collapsed-rerun-old-job'
+  ],
+  blockedJobIds: [],
+  artifacts: collapsedDecisionArtifacts,
+  summary: {
+    iterationCount: 1,
+    collectionCount: 1,
+    applyCount: 1,
+    terminalCount: 4,
+    blockedCount: 0,
+    conflictBlockedCount: 1,
+    humanBlockedCount: 0,
+    remainingReadyCount: 0,
+    admittedCount: 4,
+    deferredCount: 0,
+    reviewerAssignmentCount: 0,
+    reviewerTaskCount: 0,
+    patchStackCount: 0
+  }
+};
+const collapsedDecisionDashboardPath = path.join(collapsedDecisionOutDir, 'coordinator-dashboard.json');
+await writeSwarmCoordinatorSnapshot(collapsedDecisionDashboardPath, {
+  ok: true,
+  outDir: collapsedDecisionOutDir,
+  plan,
+  run: {
+    id: 'collapsed-decision-run',
+    jobs: [],
+    results: [],
+    summary: {}
+  },
+  proof: {},
+  autoDrain: collapsedDecisionAutoDrain,
+  autoDrainArtifacts: collapsedDecisionArtifacts
+});
+const collapsedDecisionDashboard = JSON.parse(await fs.readFile(collapsedDecisionDashboardPath, 'utf8'));
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.appliedDecisionCount, 2);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committedDecisionCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.rerunCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.humanQuestions.count, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.status, 'ok');
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.staleOrRerun, 0);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
+const collapsedDecisionCards = new Map(collapsedDecisionDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
+assert.strictEqual(collapsedDecisionCards.get('applied-decisions').value, 2);
+assert.strictEqual(collapsedDecisionCards.get('stale-rerun').value, 0);
+assert.strictEqual(collapsedDecisionCards.get('true-blockers').value, 0);
 
 const autoDrainDryRunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dry-run-repo');
 const autoDrainDryRun = await runCodexSwarm(autoDrainPlan, {
@@ -1744,6 +1870,116 @@ async function writeSyntheticMergeBundle(runDir, jobId, overrides = {}) {
     reasons: [],
     ...overrides
   }, null, 2) + '\n');
+}
+
+function createSyntheticAutonomousDecision(status, overrides = {}) {
+  const now = Date.now();
+  const jobId = overrides.jobId ?? `${status}-job`;
+  const queueItemIds = Array.isArray(overrides.queueItemIds) ? overrides.queueItemIds : [`${jobId}-task`];
+  return {
+    kind: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
+    version: 1,
+    id: overrides.id ?? `synthetic-${status}-${jobId}`,
+    jobId,
+    taskId: overrides.taskId ?? `${jobId}-task`,
+    queueItemIds,
+    status,
+    reason: overrides.reason ?? status,
+    bundlePath: overrides.bundlePath ?? path.join(tmp, `${jobId}-merge.json`),
+    changedPaths: overrides.changedPaths ?? [`src/${jobId}.ts`],
+    changedRegions: overrides.changedRegions ?? [],
+    lockScope: overrides.lockScope ?? 'path',
+    lockKeys: overrides.lockKeys ?? [`path:src/${jobId}.ts`],
+    startedAt: overrides.startedAt ?? now,
+    finishedAt: overrides.finishedAt ?? now,
+    dryRun: overrides.dryRun ?? false,
+    commands: overrides.commands ?? []
+  };
+}
+
+function createSyntheticAutoDrainArtifacts(outDir) {
+  const generatedAt = Date.now();
+  return {
+    kind: 'frontier.swarm-codex.auto-drain-artifacts',
+    version: 1,
+    outDir,
+    autoDrainPath: path.join(outDir, 'auto-drain.json'),
+    generatedAt,
+    admission: { paths: [], count: 0, admittedCount: 0, deferredCount: 0 },
+    grouping: {
+      paths: [],
+      count: 0,
+      collectionCount: 0,
+      groupedBundleCount: 0,
+      readyToApplyCount: 0,
+      needsHumanPortCount: 0,
+      failedEvidenceCount: 0,
+      staleAgainstHeadCount: 0
+    },
+    reviewer: { paths: [], count: 0, assignmentCount: 0, taskCount: 0, decisionCount: 0 },
+    coordinatorAgent: {
+      paths: [],
+      count: 0,
+      assignmentCount: 0,
+      selectedCount: 0,
+      deferredCount: 0,
+      promoteCount: 0,
+      queueLocalCount: 0
+    },
+    coordinatorAgentDrainWork: {
+      paths: [],
+      count: 0,
+      leaseCount: 0,
+      assignmentCount: 0,
+      terminalCount: 0,
+      nonTerminalCount: 0,
+      promotedWorkCount: 0,
+      appliedCount: 0,
+      queuedCount: 0,
+      escalatedCount: 0,
+      rerunCount: 0,
+      rejectedCount: 0,
+      recordedCount: 0,
+      blockedCount: 0
+    },
+    patchStack: {
+      paths: [],
+      count: 0,
+      stackCount: 0,
+      jobCount: 0,
+      conflictedStackCount: 0,
+      patchCount: 0
+    },
+    mergeQueue: {
+      paths: [],
+      count: 0,
+      scopeCount: 0,
+      applyLocalCount: 0,
+      queueLocalCount: 0,
+      promoteCount: 0,
+      rerunCount: 0,
+      rejectCount: 0,
+      blockCount: 0,
+      recordOnlyCount: 0,
+      promotedPatchCandidateCount: 0
+    },
+    iterations: [],
+    summary: {
+      pathCount: 0,
+      iterationCount: 1,
+      collectionCount: 1,
+      applyCount: 1,
+      admissionCount: 0,
+      coordinatorAgentDrainCount: 0,
+      coordinatorAgentDrainWorkCount: 0,
+      mergeQueuePlanCount: 0,
+      reviewerPlanCount: 0,
+      patchStackPlanCount: 0,
+      decisionCount: 4,
+      promotedPatchCandidateCount: 0,
+      patchCount: 0
+    }
+  };
 }
 
 async function writeFakeCodexApplyScript(root) {
