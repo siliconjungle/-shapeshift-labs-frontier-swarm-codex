@@ -2212,6 +2212,8 @@ assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.targetRefs, ['src/apply
 assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.currentHead, autoDrainConflictBlockedHead);
 assert.strictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourceHead, autoDrainConflictBlockedDecision.headBefore);
 assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourceHeads, [autoDrainConflictBlockedDecision.headBefore]);
+assert.ok(autoDrainConflictBlockedRerunTask.objective.includes(`source head ${autoDrainConflictBlockedDecision.headBefore}`));
+assert.ok(autoDrainConflictBlockedRerunTask.objective.includes(`current head ${autoDrainConflictBlockedHead}`));
 assert.deepStrictEqual(autoDrainConflictBlockedRerunTask.metadata.rerun.sourcePatchPaths, [autoDrainConflictBlockedDecision.patchPath]);
 assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(autoDrainConflictBlockedDecision.patchPath));
 assert.ok(autoDrainConflictBlockedRerunTask.sourceRefs.includes(autoDrainConflictBlockedDecision.bundlePath));

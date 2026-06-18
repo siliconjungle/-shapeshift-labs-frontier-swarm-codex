@@ -5853,6 +5853,11 @@ function createAutoDrainRerunTask(
     : sourceKinds.includes('decision-rerun')
       ? 'autonomous rerun decision'
       : 'stale-against-head queue debt';
+  const sourceHeadContext = sourceHeads.length === 1
+    ? ` from source head ${sourceHeads[0]}`
+    : sourceHeads.length > 1
+      ? ` from ${sourceHeads.length} source heads`
+      : '';
   const sourceRefs = compactArtifactPaths([
     ...candidate.sourcePatchPaths,
     ...candidate.sourceBundlePaths,
@@ -5892,7 +5897,7 @@ function createAutoDrainRerunTask(
   return {
     id,
     title: `Rerun ${originalTaskId}`,
-    objective: `Rerun ${originalTaskId} against ${input.currentHead ? `current head ${input.currentHead}` : 'the current checkout'} after ${reasonLabel}.`,
+    objective: `Rerun ${originalTaskId}${sourceHeadContext} against ${input.currentHead ? `current head ${input.currentHead}` : 'the current checkout'} after ${reasonLabel}.`,
     kind: 'agent-task',
     status: 'todo',
     ...(candidate.lane ? { lane: candidate.lane } : {}),

@@ -24,7 +24,7 @@ This map describes the artifacts a coordinator, dashboard, or review script shou
 | `auto-drain/merge-admission.json` | Latest collection snapshot | Merge admission views | Convenience copy of the latest iteration's admission decision set. |
 | `auto-drain/reviewer-lane-plan.json` | Latest collection snapshot | Review assignment dashboards | Convenience copy of the latest reviewer lane plan. |
 | `auto-drain/patch-stack-plan.json` | Latest collection snapshot | Patch-stack and conflict views | Convenience copy of the latest patch stack plan. |
-| `auto-drain/rerun-manifest.json` | Whole auto-drain pass | Follow-up swarm coordinators | Task-shaped `items[]` for unresolved conflict-blocked, decision-rerun, queue-rerun, or stale-against-head work. Each item carries original task/job ids, source patch paths, bundle paths, target refs, reasons, `currentHead`, and `sourceHead` when known. Evidence-only work is omitted. |
+| `auto-drain/rerun-manifest.json` | Whole auto-drain pass | Follow-up swarm coordinators | Task-shaped `items[]` for unresolved conflict-blocked, decision-rerun, queue-rerun, or stale-against-head work. Each item carries original task/job ids, source patch paths, bundle paths, target refs, reasons, `currentHead`, and `sourceHead` when known. Item objectives name known source heads alongside the current head. Evidence-only work is omitted. |
 
 The top-level files under `auto-drain/` are summary or latest-snapshot reads. They are useful for dashboards that only need the current state after the run finishes. Use the numbered iteration directories when historical iteration state matters.
 
