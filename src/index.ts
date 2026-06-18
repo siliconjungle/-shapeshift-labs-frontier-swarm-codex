@@ -2802,9 +2802,12 @@ async function runCodexSwarmAutoDrain(input: {
     });
     latestCollection = collection;
     await writeAutoDrainReviewArtifacts(outDir, collection);
+    const resolvedQueueKeys = createResolvedAutonomousDecisionQueueKeySet(
+      iterations.flatMap((iteration) => iteration.apply?.decisions ?? [])
+    );
     const allReadyJobIds = collection.buckets['ready-to-apply']
-      .map((entry) => entry.jobId)
-      .filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId));
+      .filter((entry) => dashboardCollectedBundleIsOpen(entry, terminalJobIds, blockedJobIds, resolvedQueueKeys))
+      .map((entry) => entry.jobId);
     const admission = buildAutoDrainAdmission({
       collection,
       options: normalized,
@@ -2820,9 +2823,6 @@ async function runCodexSwarmAutoDrain(input: {
       ...admission.deferred.map((entry) => entry.jobId),
       ...admittedCandidateJobIds.filter((jobId) => !admittedJobIds.includes(jobId))
     ]).sort();
-    const resolvedQueueKeys = createResolvedAutonomousDecisionQueueKeySet(
-      iterations.flatMap((iteration) => iteration.apply?.decisions ?? [])
-    );
     const terminalQueueDebtJobIds = terminalAutoDrainQueueDebtJobIds(collection, terminalJobIds, blockedJobIds, resolvedQueueKeys);
     const activePromotedQueueDebtJobIds = visibleAutoDrainQueueDebtJobIds(
       collection,
@@ -2945,12 +2945,11 @@ async function runCodexSwarmAutoDrain(input: {
       terminalJobIds: [...terminalJobIds].sort(),
       blockedJobIds: [...blockedJobIds].sort()
     });
-    remainingReadyCount = postApplyCollection.buckets['ready-to-apply']
-      .map((entry) => entry.jobId)
-      .filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId)).length;
     const updatedResolvedQueueKeys = createResolvedAutonomousDecisionQueueKeySet(
       iterations.flatMap((iteration) => iteration.apply?.decisions ?? [])
     );
+    remainingReadyCount = postApplyCollection.buckets['ready-to-apply']
+      .filter((entry) => dashboardCollectedBundleIsOpen(entry, terminalJobIds, blockedJobIds, updatedResolvedQueueKeys)).length;
     const remainingTerminalQueueDebtCount = terminalAutoDrainQueueDebtJobIds(postApplyCollection, terminalJobIds, blockedJobIds, updatedResolvedQueueKeys).length;
     const remainingPromotedQueueDebtCount = visibleAutoDrainQueueDebtJobIds(
       postApplyCollection,
@@ -2985,9 +2984,9 @@ async function runCodexSwarmAutoDrain(input: {
   const answeredHumanBlockedJobIds = new Set(answeredHumanBlockedDecisions.map((decision) => decision.jobId));
   const openBlockedJobIds = uniqueStrings([...blockedJobIds].filter((jobId) => !answeredHumanBlockedJobIds.has(jobId))).sort();
   const openBlockedJobIdSet = new Set(openBlockedJobIds);
+  const finalResolvedQueueKeys = createResolvedAutonomousDecisionQueueKeySet(decisions);
   const finalRemainingReadyCount = latestCollection?.buckets['ready-to-apply']
-    .map((entry) => entry.jobId)
-    .filter((jobId) => !terminalJobIds.has(jobId) && !openBlockedJobIdSet.has(jobId)).length ?? remainingReadyCount;
+    .filter((entry) => dashboardCollectedBundleIsOpen(entry, terminalJobIds, openBlockedJobIdSet, finalResolvedQueueKeys)).length ?? remainingReadyCount;
   const rerunManifest = await writeAutoDrainRerunManifest({
     cwd: input.cwd,
     outDir,
@@ -6781,21 +6780,58 @@ function summarizeDashboardActiveQueuePressure(
     selectedPromoteCount: 0,
     deferredPromoteCount: 0
   };
-  const latestDrainWork = autoDrain?.iterations.at(-1)?.coordinatorAgentDrainWork.summary;
-  const latestCodexDrain = autoDrain?.iterations.at(-1)?.coordinatorAgentDrain?.summary;
-  if (latestDrainWork && latestDrainWork.assignmentCount > 0) {
-    const activeCoordinatorQueueCount = collectOnly
-      ? latestDrainWork.assignmentCount
-      : latestDrainWork.nonTerminalCount;
+  const latestIteration = autoDrain?.iterations.at(-1);
+  const latestDrainWork = latestIteration?.coordinatorAgentDrainWork;
+  const latestDrainSummary = latestDrainWork?.summary;
+  const latestCodexDrain = latestIteration?.coordinatorAgentDrain;
+  if (latestDrainSummary && latestDrainSummary.assignmentCount > 0) {
+    const terminalJobIds = new Set(autoDrain?.terminalJobIds ?? []);
+    const blockedJobIds = new Set(autoDrain?.blockedJobIds ?? []);
+    const resolvedQueueKeys = createDashboardResolvedQueueKeySet(autoDrain);
+    const answeredContinuationKeys = createDashboardAnsweredContinuationKeySet(autoDrain?.humanAnswers);
+    const subjectIsOpen = (subject: { jobId: string; taskId?: string; queueItemIds?: readonly string[] }) => (
+      dashboardQueueSubjectIsOpen(subject, terminalJobIds, blockedJobIds, resolvedQueueKeys)
+        && !dashboardQueueSubjectMatchesAnyKey(subject, answeredContinuationKeys)
+    );
+    const openDrainAssignments = Array.isArray(latestDrainWork?.assignments)
+      ? latestDrainWork.assignments
+        .filter(subjectIsOpen)
+        .filter((assignment) => collectOnly || !assignment.terminal)
+      : undefined;
+    const openCodexAssignments = Array.isArray(latestCodexDrain?.assignments)
+      ? latestCodexDrain.assignments.filter(subjectIsOpen)
+      : undefined;
+    const activeCoordinatorQueueCount = openDrainAssignments
+      ? openDrainAssignments.length
+      : collectOnly
+        ? latestDrainSummary.assignmentCount
+        : latestDrainSummary.nonTerminalCount;
+    const openLeaseKeys = openDrainAssignments
+      ? uniqueStrings(openDrainAssignments.map((assignment) => assignment.leaseId || assignment.leaseScope || assignment.queueId)).sort()
+      : [];
     return {
       activeCoordinatorQueueCount,
-      leaseCount: activeCoordinatorQueueCount > 0 ? latestDrainWork.leaseCount : 0,
-      localQueueCount: latestDrainWork.queuedCount,
-      promotedCount: latestDrainWork.promotedWorkCount,
-      selectedCoordinatorCount: latestCodexDrain?.selectedCount ?? 0,
-      deferredCoordinatorCount: latestCodexDrain?.deferredCount ?? 0,
-      selectedPromoteCount: latestCodexDrain?.selectedPromoteCount ?? 0,
-      deferredPromoteCount: latestCodexDrain?.deferredPromoteCount ?? 0
+      leaseCount: openDrainAssignments
+        ? openLeaseKeys.length
+        : activeCoordinatorQueueCount > 0 ? latestDrainSummary.leaseCount : 0,
+      localQueueCount: openDrainAssignments
+        ? openDrainAssignments.filter((assignment) => assignment.assignedAction === 'queue-local').length
+        : latestDrainSummary.queuedCount,
+      promotedCount: openDrainAssignments
+        ? openDrainAssignments.filter((assignment) => assignment.assignedAction === 'promote').length
+        : latestDrainSummary.promotedWorkCount,
+      selectedCoordinatorCount: openCodexAssignments
+        ? openCodexAssignments.filter((assignment) => assignment.selected).length
+        : latestCodexDrain?.summary.selectedCount ?? 0,
+      deferredCoordinatorCount: openCodexAssignments
+        ? openCodexAssignments.filter((assignment) => !assignment.selected).length
+        : latestCodexDrain?.summary.deferredCount ?? 0,
+      selectedPromoteCount: openCodexAssignments
+        ? openCodexAssignments.filter((assignment) => assignment.selected && assignment.queueAction === 'promote').length
+        : latestCodexDrain?.summary.selectedPromoteCount ?? 0,
+      deferredPromoteCount: openCodexAssignments
+        ? openCodexAssignments.filter((assignment) => !assignment.selected && assignment.queueAction === 'promote').length
+        : latestCodexDrain?.summary.deferredPromoteCount ?? 0
     };
   }
   if (!autoDrain) return fallback;
@@ -6816,10 +6852,10 @@ function summarizeDashboardActiveQueuePressure(
     leaseCount: uniqueStrings(pressureAssignments.map((assignment) => assignment.scopeId)).length,
     localQueueCount: activeAssignments.filter((assignment) => assignment.action === 'queue-local').length,
     promotedCount: activeAssignments.filter((assignment) => assignment.action === 'promote').length,
-    selectedCoordinatorCount: latestCodexDrain?.selectedCount ?? 0,
-    deferredCoordinatorCount: latestCodexDrain?.deferredCount ?? 0,
-    selectedPromoteCount: latestCodexDrain?.selectedPromoteCount ?? 0,
-    deferredPromoteCount: latestCodexDrain?.deferredPromoteCount ?? 0
+    selectedCoordinatorCount: latestCodexDrain?.summary.selectedCount ?? 0,
+    deferredCoordinatorCount: latestCodexDrain?.summary.deferredCount ?? 0,
+    selectedPromoteCount: latestCodexDrain?.summary.selectedPromoteCount ?? 0,
+    deferredPromoteCount: latestCodexDrain?.summary.deferredPromoteCount ?? 0
   };
 }
 

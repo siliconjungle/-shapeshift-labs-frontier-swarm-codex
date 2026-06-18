@@ -180,6 +180,10 @@ The collapse policy has two global rules:
   alias set formed from `queueItemIds`, `taskId`, and `jobId`, then use the latest
   record in that connected component. Older stale, conflict-blocked, rejected, or
   human-blocked records are superseded once a later queue-equivalent decision lands.
+  Auto-drain ready selection, final remaining-ready counts, coordinator drain-work
+  pressure, and dashboard merge-queue assignment openness must use this same
+  connected alias set; exact `jobId` filtering alone is not enough when a follow-up
+  worker lands under a new job id for the same task or queue item.
 - Human-needed dashboards require explicit questions. A `human-blocked` status is
   not enough by itself; the reason must use an explicit question marker such as
   `human-question:` or contain a concrete question. Ownership, stale patch, failed

@@ -4247,15 +4247,59 @@ const collapsedDecisionAutoDrain = {
       }
     },
     coordinatorAgentDrainWork: {
+      assignments: [
+        createSyntheticDrainWorkAssignment({
+          jobId: 'collapsed-rerun-old-job',
+          taskId: 'collapsed-rerun-task',
+          queueItemIds: ['collapsed-rerun-task'],
+          assignedAction: 'rerun',
+          decision: 'rerun',
+          classification: 'terminal',
+          terminal: true,
+          leaseId: 'collapsed-rerun-lease',
+          leaseScope: 'path:src/collapsed-rerun.ts'
+        }),
+        createSyntheticDrainWorkAssignment({
+          jobId: 'collapsed-rejected-stale-job',
+          taskId: 'collapsed-rejected-task',
+          queueItemIds: ['collapsed-rejected-task'],
+          assignedAction: 'rerun',
+          decision: 'rerun',
+          classification: 'terminal',
+          terminal: true,
+          leaseId: 'collapsed-rejected-lease',
+          leaseScope: 'path:src/collapsed-rejected.ts'
+        }),
+        createSyntheticDrainWorkAssignment({
+          jobId: 'collapsed-open-promote-job',
+          taskId: 'collapsed-open-promote-task',
+          queueItemIds: ['collapsed-open-promote-task'],
+          assignedAction: 'promote',
+          decision: 'escalated',
+          admitted: false,
+          leaseId: 'collapsed-open-promote-lease',
+          leaseScope: 'path:src/collapsed-open-promote.ts'
+        }),
+        createSyntheticDrainWorkAssignment({
+          jobId: 'alias-old-job',
+          taskId: 'alias-task-a',
+          queueItemIds: ['alias-queue-a'],
+          assignedAction: 'promote',
+          decision: 'escalated',
+          admitted: false,
+          leaseId: 'alias-old-lease',
+          leaseScope: 'path:src/alias-old.ts'
+        })
+      ],
       summary: {
-        leaseCount: 1,
-        assignmentCount: 3,
+        leaseCount: 2,
+        assignmentCount: 4,
         terminalCount: 2,
-        nonTerminalCount: 1,
-        promotedWorkCount: 1,
+        nonTerminalCount: 2,
+        promotedWorkCount: 2,
         appliedCount: 0,
         queuedCount: 0,
-        escalatedCount: 1,
+        escalatedCount: 2,
         rerunCount: 2,
         rejectedCount: 0,
         recordedCount: 0,
@@ -4263,17 +4307,40 @@ const collapsedDecisionAutoDrain = {
       }
     },
     coordinatorAgentDrain: {
+      assignments: [
+        createSyntheticCodexDrainAssignment({
+          jobId: 'collapsed-selected-open-job',
+          taskId: 'collapsed-selected-open-task',
+          queueItemIds: ['collapsed-selected-open-task'],
+          queueAction: 'queue-local',
+          selected: true
+        }),
+        createSyntheticCodexDrainAssignment({
+          jobId: 'collapsed-open-promote-job',
+          taskId: 'collapsed-open-promote-task',
+          queueItemIds: ['collapsed-open-promote-task'],
+          queueAction: 'promote',
+          selected: false
+        }),
+        createSyntheticCodexDrainAssignment({
+          jobId: 'alias-old-job',
+          taskId: 'alias-task-a',
+          queueItemIds: ['alias-queue-a'],
+          queueAction: 'promote',
+          selected: false
+        })
+      ],
       summary: {
-        assignmentCount: 2,
+        assignmentCount: 3,
         selectedCount: 1,
-        deferredCount: 1,
+        deferredCount: 2,
         applyLocalCount: 0,
         queueLocalCount: 0,
-        promoteCount: 1,
+        promoteCount: 2,
         selectedQueueLocalCount: 0,
         selectedPromoteCount: 0,
-        deferredPromoteCount: 1,
-        scopeCount: 1
+        deferredPromoteCount: 2,
+        scopeCount: 2
       }
     },
     apply: {
@@ -4335,6 +4402,38 @@ const collapsedDecisionAutoDrain = {
           queueItemIds: ['collapsed-committed-fresh-queue'],
           reason: 'fresh queue alias committed',
           finishedAt: collapsedDecisionArtifacts.generatedAt + 7
+        }),
+        createSyntheticAutonomousDecision('checked', {
+          id: 'alias-checked-old',
+          jobId: 'alias-old-job',
+          taskId: 'alias-task-a',
+          queueItemIds: ['alias-queue-a'],
+          reason: 'older checked coordinator review',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 8
+        }),
+        createSyntheticAutonomousDecision('rerun', {
+          id: 'alias-task-bridge',
+          jobId: 'alias-bridge-job',
+          taskId: 'alias-task-a',
+          queueItemIds: ['alias-queue-b'],
+          reason: 'task alias bridge rerun',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 9
+        }),
+        createSyntheticAutonomousDecision('rejected', {
+          id: 'alias-job-bridge',
+          jobId: 'alias-bridge-job',
+          taskId: 'alias-task-c',
+          queueItemIds: ['alias-queue-c'],
+          reason: 'job alias bridge rejected',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 10
+        }),
+        createSyntheticAutonomousDecision('committed', {
+          id: 'alias-committed-fresh',
+          jobId: 'alias-fresh-job',
+          taskId: 'alias-task-final',
+          queueItemIds: ['alias-queue-c'],
+          reason: 'fresh alias chain committed',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 11
         })
       ]
     }
@@ -4345,7 +4444,8 @@ const collapsedDecisionAutoDrain = {
     'collapsed-conflict-fresh-job',
     'collapsed-committed-fresh-job',
     'collapsed-rejected-fresh-job',
-    'collapsed-rerun-fresh-job'
+    'collapsed-rerun-fresh-job',
+    'alias-fresh-job'
   ],
   blockedJobIds: [],
   artifacts: collapsedDecisionArtifacts,
@@ -4353,12 +4453,12 @@ const collapsedDecisionAutoDrain = {
     iterationCount: 1,
     collectionCount: 1,
     applyCount: 1,
-    terminalCount: 4,
+    terminalCount: 5,
     blockedCount: 0,
     conflictBlockedCount: 1,
     humanBlockedCount: 0,
     remainingReadyCount: 0,
-    admittedCount: 7,
+    admittedCount: 11,
     deferredCount: 0,
     reviewerAssignmentCount: 0,
     reviewerTaskCount: 0,
@@ -4384,10 +4484,10 @@ const collapsedDecisionDashboard = JSON.parse(await fs.readFile(collapsedDecisio
 assert.deepStrictEqual(collapsedDecisionDashboard.operatorSummary, collapsedDecisionDashboard.queueMetadata.operatorSummary);
 assert.deepStrictEqual(collapsedDecisionDashboard.mergeQueueHealth, collapsedDecisionDashboard.queueMetadata.mergeQueueHealth);
 assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.decisionCollapsePolicy, FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.appliedDecisionCount, 3);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committedDecisionCount, 2);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.appliedDecisionCount, 3);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.committedDecisionCount, 2);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.appliedDecisionCount, 4);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committedDecisionCount, 3);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.appliedDecisionCount, 4);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.committedDecisionCount, 3);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.counts.rerunCandidateCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.rerunCount, 0);
@@ -4411,7 +4511,7 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.trueBlo
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.humanQuestions.count, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.status, 'warning');
 assert.match(collapsedDecisionDashboard.queueMetadata.operatorSummary.headline, /1 deferred coordinator assignment/);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 3);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 4);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.currentHeadConflicts, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.deferredCoordinatorQueues, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.deferredPromoteQueues, 1);
@@ -4419,7 +4519,7 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.coun
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
 const collapsedDecisionCards = new Map(collapsedDecisionDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
-assert.strictEqual(collapsedDecisionCards.get('applied-decisions').value, 3);
+assert.strictEqual(collapsedDecisionCards.get('applied-decisions').value, 4);
 assert.strictEqual(collapsedDecisionCards.get('coordination-debt').value, 1);
 assert.strictEqual(collapsedDecisionCards.get('coordination-debt').status, 'warning');
 assert.match(collapsedDecisionCards.get('coordination-debt').detail, /1 deferred promotion/);
@@ -4429,11 +4529,11 @@ assert.match(collapsedDecisionCards.get('stale-rerun').action, /escalate only ex
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').value, 0);
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').detail, '0 queue block actions, 0 explicit human questions');
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').status, 'ok');
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.autonomousDecisionCount, 7);
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.currentDecisionCount, 4);
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.supersededDecisionCount, 3);
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.completedHistoryCount, 7);
-assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.committedDecisionCount, 2);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.autonomousDecisionCount, 11);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.currentDecisionCount, 5);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.supersededDecisionCount, 6);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.completedHistoryCount, 11);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.committedDecisionCount, 3);
 assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.rerunWorkCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.realBlockerCount, 0);
 const collapsedDecisionHistory = new Map(collapsedDecisionDashboard.autonomousQueueHealth.decisionHistory.map((decision) => [decision.id, decision]));
@@ -4448,9 +4548,21 @@ assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-old').queueI
 assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-old').supersededByDecisionId, 'collapsed-rejected-fresh');
 assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-fresh').historyState, 'current');
 assert.strictEqual(collapsedDecisionHistory.get('collapsed-rejected-fresh').queueImpact, 'completed-history');
+assert.strictEqual(collapsedDecisionHistory.get('alias-checked-old').historyState, 'superseded');
+assert.strictEqual(collapsedDecisionHistory.get('alias-checked-old').queueImpact, 'completed-history');
+assert.strictEqual(collapsedDecisionHistory.get('alias-checked-old').supersededByDecisionId, 'alias-committed-fresh');
+assert.strictEqual(collapsedDecisionHistory.get('alias-task-bridge').historyState, 'superseded');
+assert.strictEqual(collapsedDecisionHistory.get('alias-task-bridge').supersededByDecisionId, 'alias-committed-fresh');
+assert.strictEqual(collapsedDecisionHistory.get('alias-job-bridge').historyState, 'superseded');
+assert.strictEqual(collapsedDecisionHistory.get('alias-job-bridge').supersededByDecisionId, 'alias-committed-fresh');
+assert.strictEqual(collapsedDecisionHistory.get('alias-committed-fresh').historyState, 'current');
+assert.strictEqual(collapsedDecisionHistory.get('alias-committed-fresh').queueImpact, 'completed-history');
+const collapsedCoordinatorAssignments = new Map(collapsedDecisionDashboard.queueMetadata.mergeQueueHealth.coordinatorAssignments.map((assignment) => [assignment.jobId, assignment]));
+assert.strictEqual(collapsedCoordinatorAssignments.get('collapsed-open-promote-job').open, true);
+assert.strictEqual(collapsedCoordinatorAssignments.get('alias-old-job').open, false);
 const collapsedHealthSections = new Map(collapsedDecisionDashboard.autonomousQueueHealth.sections.map((section) => [section.id, section]));
-assert.strictEqual(collapsedHealthSections.get('completed-history').value, 7);
-assert.match(collapsedHealthSections.get('completed-history').detail, /3 superseded decisions/);
+assert.strictEqual(collapsedHealthSections.get('completed-history').value, 11);
+assert.match(collapsedHealthSections.get('completed-history').detail, /6 superseded decisions/);
 assert.strictEqual(collapsedHealthSections.get('rerun-work').value, 0);
 assert.strictEqual(collapsedHealthSections.get('real-blockers').value, 0);
 
@@ -6034,6 +6146,68 @@ async function writePatchOnlyJob(runDir, jobId, patchText, overrides = {}) {
       targetRefs: changedFiles
     }, null, 2)
   ].join('\n') + '\n');
+}
+
+function createSyntheticDrainWorkAssignment(overrides = {}) {
+  const jobId = overrides.jobId ?? 'synthetic-drain-job';
+  const taskId = overrides.taskId ?? `${jobId}-task`;
+  const queueItemIds = Array.isArray(overrides.queueItemIds) ? overrides.queueItemIds : [taskId];
+  const assignedAction = overrides.assignedAction ?? 'promote';
+  const terminal = overrides.terminal ?? false;
+  const leaseScope = overrides.leaseScope ?? `path:src/${jobId}.ts`;
+  return {
+    id: overrides.id ?? `synthetic-drain-assignment:${jobId}`,
+    jobId,
+    taskId,
+    lane: overrides.lane ?? 'synthetic-drain',
+    title: overrides.title ?? jobId,
+    queueItemIds,
+    queueId: overrides.queueId ?? `queue:${jobId}`,
+    queueKind: overrides.queueKind ?? 'path',
+    rootQueueId: overrides.rootQueueId ?? 'root',
+    parentQueueIds: overrides.parentQueueIds ?? [],
+    leaseId: overrides.leaseId ?? `lease:${jobId}`,
+    leaseScope,
+    assignedAction,
+    decision: overrides.decision ?? (assignedAction === 'promote' ? 'escalated' : assignedAction),
+    classification: overrides.classification ?? (terminal ? 'terminal' : 'non-terminal'),
+    terminal,
+    reasons: overrides.reasons ?? [assignedAction],
+    admitted: overrides.admitted ?? true,
+    riskLevel: overrides.riskLevel ?? 'low',
+    disposition: overrides.disposition ?? 'auto-mergeable',
+    mergeReadiness: overrides.mergeReadiness ?? 'verified-patch',
+    changedPaths: overrides.changedPaths ?? [`src/${jobId}.ts`],
+    changedRegions: overrides.changedRegions ?? [],
+    conflictingJobIds: overrides.conflictingJobIds ?? []
+  };
+}
+
+function createSyntheticCodexDrainAssignment(overrides = {}) {
+  const jobId = overrides.jobId ?? 'synthetic-codex-drain-job';
+  const taskId = overrides.taskId ?? `${jobId}-task`;
+  const queueItemIds = Array.isArray(overrides.queueItemIds) ? overrides.queueItemIds : [taskId];
+  const queueAction = overrides.queueAction ?? 'promote';
+  const selected = overrides.selected ?? false;
+  return {
+    jobId,
+    taskId,
+    lane: overrides.lane ?? 'synthetic-drain',
+    queueItemIds,
+    queueAction,
+    decision: selected ? 'selected' : 'deferred',
+    selected,
+    scopeId: overrides.scopeId ?? `path:src/${jobId}.ts`,
+    parentScopeIds: overrides.parentScopeIds ?? [],
+    leaseKey: overrides.leaseKey ?? `path:src/${jobId}.ts`,
+    changedPaths: overrides.changedPaths ?? [`src/${jobId}.ts`],
+    changedRegions: overrides.changedRegions ?? [],
+    conflictingJobIds: overrides.conflictingJobIds ?? [],
+    serializesAfterJobIds: overrides.serializesAfterJobIds ?? [],
+    leaderJobIds: overrides.leaderJobIds ?? (selected ? [jobId] : []),
+    reasons: overrides.reasons ?? [selected ? 'coordinator-agent-drain-selected' : 'coordinator-agent-drain-deferred'],
+    selectionReason: overrides.selectionReason ?? (selected ? 'selected' : 'deferred-by-queue-leader')
+  };
 }
 
 function createSyntheticAutonomousDecision(status, overrides = {}) {
