@@ -114,6 +114,8 @@ export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND = 'frontier.swar
 export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_KIND = 'frontier.swarm-codex.dashboard-cost-summary';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_COST_SUMMARY_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_DASHBOARD_AUTONOMOUS_QUEUE_HEALTH_KIND = 'frontier.swarm-codex.dashboard-autonomous-queue-health';
+export const FRONTIER_SWARM_CODEX_DASHBOARD_AUTONOMOUS_QUEUE_HEALTH_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_HUMAN_ANSWER_ROUTING_KIND = 'frontier.swarm-codex.human-answer-routing';
 export const FRONTIER_SWARM_CODEX_HUMAN_ANSWER_ROUTING_VERSION = 1;
 const DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIXES = [
@@ -1964,6 +1966,121 @@ export interface FrontierCodexDashboardOperatorQueueSummary {
     trueBlockers: number;
     humanQuestions: number;
     coordinatorReviewArtifacts: number;
+  };
+}
+
+export type FrontierCodexDashboardAutonomousQueueHealthSource = 'run-and-auto-drain' | 'run-only';
+
+export type FrontierCodexDashboardAutonomousQueueHealthSectionId =
+  | 'active-workers'
+  | 'coordinator-review'
+  | 'completed-history'
+  | 'rerun-work'
+  | 'real-blockers'
+  | 'human-questions';
+
+export type FrontierCodexDashboardAutonomousDecisionHistoryState = 'current' | 'superseded';
+
+export type FrontierCodexDashboardAutonomousDecisionQueueImpact =
+  | 'completed-history'
+  | 'rerun-work'
+  | 'real-blocker'
+  | 'human-question';
+
+export interface FrontierCodexDashboardAutonomousQueueWorker {
+  jobId: string;
+  taskId?: string;
+  lane?: string;
+  layer?: string;
+  title?: string;
+  status: string;
+  active: boolean;
+  resultStatus?: string;
+  mergeReadiness?: string;
+  changedPaths: string[];
+  evidencePaths: string[];
+}
+
+export interface FrontierCodexDashboardAutonomousDecisionHistoryItem {
+  id: string;
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  status: FrontierCodexAutonomousDecisionStatus;
+  reason: string;
+  historyState: FrontierCodexDashboardAutonomousDecisionHistoryState;
+  current: boolean;
+  superseded: boolean;
+  supersededByDecisionId?: string;
+  supersededByStatus?: FrontierCodexAutonomousDecisionStatus;
+  queueImpact: FrontierCodexDashboardAutonomousDecisionQueueImpact;
+  bundlePath: string;
+  patchPath?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  lockScope: FrontierCodexAutonomousLockScope;
+  lockKeys: string[];
+  finishedAt: number;
+  commit?: string;
+}
+
+export interface FrontierCodexDashboardAutonomousQueueBlocker {
+  id: string;
+  source: 'queue-block' | 'human-blocked-decision';
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  queueKeys: string[];
+  reason: string;
+  changedPaths: string[];
+  changedRegions: string[];
+}
+
+export interface FrontierCodexDashboardAutonomousQueueHealthSection {
+  id: FrontierCodexDashboardAutonomousQueueHealthSectionId;
+  label: string;
+  value: number;
+  detail: string;
+  status: FrontierCodexDashboardOperatorQueueStatus;
+  action: string;
+  sourceFields: string[];
+  itemIds: string[];
+}
+
+export interface FrontierCodexDashboardAutonomousQueueHealth {
+  kind: typeof FRONTIER_SWARM_CODEX_DASHBOARD_AUTONOMOUS_QUEUE_HEALTH_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_DASHBOARD_AUTONOMOUS_QUEUE_HEALTH_VERSION;
+  source: FrontierCodexDashboardAutonomousQueueHealthSource;
+  available: boolean;
+  status: FrontierCodexDashboardOperatorQueueStatus;
+  headline: string;
+  sections: FrontierCodexDashboardAutonomousQueueHealthSection[];
+  activeWorkers: FrontierCodexDashboardAutonomousQueueWorker[];
+  workers: FrontierCodexDashboardAutonomousQueueWorker[];
+  decisionHistory: FrontierCodexDashboardAutonomousDecisionHistoryItem[];
+  completedHistory: FrontierCodexDashboardAutonomousDecisionHistoryItem[];
+  rerunWork: FrontierCodexDashboardMergeQueueRerunCandidate[];
+  realBlockers: FrontierCodexDashboardAutonomousQueueBlocker[];
+  humanQuestions: FrontierCodexDashboardHumanQuestions;
+  summary: {
+    activeWorkerCount: number;
+    workerCount: number;
+    completedWorkerCount: number;
+    failedWorkerCount: number;
+    blockedWorkerCount: number;
+    coordinatorReviewCount: number;
+    coordinatorReviewAssignmentCount: number;
+    coordinatorReviewTaskCount: number;
+    completedHistoryCount: number;
+    autonomousDecisionCount: number;
+    currentDecisionCount: number;
+    supersededDecisionCount: number;
+    appliedDecisionCount: number;
+    committedDecisionCount: number;
+    rerunWorkCount: number;
+    realBlockerCount: number;
+    humanQuestionCount: number;
   };
 }
 
@@ -4531,6 +4648,7 @@ export async function writeSwarmCoordinatorSnapshot(
   }, {});
   const queueMetadata = createDashboardQueueMetadata(input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null, input.autoDrain ?? null);
   const costSummary = createCodexDashboardCostSummary(input.run);
+  const autonomousQueueHealth = createDashboardAutonomousQueueHealth(input.run, queueMetadata, input.autoDrain ?? null);
   const dashboard = {
     kind: 'frontier.swarm-codex.coordinator-dashboard',
     version: 1,
@@ -4543,6 +4661,7 @@ export async function writeSwarmCoordinatorSnapshot(
     byLane,
     mergeReadiness,
     costSummary,
+    autonomousQueueHealth,
     queueMetadata,
     queueHealth: queueMetadata.queueHealth,
     mergeQueueHealth: queueMetadata.mergeQueueHealth,
@@ -4557,6 +4676,313 @@ export async function writeSwarmCoordinatorSnapshot(
   };
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(dashboard, null, 2) + '\n');
+}
+
+function createDashboardAutonomousQueueHealth(
+  run: FrontierSwarmRun,
+  queueMetadata: FrontierCodexDashboardQueueMetadata,
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null
+): FrontierCodexDashboardAutonomousQueueHealth {
+  const workers = createDashboardAutonomousQueueWorkers(run);
+  const activeWorkers = workers.filter((worker) => worker.active);
+  const decisionHistory = createDashboardAutonomousDecisionHistory(autoDrain);
+  const completedHistory = decisionHistory.filter((decision) => decision.queueImpact === 'completed-history');
+  const rerunDecisionIds = decisionHistory
+    .filter((decision) => decision.current && decision.queueImpact === 'rerun-work')
+    .map((decision) => decision.id);
+  const rerunWork = queueMetadata.mergeQueueHealth.rerunCandidates;
+  const realBlockers = createDashboardAutonomousQueueBlockers(queueMetadata, decisionHistory);
+  const queueBlockerCount = realBlockers.filter((blocker) => blocker.source === 'queue-block').length;
+  const decisionBlockerCount = realBlockers.filter((blocker) => blocker.source === 'human-blocked-decision').length;
+  const realBlockerCount = Math.max(queueMetadata.queueHealth.trueBlockerCount, queueBlockerCount) + decisionBlockerCount;
+  const rerunWorkCount = Math.max(rerunWork.length, rerunDecisionIds.length);
+  const humanQuestionCount = queueMetadata.humanQuestions.count;
+  const completedWorkerCount = workers.filter((worker) => dashboardWorkerStatusIsCompleted(worker.resultStatus ?? worker.status)).length;
+  const failedWorkerCount = workers.filter((worker) => (worker.resultStatus ?? worker.status) === 'failed').length;
+  const blockedWorkerCount = workers.filter((worker) => (worker.resultStatus ?? worker.status) === 'blocked').length;
+  const coordinatorReviewCount = queueMetadata.queueHealth.coordinatorReviewCount;
+  const summary: FrontierCodexDashboardAutonomousQueueHealth['summary'] = {
+    activeWorkerCount: activeWorkers.length,
+    workerCount: workers.length,
+    completedWorkerCount,
+    failedWorkerCount,
+    blockedWorkerCount,
+    coordinatorReviewCount,
+    coordinatorReviewAssignmentCount: queueMetadata.queueHealth.coordinatorReviewAssignmentCount,
+    coordinatorReviewTaskCount: queueMetadata.queueHealth.coordinatorReviewTaskCount,
+    completedHistoryCount: completedHistory.length,
+    autonomousDecisionCount: decisionHistory.length,
+    currentDecisionCount: decisionHistory.filter((decision) => decision.current).length,
+    supersededDecisionCount: decisionHistory.filter((decision) => decision.superseded).length,
+    appliedDecisionCount: decisionHistory.filter((decision) => decision.status === 'applied' || decision.status === 'committed').length,
+    committedDecisionCount: decisionHistory.filter((decision) => decision.status === 'committed').length,
+    rerunWorkCount,
+    realBlockerCount,
+    humanQuestionCount
+  };
+  const status: FrontierCodexDashboardOperatorQueueStatus = realBlockerCount > 0 || humanQuestionCount > 0
+    ? 'blocked'
+    : rerunWorkCount > 0
+      ? 'warning'
+      : activeWorkers.length > 0 || coordinatorReviewCount > 0
+        ? 'info'
+        : 'ok';
+  const sections: FrontierCodexDashboardAutonomousQueueHealthSection[] = [
+    createDashboardAutonomousQueueHealthSection({
+      id: 'active-workers',
+      label: 'Active workers',
+      value: activeWorkers.length,
+      detail: `${formatDashboardOperatorQueueCount(completedWorkerCount, 'completed worker')}, ${formatDashboardOperatorQueueCount(failedWorkerCount, 'failed worker')}, ${formatDashboardOperatorQueueCount(blockedWorkerCount, 'blocked worker')}`,
+      status: activeWorkers.length > 0 ? 'info' : 'ok',
+      action: activeWorkers.length > 0 ? 'Watch active worker evidence and result files before draining coordinator work.' : 'No worker slots are currently active.',
+      sourceFields: ['run.jobs', 'run.results'],
+      itemIds: activeWorkers.map((worker) => worker.jobId)
+    }),
+    createDashboardAutonomousQueueHealthSection({
+      id: 'coordinator-review',
+      label: 'Coordinator review',
+      value: coordinatorReviewCount,
+      detail: `${formatDashboardOperatorQueueCount(queueMetadata.queueHealth.coordinatorReviewAssignmentCount, 'review assignment')}, ${formatDashboardOperatorQueueCount(queueMetadata.queueHealth.coordinatorReviewTaskCount, 'review task')}`,
+      status: coordinatorReviewCount > 0 ? 'info' : 'ok',
+      action: 'Use coordinator-review artifacts as audit evidence; they are not active blockers by themselves.',
+      sourceFields: ['queueHealth.coordinatorReviewCount', 'queueHealth.coordinatorReviewAssignmentCount', 'queueHealth.coordinatorReviewTaskCount'],
+      itemIds: []
+    }),
+    createDashboardAutonomousQueueHealthSection({
+      id: 'completed-history',
+      label: 'Completed history',
+      value: completedHistory.length,
+      detail: `${formatDashboardOperatorQueueCount(summary.committedDecisionCount, 'committed decision')}, ${formatDashboardOperatorQueueCount(summary.supersededDecisionCount, 'superseded decision')}`,
+      status: completedHistory.length > 0 ? 'ok' : 'info',
+      action: 'Show committed, applied, recorded, rejected, and superseded decisions as history instead of active queue pressure.',
+      sourceFields: ['autonomousQueueHealth.decisionHistory', 'queueHealth.appliedDecisionCount', 'queueHealth.committedDecisionCount'],
+      itemIds: completedHistory.map((decision) => decision.id)
+    }),
+    createDashboardAutonomousQueueHealthSection({
+      id: 'rerun-work',
+      label: 'Rerun work',
+      value: rerunWorkCount,
+      detail: `${formatDashboardOperatorQueueCount(rerunWork.length, 'rerun candidate')}, ${formatDashboardOperatorQueueCount(queueMetadata.queueHealth.conflictRetryWork.length, 'conflict retry')}`,
+      status: rerunWorkCount > 0 ? 'warning' : 'ok',
+      action: 'Refresh stale or current-head conflict work as coordinator retry work; do not promote it to a human question.',
+      sourceFields: ['mergeQueueHealth.rerunCandidates', 'queueHealth.conflictRetryWork', 'autonomousQueueHealth.decisionHistory'],
+      itemIds: uniqueStrings([
+        ...rerunWork.map((candidate) => candidate.taskId ?? candidate.queueItemIds[0] ?? candidate.jobId),
+        ...rerunDecisionIds
+      ]).sort()
+    }),
+    createDashboardAutonomousQueueHealthSection({
+      id: 'real-blockers',
+      label: 'Real blockers',
+      value: realBlockerCount,
+      detail: `${formatDashboardOperatorQueueCount(Math.max(queueMetadata.queueHealth.trueBlockerCount, queueBlockerCount), 'queue block action')}, ${formatDashboardOperatorQueueCount(decisionBlockerCount, 'blocked autonomous decision')}`,
+      status: realBlockerCount > 0 ? 'blocked' : 'ok',
+      action: 'Escalate only concrete queue blocks or non-question human-blocked decisions that local policy cannot resolve.',
+      sourceFields: ['queueHealth.trueBlockerCount', 'mergeQueueHealth.coordinatorAssignments', 'autonomousQueueHealth.decisionHistory'],
+      itemIds: realBlockers.map((blocker) => blocker.id)
+    }),
+    createDashboardAutonomousQueueHealthSection({
+      id: 'human-questions',
+      label: 'Human questions',
+      value: humanQuestionCount,
+      detail: `${formatDashboardOperatorQueueCount(queueMetadata.humanQuestions.answeredCount, 'answered question')}, ${formatDashboardOperatorQueueCount(queueMetadata.humanQuestions.routedDecisionCount, 'routed answer')}`,
+      status: humanQuestionCount > 0 ? 'blocked' : 'ok',
+      action: 'Route explicit structured human questions through the human answer log.',
+      sourceFields: ['humanQuestions.count', 'humanQuestions.openDecisionIds', 'humanAnswers.routedDecisionIds'],
+      itemIds: queueMetadata.humanQuestions.openDecisionIds
+    })
+  ];
+  return {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_AUTONOMOUS_QUEUE_HEALTH_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_AUTONOMOUS_QUEUE_HEALTH_VERSION,
+    source: queueMetadata.available || autoDrain ? 'run-and-auto-drain' : 'run-only',
+    available: true,
+    status,
+    headline: createDashboardAutonomousQueueHealthHeadline(status, summary),
+    sections,
+    activeWorkers,
+    workers,
+    decisionHistory,
+    completedHistory,
+    rerunWork,
+    realBlockers,
+    humanQuestions: queueMetadata.humanQuestions,
+    summary
+  };
+}
+
+function createDashboardAutonomousQueueWorkers(run: FrontierSwarmRun): FrontierCodexDashboardAutonomousQueueWorker[] {
+  const resultByJobId = new Map(run.results.map((result) => [result.jobId, result]));
+  return run.jobs.map((job) => {
+    const result = resultByJobId.get(job.id);
+    const status = result?.status ?? job.status;
+    return {
+      jobId: job.id,
+      taskId: job.taskId,
+      lane: job.lane,
+      ...(job.layer ? { layer: job.layer } : {}),
+      title: job.title,
+      status,
+      active: dashboardWorkerStatusIsActive(status),
+      ...(result ? { resultStatus: result.status } : {}),
+      ...(result?.mergeReadiness ? { mergeReadiness: result.mergeReadiness } : {}),
+      changedPaths: result?.changedPaths ?? [],
+      evidencePaths: result?.evidencePaths ?? []
+    };
+  }).sort((left, right) => left.jobId.localeCompare(right.jobId));
+}
+
+function dashboardWorkerStatusIsActive(status: string): boolean {
+  return status === 'planned' || status === 'scheduled' || status === 'running';
+}
+
+function dashboardWorkerStatusIsCompleted(status: string): boolean {
+  return status === 'completed' || status === 'verified';
+}
+
+function createDashboardAutonomousDecisionHistory(
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null
+): FrontierCodexDashboardAutonomousDecisionHistoryItem[] {
+  const entries: Array<{ decision: FrontierCodexAutonomousMergeDecision; index: number }> = [];
+  for (const iteration of autoDrain?.iterations ?? []) {
+    for (const decision of iteration.apply?.decisions ?? []) {
+      entries.push({ decision, index: entries.length });
+    }
+  }
+  const components = createDashboardAutonomousDecisionComponents(entries.map((entry) => entry.decision));
+  const componentByKey = new Map<string, DashboardAutonomousDecisionComponent>();
+  for (const component of components) {
+    for (const key of component.keys) componentByKey.set(key, component);
+  }
+  return entries.map(({ decision }) => {
+    const component = dashboardAutonomousDecisionAliasKeys(decision)
+      .map((key) => componentByKey.get(key))
+      .find((entry): entry is DashboardAutonomousDecisionComponent => !!entry);
+    const latestDecision = component?.latest.decision ?? decision;
+    const current = latestDecision.id === decision.id;
+    const superseded = !current;
+    const historyState: FrontierCodexDashboardAutonomousDecisionHistoryState = superseded ? 'superseded' : 'current';
+    return {
+      id: decision.id,
+      jobId: decision.jobId,
+      ...(decision.taskId ? { taskId: decision.taskId } : {}),
+      queueItemIds: [...decision.queueItemIds],
+      queueKeys: dashboardAutonomousDecisionAliasKeys(decision),
+      status: decision.status,
+      reason: decision.reason,
+      historyState,
+      current,
+      superseded,
+      ...(superseded ? { supersededByDecisionId: latestDecision.id, supersededByStatus: latestDecision.status } : {}),
+      queueImpact: dashboardAutonomousDecisionQueueImpact(decision, current, autoDrain?.humanAnswers),
+      bundlePath: decision.bundlePath,
+      ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+      changedPaths: [...decision.changedPaths],
+      changedRegions: [...decision.changedRegions],
+      lockScope: decision.lockScope,
+      lockKeys: [...decision.lockKeys],
+      finishedAt: decision.finishedAt,
+      ...(decision.commit ? { commit: decision.commit } : {})
+    };
+  }).sort((left, right) => left.finishedAt - right.finishedAt || left.id.localeCompare(right.id));
+}
+
+function dashboardAutonomousDecisionQueueImpact(
+  decision: FrontierCodexAutonomousMergeDecision,
+  current: boolean,
+  routing: FrontierCodexHumanAnswerRoutingSummary | undefined
+): FrontierCodexDashboardAutonomousDecisionQueueImpact {
+  if (!current) return 'completed-history';
+  if (decision.status === 'applied'
+    || decision.status === 'committed'
+    || decision.status === 'checked'
+    || decision.status === 'skipped'
+    || decision.status === 'rejected'
+    || decision.status === 'failed') {
+    return 'completed-history';
+  }
+  if (decision.status === 'rerun' || decision.status === 'conflict-blocked') return 'rerun-work';
+  if (dashboardAutonomousDecisionIsExplicitHumanQuestion(decision)) {
+    return dashboardHumanQuestionHasRoutedAnswer(decision, routing) ? 'completed-history' : 'human-question';
+  }
+  return 'real-blocker';
+}
+
+function createDashboardAutonomousQueueBlockers(
+  queueMetadata: FrontierCodexDashboardQueueMetadata,
+  decisionHistory: readonly FrontierCodexDashboardAutonomousDecisionHistoryItem[]
+): FrontierCodexDashboardAutonomousQueueBlocker[] {
+  const blockers = new Map<string, FrontierCodexDashboardAutonomousQueueBlocker>();
+  for (const assignment of queueMetadata.mergeQueueHealth.coordinatorAssignments) {
+    if (!assignment.open || assignment.assignedAction !== 'block') continue;
+    blockers.set(`queue-block:${assignment.jobId}`, {
+      id: `queue-block:${assignment.jobId}`,
+      source: 'queue-block',
+      jobId: assignment.jobId,
+      ...(assignment.taskId ? { taskId: assignment.taskId } : {}),
+      queueItemIds: [...assignment.queueItemIds],
+      queueKeys: [...assignment.queueKeys],
+      reason: assignment.reasons[0] ?? assignment.decision,
+      changedPaths: [...assignment.changedPaths],
+      changedRegions: [...assignment.changedRegions]
+    });
+  }
+  for (const decision of decisionHistory) {
+    if (!decision.current || decision.queueImpact !== 'real-blocker') continue;
+    blockers.set(`human-blocked-decision:${decision.id}`, {
+      id: `human-blocked-decision:${decision.id}`,
+      source: 'human-blocked-decision',
+      jobId: decision.jobId,
+      ...(decision.taskId ? { taskId: decision.taskId } : {}),
+      queueItemIds: [...decision.queueItemIds],
+      queueKeys: [...decision.queueKeys],
+      reason: decision.reason,
+      changedPaths: [...decision.changedPaths],
+      changedRegions: [...decision.changedRegions]
+    });
+  }
+  return [...blockers.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function createDashboardAutonomousQueueHealthSection(input: {
+  id: FrontierCodexDashboardAutonomousQueueHealthSectionId;
+  label: string;
+  value: number;
+  detail: string;
+  status: FrontierCodexDashboardOperatorQueueStatus;
+  action: string;
+  sourceFields: readonly string[];
+  itemIds: readonly string[];
+}): FrontierCodexDashboardAutonomousQueueHealthSection {
+  return {
+    id: input.id,
+    label: input.label,
+    value: input.value,
+    detail: input.detail,
+    status: input.status,
+    action: input.action,
+    sourceFields: [...input.sourceFields],
+    itemIds: uniqueStrings(input.itemIds).sort()
+  };
+}
+
+function createDashboardAutonomousQueueHealthHeadline(
+  status: FrontierCodexDashboardOperatorQueueStatus,
+  summary: FrontierCodexDashboardAutonomousQueueHealth['summary']
+): string {
+  if (status === 'blocked') {
+    return `${formatDashboardOperatorQueueCount(summary.realBlockerCount, 'real blocker')} and ${formatDashboardOperatorQueueCount(summary.humanQuestionCount, 'human question')} need coordinator action.`;
+  }
+  if (status === 'warning') {
+    return `${formatDashboardOperatorQueueCount(summary.rerunWorkCount, 'rerun item')} need coordinator retry work; ${formatDashboardOperatorQueueCount(summary.completedHistoryCount, 'completed decision')} recorded.`;
+  }
+  if (status === 'info') {
+    const active = summary.activeWorkerCount > 0 ? formatDashboardOperatorQueueCount(summary.activeWorkerCount, 'active worker') : '';
+    const review = summary.coordinatorReviewCount > 0 ? formatDashboardOperatorQueueCount(summary.coordinatorReviewCount, 'coordinator review artifact') : '';
+    const detail = [active, review].filter((entry) => entry.length > 0).join(' and ');
+    return `${detail} available; no true blockers are open.`;
+  }
+  return `Autonomous queue is clear; ${formatDashboardOperatorQueueCount(summary.completedHistoryCount, 'completed decision')} recorded.`;
 }
 
 function createCodexDashboardCostSummary(run: FrontierSwarmRun): FrontierCodexDashboardCostSummary {

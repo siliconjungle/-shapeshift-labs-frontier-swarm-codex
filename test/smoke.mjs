@@ -708,6 +708,17 @@ assert.deepStrictEqual(activeCostDashboard.costSummary.unknownPricing, [{
   model: 'future-codex-model',
   reason: 'unknown-model-pricing'
 }]);
+assert.strictEqual(activeCostDashboard.autonomousQueueHealth.kind, 'frontier.swarm-codex.dashboard-autonomous-queue-health');
+assert.strictEqual(activeCostDashboard.autonomousQueueHealth.source, 'run-only');
+assert.strictEqual(activeCostDashboard.autonomousQueueHealth.summary.activeWorkerCount, 2);
+assert.deepStrictEqual(activeCostDashboard.autonomousQueueHealth.activeWorkers.map((worker) => worker.jobId), [
+  'active-priced',
+  'active-unknown-pricing'
+]);
+assert.strictEqual(activeCostDashboard.autonomousQueueHealth.summary.completedHistoryCount, 0);
+const activeCostHealthSections = new Map(activeCostDashboard.autonomousQueueHealth.sections.map((section) => [section.id, section]));
+assert.strictEqual(activeCostHealthSections.get('active-workers').value, 2);
+assert.strictEqual(activeCostHealthSections.get('active-workers').status, 'info');
 const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), checkStale: false, branchPrefix: 'codex/swarm-slice' });
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);
@@ -3332,6 +3343,25 @@ assert.match(collapsedDecisionCards.get('stale-rerun').action, /escalate only ex
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').value, 0);
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').detail, '0 queue block actions, 0 explicit human questions');
 assert.strictEqual(collapsedDecisionCards.get('true-blockers').status, 'ok');
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.autonomousDecisionCount, 5);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.currentDecisionCount, 3);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.supersededDecisionCount, 2);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.completedHistoryCount, 5);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.committedDecisionCount, 2);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.rerunWorkCount, 0);
+assert.strictEqual(collapsedDecisionDashboard.autonomousQueueHealth.summary.realBlockerCount, 0);
+const collapsedDecisionHistory = new Map(collapsedDecisionDashboard.autonomousQueueHealth.decisionHistory.map((decision) => [decision.id, decision]));
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-rerun-old').historyState, 'superseded');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-rerun-old').queueImpact, 'completed-history');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-rerun-old').supersededByDecisionId, 'collapsed-rerun-fresh');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-conflict-old').historyState, 'superseded');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-conflict-old').queueImpact, 'completed-history');
+assert.strictEqual(collapsedDecisionHistory.get('collapsed-conflict-old').supersededByDecisionId, 'collapsed-conflict-fresh');
+const collapsedHealthSections = new Map(collapsedDecisionDashboard.autonomousQueueHealth.sections.map((section) => [section.id, section]));
+assert.strictEqual(collapsedHealthSections.get('completed-history').value, 5);
+assert.match(collapsedHealthSections.get('completed-history').detail, /2 superseded decisions/);
+assert.strictEqual(collapsedHealthSections.get('rerun-work').value, 0);
+assert.strictEqual(collapsedHealthSections.get('real-blockers').value, 0);
 const collapsedManifestHead = 'f'.repeat(40);
 const closedStaleEntry = createSyntheticCollectedRerunEntry(collapsedDecisionOutDir, {
   jobId: 'closed-stale-old-job',
@@ -3731,6 +3761,14 @@ const explicitHumanQuestionCards = new Map(explicitHumanQuestionDashboard.queueM
 assert.strictEqual(explicitHumanQuestionCards.get('true-blockers').value, 1);
 assert.strictEqual(explicitHumanQuestionCards.get('true-blockers').status, 'blocked');
 assert.match(explicitHumanQuestionCards.get('true-blockers').detail, /1 explicit human question/);
+assert.strictEqual(explicitHumanQuestionDashboard.autonomousQueueHealth.summary.humanQuestionCount, 1);
+assert.strictEqual(explicitHumanQuestionDashboard.autonomousQueueHealth.summary.realBlockerCount, 1);
+const explicitHumanQuestionHealthSections = new Map(explicitHumanQuestionDashboard.autonomousQueueHealth.sections.map((section) => [section.id, section]));
+assert.strictEqual(explicitHumanQuestionHealthSections.get('human-questions').value, 1);
+assert.strictEqual(explicitHumanQuestionHealthSections.get('real-blockers').value, 1);
+assert.deepStrictEqual(explicitHumanQuestionDashboard.autonomousQueueHealth.realBlockers.map((blocker) => blocker.id), [
+  'human-blocked-decision:generic-human-blocked'
+]);
 
 const autoDrainDryRunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dry-run-repo');
 const autoDrainDryRun = await runCodexSwarm(autoDrainPlan, {
