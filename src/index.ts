@@ -4301,14 +4301,18 @@ function dashboardQueueSubjectIsOpen(
   resolvedQueueKeys: ReadonlySet<string>
 ): boolean {
   if (terminalJobIds.has(subject.jobId) || blockedJobIds.has(subject.jobId)) return false;
-  return dashboardQueueSubjectKeys(subject).every((key) => !resolvedQueueKeys.has(key));
+  return dashboardQueueSubjectAliasKeys(subject).every((key) => !resolvedQueueKeys.has(key));
 }
 
 function createDashboardResolvedQueueKeySet(autoDrain: FrontierCodexSwarmAutoDrainResult | null): Set<string> {
-  const decisions = latestDashboardAutonomousDecisions((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
-  return new Set(decisions
-    .filter((decision) => decision.status === 'applied' || decision.status === 'committed')
-    .flatMap(dashboardAutonomousDecisionQueueKeys));
+  const components = createDashboardAutonomousDecisionComponents((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
+  const resolved = new Set<string>();
+  for (const component of components) {
+    const decision = component.latest.decision;
+    if (decision.status !== 'applied' && decision.status !== 'committed') continue;
+    for (const key of component.keys) resolved.add(key);
+  }
+  return resolved;
 }
 
 function dashboardQueueSubjectKeys(subject: { jobId: string; taskId?: string; queueItemIds?: readonly string[] }): string[] {
@@ -4316,6 +4320,15 @@ function dashboardQueueSubjectKeys(subject: { jobId: string; taskId?: string; qu
   if (queueItemIds.length) return queueItemIds.map((queueItemId) => `queue:${queueItemId}`);
   if (subject.taskId && subject.taskId.length > 0) return [`task:${subject.taskId}`];
   return [`job:${subject.jobId}`];
+}
+
+function dashboardQueueSubjectAliasKeys(subject: { jobId: string; taskId?: string; queueItemIds?: readonly string[] }): string[] {
+  const queueItemIds = uniqueStrings((subject.queueItemIds ?? []).filter((entry) => entry.length > 0)).sort();
+  return uniqueStrings([
+    ...queueItemIds.map((queueItemId) => `queue:${queueItemId}`),
+    subject.taskId && subject.taskId.length > 0 ? `task:${subject.taskId}` : '',
+    `job:${subject.jobId}`
+  ].filter((entry) => entry.length > 0));
 }
 
 function createDashboardCollectOnlyMetadata(autoDrain: FrontierCodexSwarmAutoDrainResult | null): FrontierCodexDashboardCollectOnlyMetadata | undefined {
@@ -4575,7 +4588,7 @@ function dashboardConflictRetryWorkFromDecision(decision: FrontierCodexAutonomou
     jobId: decision.jobId,
     ...(decision.taskId ? { taskId: decision.taskId } : {}),
     queueItemIds,
-    queueKeys: dashboardAutonomousDecisionQueueKeys(decision),
+    queueKeys: dashboardAutonomousDecisionAliasKeys(decision),
     ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
     bundlePath: decision.bundlePath,
     changedPaths: [...decision.changedPaths],
@@ -4672,29 +4685,62 @@ function explicitHumanQuestionReasonFromBundle(bundle: FrontierSwarmMergeBundle)
 function latestDashboardAutonomousDecisions(
   decisions: readonly FrontierCodexAutonomousMergeDecision[]
 ): FrontierCodexAutonomousMergeDecision[] {
-  // The ledger is append-only; dashboard debt is derived from the latest event per queue key.
-  const latestByQueueKey = new Map<string, { decision: FrontierCodexAutonomousMergeDecision; index: number }>();
-  decisions.forEach((decision, index) => {
-    for (const key of dashboardAutonomousDecisionQueueKeys(decision)) {
-      latestByQueueKey.set(key, { decision, index });
-    }
-  });
-
-  const latestByDecisionId = new Map<string, { decision: FrontierCodexAutonomousMergeDecision; index: number }>();
-  for (const entry of latestByQueueKey.values()) {
-    const existing = latestByDecisionId.get(entry.decision.id);
-    if (!existing || entry.index > existing.index) latestByDecisionId.set(entry.decision.id, entry);
-  }
-  return [...latestByDecisionId.values()]
+  // The ledger is append-only; dashboard debt is derived from the latest event per connected queue subject.
+  return createDashboardAutonomousDecisionComponents(decisions)
+    .map((component) => component.latest)
     .sort((left, right) => left.index - right.index)
     .map((entry) => entry.decision);
 }
 
+interface DashboardAutonomousDecisionComponent {
+  keys: Set<string>;
+  latest: { decision: FrontierCodexAutonomousMergeDecision; index: number };
+}
+
+function createDashboardAutonomousDecisionComponents(
+  decisions: readonly FrontierCodexAutonomousMergeDecision[]
+): DashboardAutonomousDecisionComponent[] {
+  const components: DashboardAutonomousDecisionComponent[] = [];
+  const componentByKey = new Map<string, DashboardAutonomousDecisionComponent>();
+  decisions.forEach((decision, index) => {
+    const keys = dashboardAutonomousDecisionAliasKeys(decision);
+    const existingComponents: DashboardAutonomousDecisionComponent[] = [];
+    for (const key of keys) {
+      const existing = componentByKey.get(key);
+      if (existing && !existingComponents.includes(existing)) existingComponents.push(existing);
+    }
+    const component = existingComponents[0] ?? {
+      keys: new Set<string>(),
+      latest: { decision, index }
+    };
+    if (existingComponents.length === 0) {
+      components.push(component);
+    } else {
+      for (const existing of existingComponents.slice(1)) {
+        for (const key of existing.keys) {
+          component.keys.add(key);
+          componentByKey.set(key, component);
+        }
+        if (existing.latest.index > component.latest.index) component.latest = existing.latest;
+        const existingIndex = components.indexOf(existing);
+        if (existingIndex >= 0) components.splice(existingIndex, 1);
+      }
+    }
+    for (const key of keys) {
+      component.keys.add(key);
+      componentByKey.set(key, component);
+    }
+    if (index >= component.latest.index) component.latest = { decision, index };
+  });
+  return components;
+}
+
 function dashboardAutonomousDecisionQueueKeys(decision: FrontierCodexAutonomousMergeDecision): string[] {
-  const queueItemIds = uniqueStrings(decision.queueItemIds.filter((entry) => entry.length > 0)).sort();
-  if (queueItemIds.length) return queueItemIds.map((queueItemId) => `queue:${queueItemId}`);
-  if (decision.taskId && decision.taskId.length > 0) return [`task:${decision.taskId}`];
-  return [`job:${decision.jobId}`];
+  return dashboardQueueSubjectKeys(decision);
+}
+
+function dashboardAutonomousDecisionAliasKeys(decision: FrontierCodexAutonomousMergeDecision): string[] {
+  return dashboardQueueSubjectAliasKeys(decision);
 }
 
 function dashboardHumanQuestionIds(decision: FrontierCodexAutonomousMergeDecision): string[] {
@@ -5622,10 +5668,17 @@ function createAutoDrainRerunManifest(input: {
   const latestSourceHeads = compactArtifactPaths([input.currentHead]);
   const terminalJobIds = new Set(input.terminalJobIds);
   const blockedJobIds = new Set(input.blockedJobIds);
-  const decisions = latestDashboardAutonomousDecisions(input.iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
-  const resolvedQueueKeys = new Set(decisions
-    .filter((decision) => decision.status === 'applied' || decision.status === 'committed')
-    .flatMap(dashboardAutonomousDecisionQueueKeys));
+  const decisionComponents = createDashboardAutonomousDecisionComponents(input.iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
+  const decisions = decisionComponents
+    .map((component) => component.latest)
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => entry.decision);
+  const resolvedQueueKeys = new Set<string>();
+  for (const component of decisionComponents) {
+    const decision = component.latest.decision;
+    if (decision.status !== 'applied' && decision.status !== 'committed') continue;
+    for (const key of component.keys) resolvedQueueKeys.add(key);
+  }
   const decisionLogPathById = new Map<string, string>();
   const applyPathByDecisionId = new Map<string, string>();
   const autonomousQueueOverlayPathByDecisionId = new Map<string, string>();

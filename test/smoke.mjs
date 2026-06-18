@@ -2194,7 +2194,11 @@ assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictR
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork.length, 1);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].jobId, autoDrainConflictBlockedDecision.jobId);
 assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].queueItemIds, ['conflict-blocked-task']);
-assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].queueKeys, ['queue:conflict-blocked-task']);
+assert.deepStrictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].queueKeys, [
+  'queue:conflict-blocked-task',
+  'task:conflict-blocked-task',
+  `job:${autoDrainConflictBlockedDecision.jobId}`
+]);
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].patchPath, autoDrainConflictBlockedDecision.patchPath);
 assert.ok(autoDrainConflictBlockedDashboard.queueMetadata.conflictRetryWork[0].patchPath.endsWith('changes.patch'));
 assert.strictEqual(autoDrainConflictBlockedDashboard.queueMetadata.operatorSummary.status, 'warning');
@@ -2257,16 +2261,16 @@ assert.deepStrictEqual(coerceCodexSwarmTasksInput(autoDrainConflictBlockedManife
 
 const collapsedDecisionOutDir = path.join(tmp, 'collapsed-decision-dashboard');
 const collapsedDecisionArtifacts = createSyntheticAutoDrainArtifacts(collapsedDecisionOutDir);
-Object.assign(collapsedDecisionArtifacts.grouping, { staleAgainstHeadCount: 1 });
+Object.assign(collapsedDecisionArtifacts.grouping, { staleAgainstHeadCount: 2 });
 Object.assign(collapsedDecisionArtifacts.coordinatorAgentDrainWork, {
   count: 1,
   leaseCount: 1,
-  assignmentCount: 2,
-  terminalCount: 1,
+  assignmentCount: 3,
+  terminalCount: 2,
   nonTerminalCount: 1,
   promotedWorkCount: 1,
   escalatedCount: 1,
-  rerunCount: 1
+  rerunCount: 2
 });
 Object.assign(collapsedDecisionArtifacts.coordinatorAgent, {
   count: 1,
@@ -2277,10 +2281,10 @@ Object.assign(collapsedDecisionArtifacts.coordinatorAgent, {
   queueLocalCount: 0
 });
 Object.assign(collapsedDecisionArtifacts.mergeQueue, {
-  count: 1,
+  count: 3,
   scopeCount: 1,
   promoteCount: 1,
-  rerunCount: 1
+  rerunCount: 2
 });
 const collapsedDecisionAutoDrain = {
   kind: 'frontier.swarm-codex.auto-drain',
@@ -2304,12 +2308,24 @@ const collapsedDecisionAutoDrain = {
             taskId: 'collapsed-rerun-task',
             queueItemIds: ['collapsed-rerun-task']
           }
+        }, {
+          jobId: 'collapsed-committed-stale-job',
+          bundle: {
+            taskId: 'collapsed-committed-task',
+            queueItemIds: ['collapsed-committed-stale-queue']
+          }
         }]
       },
       hierarchicalMergeQueue: {
         assignments: [{
           jobId: 'collapsed-rerun-old-job',
+          taskId: 'collapsed-rerun-task',
           queueItemIds: ['collapsed-rerun-task'],
+          action: 'rerun'
+        }, {
+          jobId: 'collapsed-committed-stale-job',
+          taskId: 'collapsed-committed-task',
+          queueItemIds: ['collapsed-committed-stale-queue'],
           action: 'rerun'
         }]
       }
@@ -2317,14 +2333,14 @@ const collapsedDecisionAutoDrain = {
     coordinatorAgentDrainWork: {
       summary: {
         leaseCount: 1,
-        assignmentCount: 2,
-        terminalCount: 1,
+        assignmentCount: 3,
+        terminalCount: 2,
         nonTerminalCount: 1,
         promotedWorkCount: 1,
         appliedCount: 0,
         queuedCount: 0,
         escalatedCount: 1,
-        rerunCount: 1,
+        rerunCount: 2,
         rejectedCount: 0,
         recordedCount: 0,
         blockedCount: 0
@@ -2377,6 +2393,14 @@ const collapsedDecisionAutoDrain = {
           queueItemIds: ['collapsed-conflict-task'],
           reason: 'fresh conflict-resolution bundle committed',
           finishedAt: collapsedDecisionArtifacts.generatedAt + 4
+        }),
+        createSyntheticAutonomousDecision('committed', {
+          id: 'collapsed-committed-fresh',
+          jobId: 'collapsed-committed-fresh-job',
+          taskId: 'collapsed-committed-task',
+          queueItemIds: ['collapsed-committed-fresh-queue'],
+          reason: 'fresh queue alias committed',
+          finishedAt: collapsedDecisionArtifacts.generatedAt + 5
         })
       ]
     }
@@ -2385,6 +2409,7 @@ const collapsedDecisionAutoDrain = {
   lockScopeCounts: { semantic: 0, path: 0, repo: 0 },
   terminalJobIds: [
     'collapsed-conflict-fresh-job',
+    'collapsed-committed-fresh-job',
     'collapsed-rerun-fresh-job'
   ],
   blockedJobIds: [],
@@ -2393,12 +2418,12 @@ const collapsedDecisionAutoDrain = {
     iterationCount: 1,
     collectionCount: 1,
     applyCount: 1,
-    terminalCount: 2,
+    terminalCount: 3,
     blockedCount: 0,
     conflictBlockedCount: 1,
     humanBlockedCount: 0,
     remainingReadyCount: 0,
-    admittedCount: 4,
+    admittedCount: 5,
     deferredCount: 0,
     reviewerAssignmentCount: 0,
     reviewerTaskCount: 0,
@@ -2422,8 +2447,8 @@ await writeSwarmCoordinatorSnapshot(collapsedDecisionDashboardPath, {
 });
 const collapsedDecisionDashboard = JSON.parse(await fs.readFile(collapsedDecisionDashboardPath, 'utf8'));
 assert.deepStrictEqual(collapsedDecisionDashboard.operatorSummary, collapsedDecisionDashboard.queueMetadata.operatorSummary);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.appliedDecisionCount, 2);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committedDecisionCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.appliedDecisionCount, 3);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.committedDecisionCount, 2);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.staleOrRerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.rerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictBlockedDecisionCount, 0);
@@ -2436,7 +2461,7 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.deferred
 assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.conflictRetryWork, []);
 assert.deepStrictEqual(collapsedDecisionDashboard.queueMetadata.conflictRetryWork, []);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.queueHealth.trueBlockerCount, 0);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 1);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.bucketCounts.staleAgainstHeadCount, 2);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.promoteCount, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.rerunCount, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.currentHeadConflictCount, 0);
@@ -2446,7 +2471,7 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.actionCounts.trueBlo
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.humanQuestions.count, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.status, 'warning');
 assert.match(collapsedDecisionDashboard.queueMetadata.operatorSummary.headline, /1 deferred coordinator assignment/);
-assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 2);
+assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.appliedDecisions, 3);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.currentHeadConflicts, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.deferredCoordinatorQueues, 1);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.deferredPromoteQueues, 1);
@@ -2454,7 +2479,7 @@ assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.coun
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.trueBlockers, 0);
 assert.strictEqual(collapsedDecisionDashboard.queueMetadata.operatorSummary.counts.humanQuestions, 0);
 const collapsedDecisionCards = new Map(collapsedDecisionDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
-assert.strictEqual(collapsedDecisionCards.get('applied-decisions').value, 2);
+assert.strictEqual(collapsedDecisionCards.get('applied-decisions').value, 3);
 assert.strictEqual(collapsedDecisionCards.get('coordination-debt').value, 1);
 assert.strictEqual(collapsedDecisionCards.get('coordination-debt').status, 'warning');
 assert.match(collapsedDecisionCards.get('coordination-debt').detail, /1 deferred promotion/);
