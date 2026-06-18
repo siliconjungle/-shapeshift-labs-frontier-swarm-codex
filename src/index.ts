@@ -1053,6 +1053,8 @@ export interface FrontierCodexSwarmAutoDrainResult {
     applyCount: number;
     terminalCount: number;
     blockedCount: number;
+    conflictBlockedCount: number;
+    humanBlockedCount: number;
     remainingReadyCount: number;
     admittedCount: number;
     deferredCount: number;
@@ -1275,6 +1277,8 @@ async function runCodexSwarmAutoDrain(input: {
         applyCount: 0,
         terminalCount: 0,
         blockedCount: 0,
+        conflictBlockedCount: 0,
+        humanBlockedCount: 0,
         remainingReadyCount: 0,
         admittedCount: 0,
         deferredCount: 0,
@@ -1386,7 +1390,7 @@ async function runCodexSwarmAutoDrain(input: {
     });
     for (const decision of apply.decisions) {
       if (autonomousDecisionIsTerminal(decision.status)) terminalJobIds.add(decision.jobId);
-      else blockedJobIds.add(decision.jobId);
+      else if (autonomousDecisionBlocksAutoDrain(decision.status)) blockedJobIds.add(decision.jobId);
     }
     const postApplyCollection = await collectCodexSwarmRun({
       run: input.outDir,
@@ -1428,6 +1432,9 @@ async function runCodexSwarmAutoDrain(input: {
   const latestIteration = iterations[iterations.length - 1];
   const admittedCount = uniqueStrings(iterations.flatMap((iteration) => iteration.admittedJobIds)).length;
   const deferredCount = latestIteration?.deferredJobIds.length ?? 0;
+  const decisions = iterations.flatMap((iteration) => iteration.apply?.decisions ?? []);
+  const conflictBlockedCount = decisions.filter((decision) => decision.status === 'conflict-blocked').length;
+  const humanBlockedCount = decisions.filter((decision) => decision.status === 'human-blocked').length;
   const result: FrontierCodexSwarmAutoDrainResult = {
     kind: FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND,
     version: FRONTIER_SWARM_CODEX_AUTO_DRAIN_VERSION,
@@ -1449,6 +1456,8 @@ async function runCodexSwarmAutoDrain(input: {
       applyCount: iterations.filter((iteration) => iteration.apply).length,
       terminalCount: terminalJobIds.size,
       blockedCount: blockedJobIds.size,
+      conflictBlockedCount,
+      humanBlockedCount,
       remainingReadyCount,
       admittedCount,
       deferredCount,
@@ -2117,8 +2126,14 @@ function autonomousDecisionIsTerminal(status: FrontierCodexAutonomousDecisionSta
   return status === 'checked'
     || status === 'applied'
     || status === 'committed'
+    || status === 'conflict-blocked'
     || status === 'rejected'
+    || status === 'rerun'
     || status === 'skipped';
+}
+
+function autonomousDecisionBlocksAutoDrain(status: FrontierCodexAutonomousDecisionStatus): boolean {
+  return status === 'human-blocked';
 }
 
 function emptyAutonomousLockScopeCounts(): FrontierCodexAutonomousLockScopeCounts {
@@ -3962,7 +3977,7 @@ function createAutonomousQueueOverlay(input: {
         queueItemId,
         jobId: decision.jobId,
         status: queueStatusFromAutonomousDecision(decision.status),
-        mergeReadiness: decision.status === 'conflict-blocked' || decision.status === 'human-blocked' ? 'blocked' : 'verified-patch',
+        mergeReadiness: mergeReadinessFromAutonomousDecision(decision.status),
         disposition: dispositionFromAutonomousDecision(decision.status),
         riskLevel: decision.status === 'conflict-blocked' || decision.status === 'human-blocked' || decision.status === 'failed' ? 'high' : 'low',
         ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
@@ -4008,16 +4023,23 @@ function createAutonomousQueueOverlay(input: {
 
 function queueStatusFromAutonomousDecision(status: FrontierCodexAutonomousDecisionStatus): string {
   if (status === 'checked') return 'ready-to-apply';
-  if (status === 'rerun') return 'stale-against-head';
-  if (status === 'conflict-blocked' || status === 'human-blocked') return 'blocked';
+  if (status === 'rerun' || status === 'conflict-blocked') return 'stale-against-head';
+  if (status === 'human-blocked') return 'blocked';
   if (status === 'failed') return 'failed-evidence';
   return 'satisfied';
 }
 
+function mergeReadinessFromAutonomousDecision(status: FrontierCodexAutonomousDecisionStatus): string {
+  if (status === 'conflict-blocked' || status === 'rerun') return 'stale-against-head';
+  if (status === 'human-blocked') return 'blocked';
+  if (status === 'failed') return 'rejected';
+  return 'verified-patch';
+}
+
 function dispositionFromAutonomousDecision(status: FrontierCodexAutonomousDecisionStatus): string {
   if (status === 'checked') return 'auto-mergeable';
-  if (status === 'rerun') return 'stale-against-head';
-  if (status === 'conflict-blocked' || status === 'human-blocked' || status === 'failed') return 'blocked';
+  if (status === 'rerun' || status === 'conflict-blocked') return 'stale-against-head';
+  if (status === 'human-blocked' || status === 'failed') return 'blocked';
   if (status === 'rejected') return 'rejected';
   return 'auto-mergeable';
 }

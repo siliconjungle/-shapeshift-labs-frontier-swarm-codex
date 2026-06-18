@@ -459,6 +459,22 @@ assert.deepStrictEqual(autonomousDecisionLogEntry.lockKeys, ['path:src/apply.ts'
 const autonomousApplyArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'autonomous-apply-out', 'autonomous-apply.json'), 'utf8'));
 assert.deepStrictEqual(autonomousApplyArtifact.lockKeys, ['path:src/apply.ts']);
 
+const autonomousConflictRepo = await createApplyFixtureRepo(tmp, 'autonomous-conflict-repo');
+await fs.writeFile(path.join(autonomousConflictRepo, 'src', 'apply.ts'), 'new\n');
+await execFileP('git', ['add', '--', 'src/apply.ts'], { cwd: autonomousConflictRepo });
+await execFileP('git', ['commit', '-m', 'Already applied fixture'], { cwd: autonomousConflictRepo });
+const autonomousConflictResult = await autonomousApplyCodexSwarmRun({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: autonomousConflictRepo,
+  outDir: path.join(tmp, 'autonomous-conflict-out')
+});
+assert.strictEqual(autonomousConflictResult.ok, false);
+assert.strictEqual(autonomousConflictResult.summary['conflict-blocked'], 1);
+assert.strictEqual(autonomousConflictResult.decisions[0].status, 'conflict-blocked');
+assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].status, 'stale-against-head');
+assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].mergeReadiness, 'stale-against-head');
+assert.strictEqual(autonomousConflictResult.queueOverlay.entries[0].disposition, 'stale-against-head');
+
 const rollbackRepo = await createApplyFixtureRepo(tmp, 'autonomous-rollback-repo');
 const rollbackResult = await autonomousApplyCodexSwarmRun({
   collection: path.join(tmp, 'ready-collection'),
@@ -537,6 +553,8 @@ assert.strictEqual(autoDrainRun.ok, true);
 assert.strictEqual(autoDrainRun.autoDrain.summary.applyCount, 1);
 assert.strictEqual(autoDrainRun.autoDrain.summary.terminalCount, 1);
 assert.strictEqual(autoDrainRun.autoDrain.summary.blockedCount, 0);
+assert.strictEqual(autoDrainRun.autoDrain.summary.conflictBlockedCount, 0);
+assert.strictEqual(autoDrainRun.autoDrain.summary.humanBlockedCount, 0);
 assert.strictEqual(autoDrainRun.autoDrain.iterations[0].apply.decisions[0].status, 'applied');
 assert.strictEqual(autoDrainRun.autoDrain.iterations[0].apply.decisions[0].lockScope, 'semantic');
 assert.deepStrictEqual(autoDrainRun.autoDrain.iterations[0].apply.decisions[0].lockKeys, ['region:src/apply.ts#apply']);
