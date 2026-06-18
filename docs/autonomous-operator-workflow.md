@@ -64,6 +64,15 @@ The run directory is the operator console. Check these files while the run is ac
 - `auto-drain/apply-*/autonomous-merge-decisions.jsonl`: append-only decisions from autonomous apply.
 - Worker directories: `last-message.md`, `merge.json`, `changes.patch`, verification output, and evidence artifacts.
 
+For landed-code confidence, read `autoDrain.summary.finalGateOk` and
+`autoDrainArtifacts.summary.finalGateOk` before trusting `ok`. The detailed
+`finalGateSummary` records the ordered coordinator gates for each autonomous
+decision, including `failed` gates and required gates skipped after an earlier
+required failure. A `rejected` decision is terminal queue evidence, not green
+code: required-gate failures keep `finalGateOk: false`, list the failed and
+skipped required gate names, and roll the patch back even when later rollback or
+repository commands succeeded.
+
 After a run, use `coordinator-dashboard.json.operatorSummary` for human-facing queue status. It is the display contract for the top-line status, headline, cards, and counts; use lower-level queue metadata only when drilling into diagnostics. Treat blocker UI as reserved for `operatorSummary.status === "blocked"`, the true-blockers card, or explicit `humanQuestions`.
 
 `humanQuestions` is intentionally narrower than every blocked-looking artifact. A dashboard human question must come from the latest autonomous decision for that queue item, have `status: "human-blocked"`, and carry an explicit question-shaped `reason`: either start it with `human-question:`, `human question:`, `human/authority question:`, `question:`, or phrase it with a `?`. Generic ownership notes, stale/rerun records, `conflict-blocked`, failed/rejected applies, coordinator review tasks, discovery evidence, and generated evidence stay in their queue buckets and must not populate `humanQuestions`.

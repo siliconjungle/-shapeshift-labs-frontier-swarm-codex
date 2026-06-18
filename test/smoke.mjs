@@ -1108,12 +1108,65 @@ const rollbackResult = await autonomousApplyCodexSwarmRun({
   collection: path.join(tmp, 'ready-collection'),
   cwd: rollbackRepo,
   outDir: path.join(tmp, 'autonomous-rollback-out'),
-  focusedCommands: [{ name: 'reject-new', command: 'node', args: ['-e', 'process.exit(1)'] }]
+  focusedCommands: [
+    { name: 'reject-new', command: 'node', args: ['-e', 'process.exit(1)'] },
+    { name: 'must-not-be-marked-passed', command: 'node', args: ['-e', 'process.exit(0)'] }
+  ]
 });
-assert.strictEqual(rollbackResult.ok, true);
+assert.strictEqual(rollbackResult.ok, false);
 assert.strictEqual(rollbackResult.summary.rejected, 1);
-assert.strictEqual(rollbackResult.decisions[0].status, 'rejected');
-assert.match(rollbackResult.decisions[0].reason, /verification failed: reject-new/);
+assert.strictEqual(rollbackResult.summary.finalGateOk, false);
+assert.strictEqual(rollbackResult.summary.finalGateState, 'failed');
+assert.strictEqual(rollbackResult.summary.failedRequiredGateCount, 1);
+assert.strictEqual(rollbackResult.summary.skippedRequiredGateCount, 1);
+const rollbackDecision = rollbackResult.decisions[0];
+assert.strictEqual(rollbackDecision.status, 'rejected');
+assert.match(rollbackDecision.reason, /verification failed: reject-new/);
+assert.deepStrictEqual(rollbackDecision.verification, {
+  planned: 2,
+  run: 1,
+  required: 2,
+  passed: 0,
+  failed: 1,
+  skipped: 1,
+  skippedRequired: 1,
+  names: ['reject-new', 'must-not-be-marked-passed'],
+  passedNames: [],
+  failedNames: ['reject-new'],
+  skippedNames: ['must-not-be-marked-passed'],
+  skippedRequiredNames: ['must-not-be-marked-passed']
+});
+assert.strictEqual(rollbackDecision.finalGateSummary.ok, false);
+assert.strictEqual(rollbackDecision.finalGateSummary.state, 'failed');
+assert.deepStrictEqual(rollbackDecision.finalGateSummary.gates.map((gate) => ({
+  index: gate.index,
+  name: gate.name,
+  required: gate.required,
+  status: gate.status,
+  exitCode: gate.exitCode
+})), [{
+  index: 1,
+  name: 'reject-new',
+  required: true,
+  status: 'failed',
+  exitCode: 1
+}, {
+  index: 2,
+  name: 'must-not-be-marked-passed',
+  required: true,
+  status: 'skipped',
+  exitCode: undefined
+}]);
+assert.ok(rollbackDecision.commands.some((entry) => (
+  entry.command[0] === 'git'
+    && entry.command[1] === 'apply'
+    && entry.command[2] === '-R'
+    && entry.status === 0
+)));
+assert.strictEqual(rollbackResult.finalGateSummary.ok, false);
+assert.strictEqual(rollbackResult.finalGateSummary.state, 'failed');
+assert.deepStrictEqual(rollbackResult.finalGateSummary.failedRequiredGateNames, ['reject-new']);
+assert.deepStrictEqual(rollbackResult.finalGateSummary.skippedRequiredGateNames, ['must-not-be-marked-passed']);
 assert.strictEqual(rollbackResult.queueOverlay.entries[0].status, 'satisfied');
 assert.strictEqual(await fs.readFile(path.join(rollbackRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: rollbackRepo })).stdout, '');
@@ -1573,9 +1626,13 @@ assert.deepStrictEqual(autoDrainCommitDecision.verification, {
   required: 1,
   passed: 1,
   failed: 0,
+  skipped: 0,
+  skippedRequired: 0,
   names: ['coordinator-sees-new'],
   passedNames: ['coordinator-sees-new'],
-  failedNames: []
+  failedNames: [],
+  skippedNames: [],
+  skippedRequiredNames: []
 });
 assert.match(autoDrainCommitDecision.headAfter, /^[0-9a-f]{40}$/);
 assert.strictEqual(autoDrainCommitDecision.commit, autoDrainCommitDecision.headAfter);
@@ -1943,9 +2000,13 @@ assert.deepStrictEqual(cliAutoDrainCommitDecision.verification, {
   required: 1,
   passed: 1,
   failed: 0,
+  skipped: 0,
+  skippedRequired: 0,
   names: [cliAutoDrainCommitFocusedCommand],
   passedNames: [cliAutoDrainCommitFocusedCommand],
-  failedNames: []
+  failedNames: [],
+  skippedNames: [],
+  skippedRequiredNames: []
 });
 assert.strictEqual(cliAutoDrainCommitDecision.jobId, cliAutoDrainCommitRun.run.results[0].jobId);
 assert.deepStrictEqual(cliAutoDrainCommitDecision.queueItemIds, ['apply-task']);
@@ -1971,6 +2032,113 @@ assert.strictEqual(cliAutoDrainCommitDecisionEntry.commit, cliAutoDrainCommitDec
 assert.deepStrictEqual(cliAutoDrainCommitDecisionEntry.queueItemIds, ['apply-task']);
 assert.deepStrictEqual(cliAutoDrainCommitDecisionEntry.lockKeys, ['region:src/apply.ts#apply']);
 assert.deepStrictEqual(cliAutoDrainCommitDecisionEntry.verification, cliAutoDrainCommitDecision.verification);
+
+const autoDrainGateFailureRepo = await createApplyFixtureRepo(tmp, 'auto-drain-gate-failure-run-repo');
+const autoDrainGateFailureOutDir = path.join(tmp, 'auto-drain-gate-failure-run-out');
+const autoDrainGateFailureRun = await runCodexSwarm(autoDrainPlan, {
+  outDir: autoDrainGateFailureOutDir,
+  cwd: autoDrainGateFailureRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainGateFailureOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    maxIterations: 2,
+    focusedCommands: [{
+      name: 'coordinator-rejects-new',
+      command: 'node',
+      args: ['-e', 'process.exit(1)']
+    }, {
+      name: 'skipped-required-after-failure',
+      command: 'node',
+      args: ['-e', 'process.exit(0)']
+    }]
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'gate failure auto drained\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'gate failure auto drained' };
+  }
+});
+assert.strictEqual(autoDrainGateFailureRun.ok, false);
+assert.strictEqual(autoDrainGateFailureRun.autoDrain.ok, false);
+assert.strictEqual(autoDrainGateFailureRun.autoDrain.summary.applyCount, 1);
+assert.strictEqual(autoDrainGateFailureRun.autoDrain.summary.terminalCount, 1);
+assert.strictEqual(autoDrainGateFailureRun.autoDrain.summary.finalGateOk, false);
+assert.strictEqual(autoDrainGateFailureRun.autoDrain.summary.finalGateState, 'failed');
+assert.strictEqual(autoDrainGateFailureRun.autoDrain.summary.failedRequiredGateCount, 1);
+assert.strictEqual(autoDrainGateFailureRun.autoDrain.summary.skippedRequiredGateCount, 1);
+assert.strictEqual(autoDrainGateFailureRun.autoDrainArtifacts.summary.finalGateOk, false);
+assert.strictEqual(autoDrainGateFailureRun.autoDrainArtifacts.summary.finalGateState, 'failed');
+assert.strictEqual(autoDrainGateFailureRun.autoDrainArtifacts.summary.failedRequiredGateCount, 1);
+assert.strictEqual(autoDrainGateFailureRun.autoDrainArtifacts.summary.skippedRequiredGateCount, 1);
+const autoDrainGateFailureDecision = autoDrainGateFailureRun.autoDrain.iterations[0].apply.decisions[0];
+assert.strictEqual(autoDrainGateFailureDecision.status, 'rejected');
+assert.strictEqual(autoDrainGateFailureDecision.finalGateSummary.ok, false);
+assert.strictEqual(autoDrainGateFailureDecision.finalGateSummary.state, 'failed');
+assert.deepStrictEqual(autoDrainGateFailureDecision.finalGateSummary.gates.map((gate) => ({
+  index: gate.index,
+  name: gate.name,
+  required: gate.required,
+  status: gate.status,
+  exitCode: gate.exitCode
+})), [{
+  index: 1,
+  name: 'coordinator-rejects-new',
+  required: true,
+  status: 'failed',
+  exitCode: 1
+}, {
+  index: 2,
+  name: 'skipped-required-after-failure',
+  required: true,
+  status: 'skipped',
+  exitCode: undefined
+}]);
+assert.deepStrictEqual(autoDrainGateFailureRun.autoDrain.finalGateSummary.failedDecisionIds, [autoDrainGateFailureDecision.id]);
+assert.deepStrictEqual(autoDrainGateFailureRun.autoDrain.finalGateSummary.skippedRequiredDecisionIds, [autoDrainGateFailureDecision.id]);
+assert.deepStrictEqual(autoDrainGateFailureRun.autoDrain.finalGateSummary.failedRequiredGateNames, ['coordinator-rejects-new']);
+assert.deepStrictEqual(autoDrainGateFailureRun.autoDrain.finalGateSummary.skippedRequiredGateNames, ['skipped-required-after-failure']);
+assert.deepStrictEqual(autoDrainGateFailureRun.autoDrainArtifacts.finalGateSummary.gates.map((gate) => ({
+  decisionId: gate.decisionId,
+  name: gate.name,
+  status: gate.status
+})), [{
+  decisionId: autoDrainGateFailureDecision.id,
+  name: 'coordinator-rejects-new',
+  status: 'failed'
+}, {
+  decisionId: autoDrainGateFailureDecision.id,
+  name: 'skipped-required-after-failure',
+  status: 'skipped'
+}]);
+assert.strictEqual(autoDrainGateFailureRun.autoDrainArtifacts.iterations[0].finalGateOk, false);
+assert.strictEqual(autoDrainGateFailureRun.autoDrainArtifacts.iterations[0].finalGateState, 'failed');
+assert.strictEqual(autoDrainGateFailureRun.autoDrainArtifacts.iterations[0].failedRequiredGateCount, 1);
+assert.strictEqual(autoDrainGateFailureRun.autoDrainArtifacts.iterations[0].skippedRequiredGateCount, 1);
+assert.deepStrictEqual(autoDrainGateFailureRun.autoDrain.terminalJobIds, [autoDrainGateFailureDecision.jobId]);
+assert.ok(autoDrainGateFailureDecision.commands.some((entry) => (
+  entry.command[0] === 'git'
+    && entry.command[1] === 'apply'
+    && entry.command[2] === '-R'
+    && entry.status === 0
+)));
+assert.strictEqual(await fs.readFile(path.join(autoDrainGateFailureRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: autoDrainGateFailureRepo })).stdout, '');
+const autoDrainGateFailureSwarmResults = JSON.parse(await fs.readFile(path.join(autoDrainGateFailureOutDir, 'swarm-results.json'), 'utf8'));
+assert.strictEqual(autoDrainGateFailureSwarmResults.ok, false);
+assert.strictEqual(autoDrainGateFailureSwarmResults.autoDrain.summary.finalGateOk, false);
+assert.strictEqual(autoDrainGateFailureSwarmResults.autoDrainArtifacts.summary.finalGateOk, false);
+assert.deepStrictEqual(autoDrainGateFailureSwarmResults.autoDrainArtifacts.finalGateSummary.failedRequiredGateNames, ['coordinator-rejects-new']);
+const autoDrainGateFailureDashboard = JSON.parse(await fs.readFile(path.join(autoDrainGateFailureOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainGateFailureDashboard.autoDrain.summary.finalGateOk, false);
+assert.strictEqual(autoDrainGateFailureDashboard.autoDrainArtifacts.summary.finalGateOk, false);
+assert.deepStrictEqual(autoDrainGateFailureDashboard.autoDrainArtifacts.finalGateSummary.skippedRequiredGateNames, ['skipped-required-after-failure']);
 
 const autoDrainCandidateRepo = await createApplyFixtureRepo(tmp, 'auto-drain-candidate-run-repo');
 const autoDrainCandidateOutDir = path.join(autoDrainCandidateRepo, 'agent-runs', 'auto-drain-candidate-run');
