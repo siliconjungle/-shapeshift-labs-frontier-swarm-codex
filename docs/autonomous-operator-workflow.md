@@ -44,6 +44,8 @@ The run directory is the operator console. Check these files while the run is ac
 - `auto-drain/apply-*/autonomous-merge-decisions.jsonl`: append-only decisions from autonomous apply.
 - Worker directories: `last-message.md`, `merge.json`, `changes.patch`, verification output, and evidence artifacts.
 
+After a run, use `coordinator-dashboard.json.operatorSummary` for human-facing queue status. It is the display contract for the top-line status, headline, cards, and counts; use lower-level queue metadata only when drilling into diagnostics.
+
 If auto-drain is disabled or you want to drain a previous run explicitly, use `autonomous-apply`:
 
 ```sh

@@ -66,6 +66,18 @@ For human-facing status views and cards, read `coordinator-dashboard.json.operat
 
 Stable card ids are `coordinator-queues`, `applied-decisions`, `stale-rerun`, `true-blockers`, and `coordinator-review-artifacts`. Each card carries its own `label`, `value`, `detail`, `status`, `action`, and `sourceFields`; dashboards should use `sourceFields` to link diagnostics without changing the card's human-facing meaning.
 
+The `cards[]` field contract is:
+
+| Card field | Meaning |
+| --- | --- |
+| `id` | Stable machine id for ordering, layout preferences, links, and tests. Use `label` for display text. |
+| `label` | Short human-facing card title. |
+| `value` | Numeric display count for the card. Render the provided value instead of recomputing it from raw counters. |
+| `detail` | Supporting human-facing text that explains the displayed count. |
+| `status` | Card display severity: `ok`, `info`, `warning`, `blocked`, or `unavailable`. A warning `stale-rerun` card means coordinator refresh or conflict-resolution pressure, not a human blocker. |
+| `action` | Human-facing next step for the card. Treat it as display copy unless `operatorSummary.status` is `blocked`, the `true-blockers` card is blocked, or `humanQuestions` lists explicit questions. |
+| `sourceFields` | Raw field paths used to build the card. Use them for diagnostic links or drill-down filters, not to relabel stale/rerun, conflict-blocked, or `needs-human-port` work as human blockers. |
+
 Use root `queueHealth` or `queueMetadata.queueHealth` when a UI needs drill-down counters, trend charts, or diagnostic filters. Use root `humanQuestions` or `queueMetadata.humanQuestions` only for explicit missing-authority questions that need a human answer. Do not convert `queueMetadata.bucketCounts.needsHumanPortCount`, `queueHealth.staleOrRerunCount`, `queueHealth.conflictBlockedDecisionCount`, or `autoDrainArtifacts.grouping.staleAgainstHeadCount` into blocker badges. Blocker UI should come from `operatorSummary.status`, the `true-blockers` card/count, and explicit `humanQuestions`.
 
 ## Per-Iteration Collection Artifacts

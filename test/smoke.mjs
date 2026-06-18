@@ -230,6 +230,16 @@ assert.strictEqual(dashboard.operatorSummary.source, dashboard.queueMetadata.sou
 assert.strictEqual(dashboard.operatorSummary.counts.coordinatorQueues, dashboard.queueHealth.activeCoordinatorQueueCount);
 assert.strictEqual(dashboard.operatorSummary.counts.trueBlockers, dashboard.queueHealth.trueBlockerCount + dashboard.humanQuestions.count);
 assert.ok(dashboard.operatorSummary.cards.some((card) => card.id === 'true-blockers'));
+assert.deepStrictEqual(
+  dashboard.operatorSummary.cards.map((card) => [card.id, card.sourceFields]),
+  [
+    ['coordinator-queues', ['queueHealth.activeCoordinatorQueueCount', 'queueHealth.leaseCount', 'queueHealth.lockKeyCount']],
+    ['applied-decisions', ['queueHealth.appliedDecisionCount', 'queueHealth.committedDecisionCount', 'queueHealth.recordOnlyCount']],
+    ['stale-rerun', ['queueHealth.staleOrRerunCount', 'queueHealth.staleCount', 'queueHealth.rerunCount', 'queueHealth.conflictBlockedDecisionCount']],
+    ['true-blockers', ['queueHealth.trueBlockerCount', 'humanQuestions.count']],
+    ['coordinator-review-artifacts', ['queueHealth.coordinatorReviewCount', 'queueHealth.coordinatorReviewAssignmentCount', 'queueHealth.coordinatorReviewTaskCount']]
+  ]
+);
 assert.ok(await exists(path.join(tmp, 'run', 'pids.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('resource-allocation.json')));
 assert.ok(result.run.results[0].evidencePaths.some((entry) => entry.endsWith('workspace-proof.json')));
