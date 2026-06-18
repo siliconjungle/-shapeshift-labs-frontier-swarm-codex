@@ -64,6 +64,17 @@ frontier-swarm-codex autonomous-apply \
 
 `autonomous-apply` is also available as `drain`. It takes a repository-local lock, reads the `ready-to-apply` bundles, re-checks patches against the current head, applies each admitted patch, runs focused and matching global gates, and writes `autonomous-apply.json` plus `autonomous-queue-overlay.json`. Use `--dry-run` to check patches without changing the checkout. Use `--allow-dirty` only when the current dirty state is intentional and already understood.
 
+## Consume Coordinator-Agent Drain Work
+
+When auto-drain is enabled, workers hand off evidence and the coordinator consumes drain work from generated artifacts:
+
+1. Start from `auto-drain/collection-NN/hierarchical-merge-queue.json` to see each bundle's queue action and scope.
+2. Open `auto-drain/coordinator-agent-drain-work-NN.json` for the generic coordinator-agent contract. Use `leases[]` to serialize work for a queue scope, `assignments[]` to know the assigned action, `terminalDecisions[]` to close terminal queue items, and `promotedWork[]` to route useful non-terminal work upward.
+3. Open `auto-drain/coordinator-agent-drain-NN.json` when using `frontier-swarm-codex` auto-drain. Its selected/deferred layer tells you which local queue leader is being attempted in that iteration.
+4. Open `auto-drain/apply-NN/autonomous-merge-decisions.jsonl` for the terminal source outcome of selected patch work.
+
+Treat `queue-local` and `promote` as unresolved coordinator work, not human questions. `queue-local` stays in the same scope until capacity or the local leader changes. `promote` becomes parent-queue work and remains non-terminal until that parent queue applies, queues, reruns, rejects, records, or blocks it. Treat `rerun`, `reject`, `record-only`, and true `block` as terminal queue decisions; stale/rerun cleanup should close the old bundle and create a fresh narrow task only when the objective is still valuable. Ask a human only for an explicit `block` or `human-blocked` decision that names the missing authority, owner, surface, or policy/risk choice.
+
 ## Interpret Outcomes
 
 Collection sorts worker output into buckets before apply:

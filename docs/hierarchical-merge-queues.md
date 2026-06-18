@@ -70,6 +70,25 @@ The action-to-decision mapping is stable:
 
 `frontier-swarm-codex` also writes `auto-drain/coordinator-agent-drain-NN.json` during auto-drain. That artifact is a per-iteration selection layer for ready work. It records `selected` versus `deferred` assignments, local `leaseKey` values, promotion targets, serialization leaders, and selection reasons before `autonomous-apply` writes terminal apply decisions. Treat selected coordinator-agent assignments as drain candidates for the iteration, not as landed patches.
 
+### Coordinator-Agent Consumption Loop
+
+A coordinator agent consuming drain work should follow the artifact chain instead of re-reading raw worker logs first:
+
+1. Open the worker bundle only to confirm evidence: `merge.json`, `changes.patch`, verification output, semantic sidecars, and the worker handoff.
+2. Open the hierarchical queue and find the assignment by `jobId` or `queueItemIds`.
+3. Acquire the matching generic drain-work lease before acting on that queue scope.
+4. Execute the assigned action and write the next machine record:
+   - `apply-local`: re-check and apply through autonomous apply, then rely on the apply ledger for the terminal source outcome.
+   - `queue-local`: keep the item in the same scope behind the local leader or capacity limit.
+   - `promote`: append the item to `promotedWork[]` or the parent queue; this is non-terminal escalated work, not a human blocker.
+   - `rerun`: close the old item as stale and launch or queue a fresh narrow shard against current head.
+   - `reject`: close the item with failed evidence, ownership, patch-shape, or gate reasons.
+   - `record-only`: attach the discovery artifact and close the queue item unless it creates a concrete follow-up task.
+   - `block`: preserve only explicit missing-authority questions with owner, surface, and decision needed.
+5. Rebuild or update queue overlays from the generic drain decisions and the autonomous apply ledger. Do not leave "needs review" as a final state.
+
+This loop is intentionally generic. A non-Frontier repository can emit the same worker bundle, queue, lease, promoted-work, and decision-ledger shapes even when its tests, ownership globs, and apply commands are project-specific.
+
 ## Real Run Flow
 
 1. Define lanes and ownership in the swarm manifest. Keep lanes narrow enough that a queue can make local decisions: one subsystem, service, feature area, test harness, or doc surface is easier to drain than a catch-all lane.

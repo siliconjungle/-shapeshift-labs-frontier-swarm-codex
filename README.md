@@ -14,6 +14,7 @@ By default, a swarm run is self-draining. After workers finish, coordinator-agen
 - [Autonomous operator workflow](docs/autonomous-operator-workflow.md): run the default self-draining path, watch queue pressure, handle dirty collect-only runs, drain from a clean apply window, and interpret autonomous apply outcomes.
 - [Review debt drain policy](docs/review-debt-drain.md): convert coordinator-review items into terminal decisions instead of open-ended review buckets.
 - [Auto-drain artifact map](docs/auto-drain-artifacts.md): find the machine-readable files behind operator summary cards, queue pressure, promoted patch candidates, apply decisions, and explicit human questions.
+- [Autonomous decision ledger](docs/autonomous-decision-ledger.md): match coordinator-agent drain assignments to append-only apply decisions and distinguish terminal outcomes from queued or promoted coordinator work.
 
 
 ## Related Packages

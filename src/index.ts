@@ -1007,6 +1007,7 @@ export interface FrontierCodexDashboardQueueMetadata {
     coordinatorAgentDrainWork: string[];
     queueOverlays: string[];
   };
+  coordinatorAgentDrainWork: FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata;
   actionCounts: {
     applyLocalCount: number;
     queueLocalCount: number;
@@ -1028,6 +1029,23 @@ export interface FrontierCodexDashboardQueueMetadata {
   queueHealth: FrontierCodexDashboardQueueHealth;
   humanQuestions: FrontierCodexDashboardHumanQuestions;
   operatorSummary: FrontierCodexDashboardOperatorQueueSummary;
+}
+
+export interface FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata {
+  paths: string[];
+  count: number;
+  leaseCount: number;
+  assignmentCount: number;
+  terminalCount: number;
+  nonTerminalCount: number;
+  promotedWorkCount: number;
+  appliedCount: number;
+  queuedCount: number;
+  escalatedCount: number;
+  rerunCount: number;
+  rejectedCount: number;
+  recordedCount: number;
+  blockedCount: number;
 }
 
 export interface FrontierCodexDashboardCollectOnlyMetadata {
@@ -1060,6 +1078,11 @@ export interface FrontierCodexDashboardQueueHealth {
   coordinatorReviewAssignmentCount: number;
   coordinatorReviewTaskCount: number;
   humanQuestionCount: number;
+  coordinatorDrainWorkCount: number;
+  coordinatorDrainAssignmentCount: number;
+  coordinatorDrainTerminalCount: number;
+  coordinatorDrainNonTerminalCount: number;
+  coordinatorDrainAppliedCount: number;
 }
 
 export interface FrontierCodexDashboardHumanQuestions {
@@ -3036,8 +3059,10 @@ function createDashboardQueueMetadata(
   const iterations = artifacts?.iterations ?? [];
   const decisionSummary = summarizeDashboardAutonomousDecisions(autoDrain);
   const collectOnly = createDashboardCollectOnlyMetadata(autoDrain);
+  const coordinatorAgentDrainWork = createDashboardCoordinatorAgentDrainWorkMetadata(artifacts);
+  const actionCounts = createDashboardQueueActionCounts(artifacts, coordinatorAgentDrainWork);
   const unresolvedPressure = summarizeDashboardUnresolvedQueuePressure(autoDrain, artifacts);
-  const activePressure = summarizeDashboardActiveQueuePressure(autoDrain, artifacts);
+  const activePressure = summarizeDashboardActiveQueuePressure(autoDrain, artifacts, collectOnly);
   const staleCount = unresolvedPressure.staleCount;
   const queueRerunCount = unresolvedPressure.queueRerunCount;
   const rerunCount = queueRerunCount + decisionSummary.rerunDecisionCount;
@@ -3072,13 +3097,18 @@ function createDashboardQueueMetadata(
     staleCount,
     rerunCount,
     conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount,
-    trueBlockerCount: artifacts?.mergeQueue.blockCount ?? 0,
-    rejectedCount: artifacts?.mergeQueue.rejectCount ?? 0,
-    recordOnlyCount: artifacts?.mergeQueue.recordOnlyCount ?? 0,
+    trueBlockerCount: actionCounts.trueBlockerCount,
+    rejectedCount: actionCounts.rejectCount,
+    recordOnlyCount: actionCounts.recordOnlyCount,
     coordinatorReviewCount: artifacts?.reviewer.taskCount ?? 0,
     coordinatorReviewAssignmentCount: artifacts?.reviewer.assignmentCount ?? 0,
     coordinatorReviewTaskCount: artifacts?.reviewer.taskCount ?? 0,
-    humanQuestionCount: humanQuestions.count
+    humanQuestionCount: humanQuestions.count,
+    coordinatorDrainWorkCount: coordinatorAgentDrainWork.count,
+    coordinatorDrainAssignmentCount: coordinatorAgentDrainWork.assignmentCount,
+    coordinatorDrainTerminalCount: coordinatorAgentDrainWork.terminalCount,
+    coordinatorDrainNonTerminalCount: coordinatorAgentDrainWork.nonTerminalCount,
+    coordinatorDrainAppliedCount: coordinatorAgentDrainWork.appliedCount
   };
   const operatorSummary = createDashboardOperatorQueueSummary(queueHealth, humanQuestions, collectOnly);
   return {
@@ -3094,16 +3124,10 @@ function createDashboardQueueMetadata(
       coordinatorAgentDrainWork: artifacts?.coordinatorAgentDrainWork?.paths ?? [],
       queueOverlays: compactArtifactPaths(iterations.map((iteration) => iteration.queueOverlayPath))
     },
+    coordinatorAgentDrainWork,
     actionCounts: {
-      applyLocalCount: artifacts?.mergeQueue.applyLocalCount ?? 0,
-      queueLocalCount: artifacts?.mergeQueue.queueLocalCount ?? 0,
-      promoteCount: artifacts?.mergeQueue.promoteCount ?? 0,
-      rerunCount: artifacts?.mergeQueue.rerunCount ?? 0,
-      rejectCount: artifacts?.mergeQueue.rejectCount ?? 0,
-      blockCount: artifacts?.mergeQueue.blockCount ?? 0,
-      trueBlockerCount: artifacts?.mergeQueue.blockCount ?? 0,
-      conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount,
-      recordOnlyCount: artifacts?.mergeQueue.recordOnlyCount ?? 0
+      ...actionCounts,
+      conflictBlockedDecisionCount: decisionSummary.conflictBlockedDecisionCount
     },
     bucketCounts: {
       readyToApplyCount: artifacts?.grouping.readyToApplyCount ?? 0,
@@ -3118,9 +3142,60 @@ function createDashboardQueueMetadata(
   };
 }
 
+function createDashboardCoordinatorAgentDrainWorkMetadata(
+  artifacts: FrontierCodexAutoDrainArtifactMetadata | null
+): FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata {
+  const source = artifacts?.coordinatorAgentDrainWork;
+  return {
+    paths: source?.paths ?? [],
+    count: source?.count ?? 0,
+    leaseCount: source?.leaseCount ?? 0,
+    assignmentCount: source?.assignmentCount ?? 0,
+    terminalCount: source?.terminalCount ?? 0,
+    nonTerminalCount: source?.nonTerminalCount ?? 0,
+    promotedWorkCount: source?.promotedWorkCount ?? 0,
+    appliedCount: source?.appliedCount ?? 0,
+    queuedCount: source?.queuedCount ?? 0,
+    escalatedCount: source?.escalatedCount ?? 0,
+    rerunCount: source?.rerunCount ?? 0,
+    rejectedCount: source?.rejectedCount ?? 0,
+    recordedCount: source?.recordedCount ?? 0,
+    blockedCount: source?.blockedCount ?? 0
+  };
+}
+
+function createDashboardQueueActionCounts(
+  artifacts: FrontierCodexAutoDrainArtifactMetadata | null,
+  coordinatorAgentDrainWork: FrontierCodexDashboardCoordinatorAgentDrainWorkMetadata
+): Omit<FrontierCodexDashboardQueueMetadata['actionCounts'], 'conflictBlockedDecisionCount'> {
+  if (coordinatorAgentDrainWork.assignmentCount > 0) {
+    return {
+      applyLocalCount: coordinatorAgentDrainWork.appliedCount,
+      queueLocalCount: coordinatorAgentDrainWork.queuedCount,
+      promoteCount: coordinatorAgentDrainWork.escalatedCount,
+      rerunCount: coordinatorAgentDrainWork.rerunCount,
+      rejectCount: coordinatorAgentDrainWork.rejectedCount,
+      blockCount: coordinatorAgentDrainWork.blockedCount,
+      trueBlockerCount: coordinatorAgentDrainWork.blockedCount,
+      recordOnlyCount: coordinatorAgentDrainWork.recordedCount
+    };
+  }
+  return {
+    applyLocalCount: artifacts?.mergeQueue.applyLocalCount ?? 0,
+    queueLocalCount: artifacts?.mergeQueue.queueLocalCount ?? 0,
+    promoteCount: artifacts?.mergeQueue.promoteCount ?? 0,
+    rerunCount: artifacts?.mergeQueue.rerunCount ?? 0,
+    rejectCount: artifacts?.mergeQueue.rejectCount ?? 0,
+    blockCount: artifacts?.mergeQueue.blockCount ?? 0,
+    trueBlockerCount: artifacts?.mergeQueue.blockCount ?? 0,
+    recordOnlyCount: artifacts?.mergeQueue.recordOnlyCount ?? 0
+  };
+}
+
 function summarizeDashboardActiveQueuePressure(
   autoDrain: FrontierCodexSwarmAutoDrainResult | null,
-  artifacts: FrontierCodexAutoDrainArtifactMetadata | null
+  artifacts: FrontierCodexAutoDrainArtifactMetadata | null,
+  collectOnly?: FrontierCodexDashboardCollectOnlyMetadata
 ): {
   activeCoordinatorQueueCount: number;
   leaseCount: number;
@@ -3133,6 +3208,18 @@ function summarizeDashboardActiveQueuePressure(
     localQueueCount: artifacts?.mergeQueue.queueLocalCount ?? 0,
     promotedCount: artifacts?.mergeQueue.promoteCount ?? 0
   };
+  const latestDrainWork = autoDrain?.iterations.at(-1)?.coordinatorAgentDrainWork.summary;
+  if (latestDrainWork && latestDrainWork.assignmentCount > 0) {
+    const activeCoordinatorQueueCount = collectOnly
+      ? latestDrainWork.assignmentCount
+      : latestDrainWork.nonTerminalCount;
+    return {
+      activeCoordinatorQueueCount,
+      leaseCount: activeCoordinatorQueueCount > 0 ? latestDrainWork.leaseCount : 0,
+      localQueueCount: latestDrainWork.queuedCount,
+      promotedCount: latestDrainWork.promotedWorkCount
+    };
+  }
   if (!autoDrain) return fallback;
   const latestIteration = autoDrain.iterations.at(-1);
   const latestCollection = latestIteration?.postApplyCollection ?? latestIteration?.collection;

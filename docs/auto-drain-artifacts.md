@@ -99,6 +99,18 @@ Each `assignments[]` entry records the local queue contract:
 
 The generic `frontier.swarm.coordinator-agent-drain-work` contract maps every hierarchical queue action to a durable coordinator-agent decision and exposes `leases`, `assignments`, `terminalDecisions`, and `promotedWork`. The Codex artifact is narrower: it records auto-drain's per-iteration selected/deferred work before autonomous apply writes terminal decisions, and links back to the generic work artifact with `workArtifactId` and `workArtifactPath`.
 
+### Worker Bundle To Apply Ledger Handoff
+
+Coordinator agents should consume drain work in layers:
+
+1. Treat worker `merge.json`, `changes.patch`, verification output, and handoff files as evidence. They describe what the worker produced; they do not decide whether the coordinator should land, reject, rerun, or escalate it.
+2. Read the iteration's `hierarchical-merge-queue.json` to understand the scoped queue action for each bundle. This is where stale work becomes `rerun`, invalid evidence becomes `reject`, discovery becomes `record-only`, true blockers become `block`, clean overflow becomes `queue-local`, and useful cross-scope work becomes `promote`.
+3. Read `coordinator-agent-drain-work-NN.json` as the generic work contract. A coordinator agent should acquire the matching `leases[]` entry, process its `assignments[]`, mirror `terminalDecisions[]` into queue overlays, and move `promotedWork[]` to the parent queue without relabeling it as a human blocker.
+4. Read `coordinator-agent-drain-NN.json` when using the Codex runner. This selected/deferred layer tells the agent which local queue leaders auto-drain will attempt in the current iteration and which clean items remain queued locally.
+5. Read `apply-NN/autonomous-apply.json` or `apply-NN/autonomous-merge-decisions.jsonl` for the terminal source outcome. Match selected assignments to apply decisions by `jobId` or `queueItemIds`; selected means "attempted this iteration", not "landed".
+
+For cleanup, prefer machine decisions over another prose review pass. Terminal generic drain decisions close queue items for `rerun`, `reject`, `record-only`, and `block`; `apply-local` still needs the apply ledger to prove whether the patch was checked, applied, committed, rejected, rerun, conflict-blocked, failed, skipped, or human-blocked. Non-terminal `queued` and `escalated` items remain coordinator work: queued items stay in the same scope, and promoted items move to the smallest parent queue that can decide. A human question exists only when a `block` action or `human-blocked` apply decision names the missing authority, owner, surface, or policy decision.
+
 ## Operator Summary Contract
 
 For human-facing status views and cards, read `coordinator-dashboard.json.operatorSummary` or the mirrored `coordinator-dashboard.json.queueMetadata.operatorSummary`. The summary is the dashboard display contract: render its `status`, `headline`, `cards[]`, and `counts` directly instead of recomputing human-facing state from raw queue counters.

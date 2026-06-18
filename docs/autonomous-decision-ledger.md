@@ -79,6 +79,14 @@ dashboard may need both sources: the coordinator-agent drain artifact explains w
 item was selected, deferred, or promoted; the JSONL ledger explains what happened when
 the coordinator tried to apply it.
 
+Coordinator agents should not translate non-terminal drain work into terminal ledger
+outcomes. `queued` means the item remains in the same scoped queue, and `escalated`
+means the item was promoted to a parent queue. Neither is a human question by itself.
+If promoted work later needs a person, the parent queue should emit a true `block` or
+the apply attempt should emit `human-blocked` with the missing authority, owner,
+surface, or policy/risk decision. Stale work should become `rerun` and replace the old
+bundle with a current worker result instead of accumulating review debt.
+
 ## Decision Statuses
 
 Read a decision `status` as both the observed outcome and the next coordinator action.
