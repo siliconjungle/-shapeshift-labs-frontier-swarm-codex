@@ -277,7 +277,7 @@ For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
 
-Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
+Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. By default `runCodexSwarm` then auto-drains the run: it collects worker bundles, applies ready auto-mergeable slices through the autonomous apply loop, writes `auto-drain/auto-drain.json`, and includes the drain summary in `swarm-results.json` and `coordinator-dashboard.json`. Use `--no-auto-drain` only for raw diagnostic runs that should not attempt coordinator apply. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
 
 `frontier-swarm collect --run <run-dir>` derives status from immutable worker overlays instead of asking workers to edit a central queue. It scans `merge.json` files and writes:
 
@@ -289,6 +289,8 @@ Each run writes event streams under `streams/`, a `coordinator-dashboard.json` s
 It also writes `merge-index.json` and `queue-overlay.json` so coordinator dashboards can show stale patches, conflicts, derived queue status, and ready merge pressure without scraping every worker directory. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
 
 `frontier-swarm apply --collection <collection-dir>` reviews the `ready-to-apply/` bucket and writes `apply-ledger.json`. It defaults to `--dry-run`, which runs `git apply --check` without mutating the checkout. Non-dry-run apply refuses a dirty worktree unless `--allow-dirty` is passed, and can optionally create small branches with `--branch-prefix` and commits with `--commit`.
+
+`frontier-swarm autonomous-apply --collection <collection-dir>` (alias: `drain`) is the coordinator self-merge path. It admits only `ready-to-apply/` bundles, takes a repo-local Git lock, re-checks the patch against the current head, applies it, runs `--focused-command` and matching `--global-command` gates, and rolls the patch back when a required gate fails. Each bundle writes an append-only `autonomous-merge-decisions.jsonl` record plus `autonomous-queue-overlay.json`; applied, committed, skipped, and rejected decisions become terminal queue overlay entries so coordinator-review debt can drain instead of piling up. It applies by default and refuses dirty worktrees unless `--allow-dirty` is passed.
 
 `frontier-swarm score --collection <collection-dir>` applies each collected bundle in a throwaway workspace and writes `patch-score.json`. Use `--focused-command` for the gate that proves the slice and `--global-command` with `--global-glob` for shared-code smoke/type/build gates. Scores are classified as `accepted-clean`, `accepted-needs-port`, `conflict`, `test-fail`, `stale`, or `evidence-only`, so the coordinator can review the best patch candidates before manually reading every bundle.
 
@@ -310,6 +312,7 @@ It also writes `merge-index.json` and `queue-overlay.json` so coordinator dashbo
 - `appendCodexPidManifest`, `readCodexPidManifest`, `stopCodexSwarmRun`
 - `collectCodexSwarmRun`
 - `applyCodexSwarmCollection`
+- `autonomousApplyCodexSwarmRun`
 - `scoreCodexSwarmPatches`
 - `renderCodexPrompt`
 - `spawnCodexExecutor`

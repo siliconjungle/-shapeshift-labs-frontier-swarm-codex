@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   appendCodexPidManifest,
   applyCodexSwarmCollection,
+  autonomousApplyCodexSwarmRun,
   buildCodexArgs,
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
@@ -14,6 +15,7 @@ import {
   collectCodexSwarmRun,
   createSwarmWorkspaceProof,
   createCodexResourceAllocation,
+  deriveCodexAutonomousApplyLockKeys,
   discoverCodexHandoffArtifacts,
   normalizeCodexApprovalPolicy,
   normalizeCodexModelFlag,
@@ -58,6 +60,24 @@ const plan = createCodexSwarmPlan({ manifest, tasks });
 assert.strictEqual(plan.jobs.length, 1);
 assert.strictEqual(plan.jobs[0].compute.model, 'gpt-5.5');
 assert.strictEqual(plan.jobs[0].compute.reasoningEffort, 'xhigh');
+assert.deepStrictEqual(
+  deriveCodexAutonomousApplyLockKeys({
+    changedRegions: ['src/apply.ts#apply', 'src/apply.ts#apply'],
+    changedPaths: ['src/apply.ts']
+  }),
+  { scope: 'semantic', keys: ['region:src/apply.ts#apply'] }
+);
+assert.deepStrictEqual(
+  deriveCodexAutonomousApplyLockKeys({
+    changedRegions: [],
+    changedPaths: ['src/apply.ts', './src/apply.ts']
+  }),
+  { scope: 'path', keys: ['path:src/apply.ts'] }
+);
+assert.deepStrictEqual(
+  deriveCodexAutonomousApplyLockKeys({ changedRegions: [], changedPaths: [] }),
+  { scope: 'repo', keys: ['repo:*'] }
+);
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'frontier-swarm-codex-'));
 const paths = {
@@ -227,9 +247,15 @@ const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'run'), chec
 assert.strictEqual(collection.summary.total, 1);
 assert.strictEqual(collection.summary['needs-human-port'], 1);
 assert.strictEqual(collection.mergeIndex.summary.entryCount, 1);
+assert.strictEqual(collection.mergeAdmission.summary.deferredCount, 1);
+assert.strictEqual(collection.reviewerLanePlan.summary.taskCount, 1);
+assert.strictEqual(collection.patchStackPlan.summary.jobCount, 1);
 assert.strictEqual(collection.queueOverlay.summary.entryCount, 1);
 assert.ok(await exists(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json')));
 assert.ok(await exists(path.join(collection.outDir, 'merge-index.json')));
+assert.ok(await exists(path.join(collection.outDir, 'merge-admission.json')));
+assert.ok(await exists(path.join(collection.outDir, 'reviewer-lane-plan.json')));
+assert.ok(await exists(path.join(collection.outDir, 'patch-stack-plan.json')));
 assert.ok(await exists(path.join(collection.outDir, 'queue-overlay.json')));
 const collectedMergeBundle = JSON.parse(await fs.readFile(path.join(collection.outDir, 'needs-human-port', 'runtime-runtime-action', 'merge.json'), 'utf8'));
 assert.strictEqual(collectedMergeBundle.branchName, 'codex/swarm-slice/runtime-runtime-action');
@@ -315,6 +341,240 @@ await assert.rejects(
   () => applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo, dryRun: false }),
   /dirty worktree/
 );
+
+const autonomousRepo = await createApplyFixtureRepo(tmp, 'autonomous-apply-repo');
+const autonomousResult = await autonomousApplyCodexSwarmRun({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: autonomousRepo,
+  outDir: path.join(tmp, 'autonomous-apply-out'),
+  focusedCommands: [{ name: 'assert-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
+});
+assert.strictEqual(autonomousResult.ok, true);
+assert.strictEqual(autonomousResult.dryRun, false);
+assert.strictEqual(autonomousResult.summary.applied, 1);
+assert.strictEqual(autonomousResult.decisions[0].status, 'applied');
+assert.strictEqual(autonomousResult.decisions[0].lockScope, 'path');
+assert.deepStrictEqual(autonomousResult.decisions[0].lockKeys, ['path:src/apply.ts']);
+assert.deepStrictEqual(autonomousResult.lockKeys, ['path:src/apply.ts']);
+assert.strictEqual(autonomousResult.lockScopeCounts.path, 1);
+assert.strictEqual(autonomousResult.queueOverlay.entries[0].status, 'satisfied');
+assert.strictEqual(await fs.readFile(path.join(autonomousRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+assert.strictEqual(await exists(autonomousResult.lockPath), false);
+const autonomousDecisionLines = (await fs.readFile(autonomousResult.decisionLogPath, 'utf8')).trim().split(/\r?\n/);
+assert.strictEqual(autonomousDecisionLines.length, 1);
+const autonomousDecisionLogEntry = JSON.parse(autonomousDecisionLines[0]);
+assert.strictEqual(autonomousDecisionLogEntry.jobId, 'apply-job');
+assert.deepStrictEqual(autonomousDecisionLogEntry.lockKeys, ['path:src/apply.ts']);
+const autonomousApplyArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'autonomous-apply-out', 'autonomous-apply.json'), 'utf8'));
+assert.deepStrictEqual(autonomousApplyArtifact.lockKeys, ['path:src/apply.ts']);
+
+const rollbackRepo = await createApplyFixtureRepo(tmp, 'autonomous-rollback-repo');
+const rollbackResult = await autonomousApplyCodexSwarmRun({
+  collection: path.join(tmp, 'ready-collection'),
+  cwd: rollbackRepo,
+  outDir: path.join(tmp, 'autonomous-rollback-out'),
+  focusedCommands: [{ name: 'reject-new', command: 'node', args: ['-e', 'process.exit(1)'] }]
+});
+assert.strictEqual(rollbackResult.ok, true);
+assert.strictEqual(rollbackResult.summary.rejected, 1);
+assert.strictEqual(rollbackResult.decisions[0].status, 'rejected');
+assert.match(rollbackResult.decisions[0].reason, /verification failed: reject-new/);
+assert.strictEqual(rollbackResult.queueOverlay.entries[0].status, 'satisfied');
+assert.strictEqual(await fs.readFile(path.join(rollbackRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: rollbackRepo })).stdout, '');
+
+const cliAutonomousRepo = await createApplyFixtureRepo(tmp, 'cli-autonomous-apply-repo');
+const cliAutonomous = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'autonomous-apply',
+  '--collection',
+  path.join(tmp, 'ready-collection'),
+  '--outDir',
+  path.join(tmp, 'cli-autonomous-apply-out'),
+  '--focused-command',
+  "node -e \"const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
+], { cwd: cliAutonomousRepo });
+const cliAutonomousResult = JSON.parse(cliAutonomous.stdout);
+assert.strictEqual(cliAutonomousResult.ok, true);
+assert.strictEqual(cliAutonomousResult.summary.applied, 1);
+assert.strictEqual(await fs.readFile(path.join(cliAutonomousRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+
+const autoDrainRepo = await createApplyFixtureRepo(tmp, 'auto-drain-run-repo');
+const autoDrainOutDir = path.join(autoDrainRepo, 'agent-runs', 'auto-drain-run');
+const autoDrainPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'apply-task',
+      lane: 'apply',
+      ownedFiles: ['src/apply.ts'],
+      changedRegions: ['src/apply.ts#apply'],
+      verification: [{
+        name: 'worker-sees-new',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"]
+      }]
+    }]
+  }
+});
+const autoDrainRun = await runCodexSwarm(autoDrainPlan, {
+  outDir: autoDrainOutDir,
+  cwd: autoDrainRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    maxIterations: 3,
+    focusedCommands: [{ name: 'coordinator-sees-new', command: 'node', args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"] }]
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'auto drained\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'auto drained' };
+  }
+});
+assert.strictEqual(autoDrainRun.ok, true);
+assert.strictEqual(autoDrainRun.autoDrain.summary.applyCount, 1);
+assert.strictEqual(autoDrainRun.autoDrain.summary.terminalCount, 1);
+assert.strictEqual(autoDrainRun.autoDrain.summary.blockedCount, 0);
+assert.strictEqual(autoDrainRun.autoDrain.iterations[0].apply.decisions[0].status, 'applied');
+assert.strictEqual(autoDrainRun.autoDrain.iterations[0].apply.decisions[0].lockScope, 'semantic');
+assert.deepStrictEqual(autoDrainRun.autoDrain.iterations[0].apply.decisions[0].lockKeys, ['region:src/apply.ts#apply']);
+assert.deepStrictEqual(autoDrainRun.autoDrain.lockKeys, ['region:src/apply.ts#apply']);
+assert.strictEqual(autoDrainRun.autoDrain.lockScopeCounts.semantic, 1);
+assert.strictEqual(await fs.readFile(path.join(autoDrainRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+assert.ok(await exists(path.join(autoDrainOutDir, 'auto-drain', 'auto-drain.json')));
+assert.ok(await exists(path.join(autoDrainOutDir, 'auto-drain', 'auto-drain-groups-01.json')));
+assert.ok(await exists(path.join(autoDrainOutDir, 'auto-drain', 'reviewer-lane-plan.json')));
+assert.ok(await exists(path.join(autoDrainOutDir, 'auto-drain', 'patch-stack-plan.json')));
+const autoDrainResults = JSON.parse(await fs.readFile(path.join(autoDrainOutDir, 'swarm-results.json'), 'utf8'));
+const autoDrainDashboard = JSON.parse(await fs.readFile(path.join(autoDrainOutDir, 'coordinator-dashboard.json'), 'utf8'));
+assert.strictEqual(autoDrainDashboard.autoDrain.summary.terminalCount, 1);
+const autoDrainArtifact = JSON.parse(await fs.readFile(path.join(autoDrainOutDir, 'auto-drain', 'auto-drain.json'), 'utf8'));
+assert.deepStrictEqual(autoDrainArtifact.lockKeys, ['region:src/apply.ts#apply']);
+assert.strictEqual(autoDrainArtifact.iterations[0].lockScopeCounts.semantic, 1);
+assert.deepStrictEqual(autoDrainRun.autoDrainArtifacts, autoDrainRun.autoDrain.artifacts);
+assert.deepStrictEqual(autoDrainResults.autoDrainArtifacts, autoDrainRun.autoDrainArtifacts);
+assert.deepStrictEqual(autoDrainDashboard.autoDrainArtifacts, autoDrainRun.autoDrainArtifacts);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.collectionCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.admissionCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.reviewerPlanCount, 1);
+assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.patchStackPlanCount, 1);
+assert.strictEqual(autoDrainRun.autoDrain.iterations[0].grouping.summary.readyCount, 1);
+assert.strictEqual(typeof autoDrainRun.autoDrainArtifacts.generatedAt, 'number');
+
+const autoDrainBudgetRepo = path.join(tmp, 'auto-drain-budget-repo');
+await fs.mkdir(path.join(autoDrainBudgetRepo, 'src'), { recursive: true });
+await execFileP('git', ['init'], { cwd: autoDrainBudgetRepo });
+await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: autoDrainBudgetRepo });
+await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: autoDrainBudgetRepo });
+await fs.writeFile(path.join(autoDrainBudgetRepo, 'src', 'one.ts'), 'old-one\n');
+await fs.writeFile(path.join(autoDrainBudgetRepo, 'src', 'two.ts'), 'old-two\n');
+await execFileP('git', ['add', '--', 'src/one.ts', 'src/two.ts'], { cwd: autoDrainBudgetRepo });
+await execFileP('git', ['commit', '-m', 'Initial budget fixture'], { cwd: autoDrainBudgetRepo });
+const autoDrainBudgetPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-budget',
+    lanes: [{ id: 'apply', allowedGlobs: ['src/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'apply-one-task',
+      lane: 'apply',
+      ownedFiles: ['src/one.ts'],
+      changedRegions: ['src/one.ts#one'],
+      verification: [{
+        name: 'worker-sees-one',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/one.ts','utf8')!=='new-one\\n') process.exit(1);"]
+      }]
+    }, {
+      id: 'apply-two-task',
+      lane: 'apply',
+      ownedFiles: ['src/two.ts'],
+      changedRegions: ['src/two.ts#two'],
+      verification: [{
+        name: 'worker-sees-two',
+        command: 'node',
+        args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/two.ts','utf8')!=='new-two\\n') process.exit(1);"]
+      }]
+    }]
+  }
+});
+const autoDrainBudgetRun = await runCodexSwarm(autoDrainBudgetPlan, {
+  outDir: path.join(autoDrainBudgetRepo, 'agent-runs', 'auto-drain-budget-run'),
+  cwd: autoDrainBudgetRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainBudgetRepo, 'agent-runs', 'auto-drain-budget-run', 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    maxReady: 1,
+    maxIterations: 4
+  },
+  executor: async (input) => {
+    const file = input.job.taskId === 'apply-one-task' ? 'src/one.ts' : 'src/two.ts';
+    const value = input.job.taskId === 'apply-one-task' ? 'new-one\n' : 'new-two\n';
+    await fs.writeFile(path.join(input.workspacePath, file), value);
+    await fs.writeFile(input.paths.lastMessagePath, `${input.job.taskId} changed\n`);
+    return { exitCode: 0, changedPaths: [file], lastMessage: `${input.job.taskId} changed` };
+  }
+});
+assert.strictEqual(autoDrainBudgetRun.ok, true);
+assert.strictEqual(autoDrainBudgetRun.autoDrain.summary.applyCount, 2);
+assert.strictEqual(autoDrainBudgetRun.autoDrain.summary.terminalCount, 2);
+assert.strictEqual(autoDrainBudgetRun.autoDrain.summary.blockedCount, 0);
+assert.strictEqual(autoDrainBudgetRun.autoDrain.summary.remainingReadyCount, 0);
+assert.strictEqual(autoDrainBudgetRun.autoDrain.summary.admittedCount, 2);
+assert.strictEqual(autoDrainBudgetRun.autoDrain.summary.deferredCount, 0);
+assert.deepStrictEqual(autoDrainBudgetRun.autoDrain.iterations.map((iteration) => iteration.admittedJobIds.length), [1, 1]);
+assert.deepStrictEqual(autoDrainBudgetRun.autoDrain.iterations.map((iteration) => iteration.deferredJobIds.length), [1, 0]);
+assert.strictEqual(await fs.readFile(path.join(autoDrainBudgetRepo, 'src', 'one.ts'), 'utf8'), 'new-one\n');
+assert.strictEqual(await fs.readFile(path.join(autoDrainBudgetRepo, 'src', 'two.ts'), 'utf8'), 'new-two\n');
+
+const autoDrainDryRunRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dry-run-repo');
+const autoDrainDryRun = await runCodexSwarm(autoDrainPlan, {
+  outDir: path.join(autoDrainDryRunRepo, 'agent-runs', 'auto-drain-dry-run'),
+  cwd: autoDrainDryRunRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainDryRunRepo, 'agent-runs', 'auto-drain-dry-run', 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: true,
+  autoDrain: {
+    dryRun: true,
+    maxIterations: 2
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'dry-run drained\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'dry-run drained' };
+  }
+});
+assert.strictEqual(autoDrainDryRun.ok, true);
+assert.strictEqual(autoDrainDryRun.autoDrain.summary.applyCount, 1);
+assert.strictEqual(autoDrainDryRun.autoDrain.summary.terminalCount, 1);
+assert.strictEqual(autoDrainDryRun.autoDrain.summary.blockedCount, 0);
+assert.strictEqual(autoDrainDryRun.autoDrain.iterations[0].apply.decisions[0].status, 'checked');
+assert.strictEqual(await fs.readFile(path.join(autoDrainDryRunRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
 
 const cleanApplyRepo = path.join(tmp, 'clean-apply-repo');
 await fs.mkdir(path.join(cleanApplyRepo, 'src'), { recursive: true });
@@ -503,6 +763,26 @@ assert.ok(cliSource.includes('frontier-swarm <command> [options]'));
 assert.ok(cliSource.includes('--semantic-import-include <glob>'));
 assert.ok(cliSource.includes('--semantic-import-exclude <glob>'));
 assert.ok(cliSource.includes('--semantic-import-max-files <n>'));
+assert.ok(cliSource.includes('autonomous-apply'));
+assert.ok(cliSource.includes('drain'));
+assert.ok(cliSource.includes('--no-auto-drain'));
+assert.ok(cliSource.includes('--auto-drain-out-dir <path>'));
+assert.ok(cliSource.includes('--auto-drain-allow-dirty'));
+assert.ok(cliSource.includes('--auto-drain-check-stale'));
+assert.ok(cliSource.includes('--auto-drain-branch-prefix <prefix>'));
+assert.ok(cliSource.includes('--auto-drain-limit <n>'));
+assert.ok(cliSource.includes('--auto-drain-max-iterations <n>'));
+assert.ok(cliSource.includes('--auto-drain-max-ready <n>'));
+assert.ok(cliSource.includes('--auto-drain-max-changed-paths <n>'));
+assert.ok(cliSource.includes('--auto-drain-max-changed-regions <n>'));
+assert.ok(cliSource.includes('--auto-drain-decision-log <path>'));
+assert.ok(cliSource.includes('--auto-drain-lock-path <path>'));
+assert.ok(cliSource.includes('--auto-drain-lock-timeout-ms <n>'));
+assert.ok(cliSource.includes('--auto-drain-lock-stale-ms <n>'));
+assert.ok(cliSource.includes("args['auto-drain-limit']"));
+assert.ok(cliSource.includes("args['auto-drain-max-iterations']"));
+assert.ok(cliSource.includes("args['auto-drain-decision-log']"));
+assert.ok(cliSource.includes("args['auto-drain-lock-path']"));
 assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
 
 const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
@@ -520,6 +800,18 @@ assert.strictEqual((await readCodexPidManifest(concurrentPidManifestPath)).entri
 const stopResult = await stopCodexSwarmRun({ run: pidManifestPath });
 assert.strictEqual(stopResult.ok, true);
 assert.deepStrictEqual(stopResult.stopped, []);
+
+async function createApplyFixtureRepo(root, name) {
+  const repo = path.join(root, name);
+  await fs.mkdir(path.join(repo, 'src'), { recursive: true });
+  await execFileP('git', ['init'], { cwd: repo });
+  await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: repo });
+  await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: repo });
+  await fs.writeFile(path.join(repo, 'src', 'apply.ts'), 'old\n');
+  await execFileP('git', ['add', '--', 'src/apply.ts'], { cwd: repo });
+  await execFileP('git', ['commit', '-m', 'Initial apply fixture'], { cwd: repo });
+  return repo;
+}
 
 async function exists(file) {
   try {

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   applyCodexSwarmCollection,
+  autonomousApplyCodexSwarmRun,
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
   collectCodexSwarmRun,
@@ -46,6 +47,28 @@ try {
       dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
       runVerification: boolArg(args.verify, false),
       semanticImport: semanticImportArg(args),
+      autoDrain: boolArg(args.noAutoDrain ?? args['no-auto-drain'], false) ? false : {
+        outDir: stringArg(args.autoDrainOutDir ?? args['auto-drain-out-dir']),
+        dryRun: boolArg(args.autoDrainDryRun ?? args['auto-drain-dry-run'], false),
+        allowDirty: boolArg(args.autoDrainAllowDirty ?? args['auto-drain-allow-dirty'], false),
+        commit: boolArg(args.autoDrainCommit ?? args['auto-drain-commit'], false),
+        branchPrefix: stringArg(args.autoDrainBranchPrefix ?? args['auto-drain-branch-prefix'] ?? args.branchPrefix ?? args['branch-prefix']),
+        limit: numberArg(args.autoDrainLimit ?? args['auto-drain-limit'], undefined),
+        maxIterations: numberArg(args.autoDrainMaxIterations ?? args['auto-drain-max-iterations'], undefined),
+        maxReady: numberArg(args.autoDrainMaxReady ?? args['auto-drain-max-ready'], undefined),
+        maxChangedPaths: numberArg(args.autoDrainMaxChangedPaths ?? args['auto-drain-max-changed-paths'], undefined),
+        maxChangedRegions: numberArg(args.autoDrainMaxChangedRegions ?? args['auto-drain-max-changed-regions'], undefined),
+        maxHighRisk: numberArg(args.autoDrainMaxHighRisk ?? args['auto-drain-max-high-risk'], undefined),
+        allowRisks: listArg(args.autoDrainAllowRisk ?? args['auto-drain-allow-risk']),
+        checkStale: boolArg(args.autoDrainCheckStale ?? args['auto-drain-check-stale'], true),
+        focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
+        globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
+        globalGlobs: listArg(args.globalGlob ?? args['global-glob']),
+        decisionLogPath: stringArg(args.autoDrainDecisionLog ?? args['auto-drain-decision-log'] ?? args.decisionLog ?? args['decision-log']),
+        lockPath: stringArg(args.autoDrainLockPath ?? args['auto-drain-lock-path'] ?? args.lockPath ?? args['lock-path']),
+        lockTimeoutMs: numberArg(args.autoDrainLockTimeoutMs ?? args['auto-drain-lock-timeout-ms'] ?? args.lockTimeoutMs ?? args['lock-timeout-ms'], undefined),
+        lockStaleMs: numberArg(args.autoDrainLockStaleMs ?? args['auto-drain-lock-stale-ms'] ?? args.lockStaleMs ?? args['lock-stale-ms'], undefined)
+      },
       workspace: {
         mode: readWorkspaceMode(args.workspace),
         root: stringArg(args.worktreeRoot ?? args['worktree-root']),
@@ -101,6 +124,28 @@ try {
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
+  } else if (command === 'autonomous-apply' || command === 'drain') {
+    const result = await autonomousApplyCodexSwarmRun({
+      collection: stringArg(args.collection),
+      run: stringArg(args.run),
+      outDir: stringArg(args.outDir ?? args.out),
+      jobIds: listArg(args.job ?? args.jobId ?? args['job-id']),
+      dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
+      allowDirty: boolArg(args.allowDirty ?? args['allow-dirty'], false),
+      commit: boolArg(args.commit, false),
+      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
+      limit: numberArg(args.limit, undefined),
+      checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
+      focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
+      globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
+      globalGlobs: listArg(args.globalGlob ?? args['global-glob']),
+      decisionLogPath: stringArg(args.decisionLog ?? args['decision-log']),
+      lockPath: stringArg(args.lockPath ?? args['lock-path']),
+      lockTimeoutMs: numberArg(args.lockTimeoutMs ?? args['lock-timeout-ms'], undefined),
+      lockStaleMs: numberArg(args.lockStaleMs ?? args['lock-stale-ms'], undefined)
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
   } else if (command === 'score') {
     const result = await scoreCodexSwarmPatches({
       collection: stringArg(args.collection),
@@ -137,6 +182,9 @@ function printHelp() {
     '  collect   Collect merge bundles into ready/needs-port/failed/stale buckets',
     '  score     Score collected patches in throwaway workspaces',
     '  apply     Dry-run or apply collected patch bundles',
+    '  autonomous-apply',
+    '            Collect/admit/apply ready bundles under a repo lock with decisions',
+    '  drain     Alias for autonomous-apply',
     '  verify    Verify a swarm-results.json proof',
     '',
     'Useful options:',
@@ -146,6 +194,16 @@ function printHelp() {
     '  --include <path> --exclude <path> --link <path>',
     '  --semantic-import --semantic-import-include <glob> --semantic-import-exclude <glob>',
     '  --semantic-import-max-files <n> --semantic-import-max-bytes <n>',
+    '  --no-auto-drain (diagnostic escape hatch for raw runs)',
+    '  --auto-drain-out-dir <path> --auto-drain-allow-dirty --auto-drain-check-stale',
+    '  --auto-drain-branch-prefix <prefix>',
+    '  --auto-drain-dry-run --auto-drain-commit',
+    '  --auto-drain-limit <n> --auto-drain-max-iterations <n>',
+    '  --auto-drain-max-ready <n> --auto-drain-max-changed-paths <n>',
+    '  --auto-drain-max-changed-regions <n> --auto-drain-max-high-risk <n>',
+    '  --auto-drain-allow-risk <risk>',
+    '  --auto-drain-decision-log <path> --auto-drain-lock-path <path>',
+    '  --auto-drain-lock-timeout-ms <n> --auto-drain-lock-stale-ms <n>',
     '  --focused-command <cmd> --global-command <cmd>',
     '',
     'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',

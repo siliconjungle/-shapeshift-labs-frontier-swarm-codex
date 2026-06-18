@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,9 +10,14 @@ import {
   completeSwarmJob,
   FRONTIER_SWARM_MERGE_BUNDLE_KIND,
   FRONTIER_SWARM_MERGE_BUNDLE_VERSION,
+  FRONTIER_SWARM_QUEUE_OVERLAY_KIND,
+  FRONTIER_SWARM_QUEUE_OVERLAY_VERSION,
+  createSwarmMergeAdmission,
   createSwarmMergeBundle,
   createSwarmMergeIndex,
+  createSwarmPatchStackPlan,
   createSwarmQueueOverlay,
+  createSwarmReviewerLanePlan,
   matchesGlob,
   createSwarmManifest,
   createSwarmEventStream,
@@ -28,13 +34,17 @@ import {
   type FrontierSwarmEventStream,
   type FrontierSwarmJob,
   type FrontierSwarmJobResultInput,
+  type FrontierSwarmMergeAdmission,
   type FrontierSwarmMergeBundle,
   type FrontierSwarmMergeIndex,
   type FrontierSwarmLease,
   type FrontierSwarmManifestInput,
+  type FrontierSwarmPatchStackPlan,
   type FrontierSwarmPlan,
   type FrontierSwarmPlanInput,
   type FrontierSwarmQueueOverlay,
+  type FrontierSwarmReviewerLanePlan,
+  type FrontierSwarmRiskLevel,
   type FrontierSwarmRun,
   type FrontierSwarmTaskInput
 } from '@shapeshift-labs/frontier-swarm';
@@ -51,6 +61,16 @@ export const FRONTIER_SWARM_CODEX_COLLECTION_KIND = 'frontier.swarm-codex.collec
 export const FRONTIER_SWARM_CODEX_COLLECTION_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_APPLY_LEDGER_KIND = 'frontier.swarm-codex.apply-ledger';
 export const FRONTIER_SWARM_CODEX_APPLY_LEDGER_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND = 'frontier.swarm-codex.autonomous-apply';
+export const FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND = 'frontier.swarm-codex.autonomous-merge-decision';
+export const FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND = 'frontier.swarm-codex.auto-drain';
+export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_KIND = 'frontier.swarm-codex.auto-drain-grouping';
+export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND = 'frontier.swarm-codex.auto-drain-artifacts';
+export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND = 'frontier.swarm-codex.patch-score';
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND = 'frontier.swarm-codex.semantic-imports';
@@ -68,6 +88,7 @@ const DEFAULT_WORKSPACE_EXCLUDES = [
   'agent-runs',
   'target'
 ];
+const AUTONOMOUS_APPLY_REPO_LOCK_KEY = 'repo:*';
 const pidManifestWriteQueues = new Map<string, Promise<void>>();
 
 export type FrontierCodexSwarmWorkspaceMode = 'current' | 'git-worktree' | 'snapshot' | 'copy';
@@ -117,9 +138,34 @@ export interface FrontierCodexSwarmRunOptions {
   renderJobPrompt?: FrontierCodexJobPromptHook;
   changedPathFilter?: FrontierCodexChangedPathFilter;
   semanticImport?: boolean | FrontierCodexSemanticImportOptions;
+  autoDrain?: boolean | FrontierCodexSwarmAutoDrainOptions;
   onJobStarted?: FrontierCodexJobStartedHook;
   onJobFinished?: FrontierCodexJobFinishedHook;
   onSwarmFinished?: FrontierCodexSwarmFinishedHook;
+}
+
+export interface FrontierCodexSwarmAutoDrainOptions {
+  enabled?: boolean;
+  outDir?: string;
+  dryRun?: boolean;
+  allowDirty?: boolean;
+  commit?: boolean;
+  branchPrefix?: string;
+  limit?: number;
+  maxIterations?: number;
+  maxReady?: number;
+  maxChangedPaths?: number;
+  maxChangedRegions?: number;
+  maxHighRisk?: number;
+  allowRisks?: readonly FrontierSwarmRiskLevel[];
+  checkStale?: boolean;
+  focusedCommands?: readonly (string | FrontierSwarmCommand)[];
+  globalCommands?: readonly (string | FrontierSwarmCommand)[];
+  globalGlobs?: readonly string[];
+  decisionLogPath?: string;
+  lockPath?: string;
+  lockTimeoutMs?: number;
+  lockStaleMs?: number;
 }
 
 export interface FrontierCodexSemanticImportOptions {
@@ -256,6 +302,31 @@ export interface FrontierCodexCollectedBundle {
   bundle: FrontierSwarmMergeBundle;
 }
 
+export interface FrontierCodexCollectArtifacts {
+  collectionPath: string;
+  mergeIndexPath: string;
+  queueOverlayPath: string;
+  mergeAdmissionPath: string;
+  reviewerLanePlanPath: string;
+  patchStackPlanPath: string;
+  bucketDirs: Record<FrontierCodexCollectBucket, string>;
+  counts: {
+    groupedBundleCount: number;
+    readyToApplyCount: number;
+    needsHumanPortCount: number;
+    failedEvidenceCount: number;
+    staleAgainstHeadCount: number;
+    admittedCount: number;
+    deferredCount: number;
+    reviewerAssignmentCount: number;
+    reviewerTaskCount: number;
+    patchStackCount: number;
+    patchStackJobCount: number;
+    conflictedPatchStackCount: number;
+    patchCount: number;
+  };
+}
+
 export interface FrontierCodexCollectResult {
   kind: typeof FRONTIER_SWARM_CODEX_COLLECTION_KIND;
   version: typeof FRONTIER_SWARM_CODEX_COLLECTION_VERSION;
@@ -265,8 +336,19 @@ export interface FrontierCodexCollectResult {
   generatedAt: number;
   buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]>;
   mergeIndex: FrontierSwarmMergeIndex;
+  mergeAdmission?: FrontierSwarmMergeAdmission;
+  reviewerLanePlan?: FrontierSwarmReviewerLanePlan;
+  patchStackPlan?: FrontierSwarmPatchStackPlan;
   queueOverlay: FrontierSwarmQueueOverlay;
-  summary: Record<FrontierCodexCollectBucket, number> & { total: number };
+  summary: Record<FrontierCodexCollectBucket, number> & {
+    total: number;
+    admittedCount?: number;
+    deferredCount?: number;
+    reviewerAssignmentCount?: number;
+    reviewerTaskCount?: number;
+    patchStackCount?: number;
+  };
+  artifacts?: FrontierCodexCollectArtifacts;
 }
 
 export type FrontierCodexApplyStatus = 'checked' | 'applied' | 'committed' | 'skipped' | 'failed';
@@ -314,6 +396,165 @@ export interface FrontierCodexApplyResult {
     committed: number;
     skipped: number;
     failed: number;
+  };
+}
+
+export type FrontierCodexAutonomousDecisionStatus =
+  | 'checked'
+  | 'applied'
+  | 'committed'
+  | 'rejected'
+  | 'rerun'
+  | 'conflict-blocked'
+  | 'human-blocked'
+  | 'skipped'
+  | 'failed';
+
+export type FrontierCodexAutonomousLockScope = 'semantic' | 'path' | 'repo';
+
+export interface FrontierCodexAutonomousApplyLockKeys {
+  scope: FrontierCodexAutonomousLockScope;
+  keys: string[];
+}
+
+export interface FrontierCodexAutonomousLockScopeCounts {
+  semantic: number;
+  path: number;
+  repo: number;
+}
+
+export interface FrontierCodexAutonomousApplyInput {
+  collection?: string;
+  run?: string;
+  outDir?: string;
+  cwd?: string;
+  jobIds?: readonly string[];
+  dryRun?: boolean;
+  allowDirty?: boolean;
+  commit?: boolean;
+  branchPrefix?: string;
+  limit?: number;
+  checkStale?: boolean;
+  focusedCommands?: readonly (string | FrontierSwarmCommand)[];
+  globalCommands?: readonly (string | FrontierSwarmCommand)[];
+  globalGlobs?: readonly string[];
+  decisionLogPath?: string;
+  lockPath?: string;
+  lockTimeoutMs?: number;
+  lockStaleMs?: number;
+}
+
+export interface FrontierCodexAutonomousMergeDecision {
+  kind: typeof FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_VERSION;
+  id: string;
+  runId?: string;
+  planId?: string;
+  jobId: string;
+  taskId?: string;
+  queueItemIds: string[];
+  status: FrontierCodexAutonomousDecisionStatus;
+  reason: string;
+  bundlePath: string;
+  patchPath?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  lockScope: FrontierCodexAutonomousLockScope;
+  lockKeys: string[];
+  startedAt: number;
+  finishedAt: number;
+  dryRun: boolean;
+  headBefore?: string;
+  headAfter?: string;
+  lockPath?: string;
+  lockToken?: string;
+  commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
+  error?: string;
+}
+
+export interface FrontierCodexAutonomousApplyResult {
+  kind: typeof FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_VERSION;
+  ok: boolean;
+  cwd: string;
+  collectionDir: string;
+  outDir: string;
+  generatedAt: number;
+  dryRun: boolean;
+  decisionLogPath: string;
+  lockPath: string;
+  decisions: FrontierCodexAutonomousMergeDecision[];
+  lockKeys: string[];
+  lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
+  queueOverlay: FrontierSwarmQueueOverlay;
+  summary: Record<FrontierCodexAutonomousDecisionStatus, number> & { total: number };
+}
+
+export type FrontierCodexSwarmAutoDrainGroupingConflictKind = 'path' | 'region' | 'unscoped';
+export type FrontierCodexSwarmAutoDrainGroupingPlacement = 'compatible' | 'serialized' | 'deferred';
+
+export interface FrontierCodexSwarmAutoDrainGroupingConflict {
+  kind: FrontierCodexSwarmAutoDrainGroupingConflictKind;
+  key: string;
+  jobIds: [string, string];
+  value?: string;
+}
+
+export interface FrontierCodexSwarmAutoDrainGroupingJob {
+  jobId: string;
+  taskId?: string;
+  lane?: string;
+  queueItemIds: string[];
+  bundlePath?: string;
+  patchPath?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  scopeKeys: string[];
+  placement: FrontierCodexSwarmAutoDrainGroupingPlacement;
+  groupId?: string;
+  serializesAfterJobIds: string[];
+  conflicts: FrontierCodexSwarmAutoDrainGroupingConflict[];
+  reason?: string;
+}
+
+export interface FrontierCodexSwarmAutoDrainGroup {
+  id: string;
+  index: number;
+  jobIds: string[];
+  queueItemIds: string[];
+  changedPaths: string[];
+  changedRegions: string[];
+  scopeKeys: string[];
+  parallelizable: boolean;
+  requiresSerialization: boolean;
+  serializesAfterJobIds: string[];
+}
+
+export interface FrontierCodexSwarmAutoDrainGroupingArtifact {
+  kind: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_VERSION;
+  id: string;
+  runId?: string;
+  generatedAt: number;
+  iteration: number;
+  collectionDir: string;
+  readyJobIds: string[];
+  admittedJobIds: string[];
+  deferredJobIds: string[];
+  groups: FrontierCodexSwarmAutoDrainGroup[];
+  jobs: FrontierCodexSwarmAutoDrainGroupingJob[];
+  conflicts: FrontierCodexSwarmAutoDrainGroupingConflict[];
+  summary: {
+    readyCount: number;
+    admittedCount: number;
+    deferredCount: number;
+    groupCount: number;
+    compatibleGroupCount: number;
+    serializedJobCount: number;
+    conflictCount: number;
+    pathConflictCount: number;
+    regionConflictCount: number;
+    unscopedConflictCount: number;
   };
 }
 
@@ -510,12 +751,140 @@ export type FrontierCodexJobStartedHook = (input: FrontierCodexJobStartedHookInp
 export type FrontierCodexJobFinishedHook = (input: FrontierCodexJobFinishedHookInput) => Promise<void> | void;
 export type FrontierCodexSwarmFinishedHook = (input: FrontierCodexSwarmFinishedHookInput) => Promise<void> | void;
 
+export interface FrontierCodexSwarmAutoDrainIteration {
+  index: number;
+  collection: FrontierCodexCollectResult;
+  admission: FrontierSwarmMergeAdmission;
+  admissionPath: string;
+  admittedJobIds: string[];
+  deferredJobIds: string[];
+  readyJobIds: string[];
+  groupingPath: string;
+  grouping: FrontierCodexSwarmAutoDrainGroupingArtifact;
+  apply?: FrontierCodexAutonomousApplyResult;
+  lockKeys: string[];
+  lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
+  terminalJobIds: string[];
+  blockedJobIds: string[];
+}
+
+export interface FrontierCodexAutoDrainArtifactIteration {
+  index: number;
+  collectionPath: string;
+  mergeIndexPath: string;
+  queueOverlayPath: string;
+  mergeAdmissionPath: string;
+  reviewerLanePlanPath: string;
+  patchStackPlanPath: string;
+  groupingPath?: string;
+  applyPath?: string;
+  autonomousQueueOverlayPath?: string;
+  decisionLogPath?: string;
+  patchPaths: string[];
+  readyJobCount: number;
+  groupedBundleCount: number;
+  readyToApplyCount: number;
+  needsHumanPortCount: number;
+  failedEvidenceCount: number;
+  staleAgainstHeadCount: number;
+  decisionCount: number;
+  admittedCount: number;
+  deferredCount: number;
+  reviewerAssignmentCount: number;
+  reviewerTaskCount: number;
+  patchStackCount: number;
+  patchStackJobCount: number;
+  conflictedPatchStackCount: number;
+}
+
+export interface FrontierCodexAutoDrainArtifactPathGroup {
+  paths: string[];
+  count: number;
+}
+
+export interface FrontierCodexAutoDrainArtifactMetadata {
+  kind: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_VERSION;
+  outDir: string;
+  autoDrainPath: string;
+  generatedAt: number;
+  admission: FrontierCodexAutoDrainArtifactPathGroup & {
+    admittedCount: number;
+    deferredCount: number;
+  };
+  grouping: FrontierCodexAutoDrainArtifactPathGroup & {
+    collectionCount: number;
+    groupedBundleCount: number;
+    readyToApplyCount: number;
+    needsHumanPortCount: number;
+    failedEvidenceCount: number;
+    staleAgainstHeadCount: number;
+  };
+  reviewer: FrontierCodexAutoDrainArtifactPathGroup & {
+    assignmentCount: number;
+    taskCount: number;
+    decisionCount: number;
+  };
+  patchStack: FrontierCodexAutoDrainArtifactPathGroup & {
+    stackCount: number;
+    jobCount: number;
+    conflictedStackCount: number;
+    patchCount: number;
+  };
+  iterations: FrontierCodexAutoDrainArtifactIteration[];
+  summary: {
+    pathCount: number;
+    iterationCount: number;
+    collectionCount: number;
+    applyCount: number;
+    admissionCount: number;
+    reviewerPlanCount: number;
+    patchStackPlanCount: number;
+    decisionCount: number;
+    patchCount: number;
+  };
+}
+
+export interface FrontierCodexSwarmAutoDrainResult {
+  kind: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_AUTO_DRAIN_VERSION;
+  ok: boolean;
+  enabled: boolean;
+  cwd: string;
+  runDir: string;
+  outDir: string;
+  generatedAt: number;
+  skippedReason?: string;
+  dirtyPaths?: string[];
+  iterations: FrontierCodexSwarmAutoDrainIteration[];
+  lockKeys: string[];
+  lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
+  terminalJobIds: string[];
+  blockedJobIds: string[];
+  artifacts?: FrontierCodexAutoDrainArtifactMetadata;
+  summary: {
+    iterationCount: number;
+    collectionCount: number;
+    applyCount: number;
+    terminalCount: number;
+    blockedCount: number;
+    remainingReadyCount: number;
+    admittedCount: number;
+    deferredCount: number;
+    reviewerAssignmentCount: number;
+    reviewerTaskCount: number;
+    patchStackCount: number;
+  };
+}
+
 export interface FrontierCodexSwarmRunResult {
   ok: boolean;
   outDir: string;
   plan: FrontierSwarmPlan;
   run: FrontierSwarmRun;
   proof: ReturnType<typeof createSwarmProof>;
+  autoDrain?: FrontierCodexSwarmAutoDrainResult;
+  autoDrainArtifacts?: FrontierCodexAutoDrainArtifactMetadata;
 }
 
 export interface FrontierCodexSwarmCliInput {
@@ -616,7 +985,8 @@ export function coerceCodexSwarmTasksInput(value: unknown): FrontierSwarmTaskInp
 }
 
 export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {
-  const outDir = path.resolve(options.cwd ?? process.cwd(), options.outDir);
+  const cwd = path.resolve(options.cwd ?? process.cwd());
+  const outDir = path.resolve(cwd, options.outDir);
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'swarm-plan.json'), JSON.stringify(plan, null, 2) + '\n');
   const eventStream = options.eventStream ?? createSwarmEventStream({
@@ -649,25 +1019,584 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   }
   for (const result of results) run = completeSwarmJob(run, result);
   const proof = createSwarmProof(run, { validation: plan.validation });
-  const ok = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
+  const workerOk = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
+  const autoDrain = await runCodexSwarmAutoDrain({
+    plan,
+    run,
+    cwd,
+    outDir,
+    options
+  });
+  const autoDrainArtifacts = autoDrain?.artifacts;
+  const ok = workerOk && (autoDrain?.ok ?? true);
   await appendFileSwarmEvent(eventStream, {
     type: 'swarm.finished',
     runId: run.id,
-    data: { ok, summary: run.summary }
+    data: { ok, summary: run.summary, autoDrain: autoDrain?.summary ?? null }
   });
-  await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({ ok, outDir, run, proof }, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({ ok, outDir, run, proof, ...(autoDrain ? { autoDrain } : {}), ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}) }, null, 2) + '\n');
   await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
     ok,
     outDir,
     plan,
     run,
     proof,
+    ...(autoDrain ? { autoDrain } : {}),
+    ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}),
     eventStream,
     pidManifestPath
   });
-  const result = { ok, outDir, plan, run, proof };
+  const result = { ok, outDir, plan, run, proof, ...(autoDrain ? { autoDrain } : {}), ...(autoDrainArtifacts ? { autoDrainArtifacts } : {}) };
   await options.onSwarmFinished?.({ result });
   return result;
+}
+
+async function runCodexSwarmAutoDrain(input: {
+  plan: FrontierSwarmPlan;
+  run: FrontierSwarmRun;
+  cwd: string;
+  outDir: string;
+  options: FrontierCodexSwarmRunOptions;
+}): Promise<FrontierCodexSwarmAutoDrainResult | undefined> {
+  const normalized = normalizeSwarmAutoDrainOptions(input.options.autoDrain);
+  if (!normalized.enabled) return undefined;
+  const generatedAt = Date.now();
+  const outDir = path.resolve(input.cwd, normalized.outDir ?? path.join(input.outDir, 'auto-drain'));
+  const autoDrainPath = path.join(outDir, 'auto-drain.json');
+  await fs.mkdir(outDir, { recursive: true });
+  const dirtyPaths = normalized.allowDirty ? [] : await gitDirtyExcluding(input.cwd, [input.outDir, outDir]);
+  if (dirtyPaths.length) {
+    const artifacts = createAutoDrainArtifactMetadata({ outDir, autoDrainPath, generatedAt, iterations: [] });
+    const result: FrontierCodexSwarmAutoDrainResult = {
+      kind: FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND,
+      version: FRONTIER_SWARM_CODEX_AUTO_DRAIN_VERSION,
+      ok: false,
+      enabled: true,
+      cwd: input.cwd,
+      runDir: input.outDir,
+      outDir,
+      generatedAt,
+      skippedReason: 'dirty-worktree',
+      dirtyPaths,
+      iterations: [],
+      lockKeys: [],
+      lockScopeCounts: emptyAutonomousLockScopeCounts(),
+      terminalJobIds: [],
+      blockedJobIds: [],
+      artifacts,
+      summary: {
+        iterationCount: 0,
+        collectionCount: 0,
+        applyCount: 0,
+        terminalCount: 0,
+        blockedCount: 0,
+        remainingReadyCount: 0,
+        admittedCount: 0,
+        deferredCount: 0,
+        reviewerAssignmentCount: 0,
+        reviewerTaskCount: 0,
+        patchStackCount: 0
+      }
+    };
+    await writeJsonAtomic(autoDrainPath, result);
+    return result;
+  }
+
+  const iterations: FrontierCodexSwarmAutoDrainIteration[] = [];
+  const terminalJobIds = new Set<string>();
+  const blockedJobIds = new Set<string>();
+  const maxIterations = Math.max(1, Math.floor(normalized.maxIterations ?? Math.max(1, input.run.jobs.length + 1)));
+  let remainingReadyCount = 0;
+  let latestCollection: FrontierCodexCollectResult | undefined;
+  for (let index = 0; index < maxIterations; index += 1) {
+    const collection = await collectCodexSwarmRun({
+      run: input.outDir,
+      cwd: input.cwd,
+      outDir: path.join(outDir, `collection-${String(index + 1).padStart(2, '0')}`),
+      checkStale: normalized.checkStale ?? true,
+      branchPrefix: normalized.branchPrefix
+    });
+    latestCollection = collection;
+    await writeAutoDrainReviewArtifacts(outDir, collection);
+    const allReadyJobIds = collection.buckets['ready-to-apply']
+      .map((entry) => entry.jobId)
+      .filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId));
+    const admission = buildAutoDrainAdmission({
+      collection,
+      options: normalized,
+      iteration: index + 1,
+      runDir: input.outDir,
+      candidateJobIds: allReadyJobIds
+    });
+    const admissionPath = path.join(collection.outDir, 'merge-admission.json');
+    await writeJsonAtomic(admissionPath, admission);
+    const admittedCandidateJobIds = allReadyJobIds.filter((jobId) => admission.admitted.includes(jobId));
+    const admittedJobIds = limitAutoDrainAdmittedJobIds(admittedCandidateJobIds, normalized);
+    const deferredJobIds = uniqueStrings([
+      ...admission.deferred.map((entry) => entry.jobId),
+      ...admittedCandidateJobIds.filter((jobId) => !admittedJobIds.includes(jobId))
+    ]).sort();
+    const grouping = await writeAutoDrainGroupingArtifact({
+      collection,
+      outDir,
+      iteration: index + 1,
+      readyJobIds: allReadyJobIds,
+      admittedJobIds,
+      deferredJobIds
+    });
+    remainingReadyCount = allReadyJobIds.length;
+    if (!allReadyJobIds.length || !admittedJobIds.length) {
+      iterations.push({
+        index: index + 1,
+        collection,
+        admission,
+        admissionPath,
+        admittedJobIds,
+        deferredJobIds,
+        readyJobIds: allReadyJobIds,
+        groupingPath: grouping.path,
+        grouping: grouping.artifact,
+        lockKeys: [],
+        lockScopeCounts: emptyAutonomousLockScopeCounts(),
+        terminalJobIds: [...terminalJobIds].sort(),
+        blockedJobIds: [...blockedJobIds].sort()
+      });
+      break;
+    }
+    const apply = await autonomousApplyCodexSwarmRun({
+      collection: collection.outDir,
+      cwd: input.cwd,
+      outDir: path.join(outDir, `apply-${String(index + 1).padStart(2, '0')}`),
+      jobIds: admittedJobIds,
+      dryRun: normalized.dryRun ?? input.options.dryRun ?? false,
+      allowDirty: true,
+      commit: normalized.commit ?? false,
+      branchPrefix: normalized.branchPrefix,
+      focusedCommands: normalized.focusedCommands,
+      globalCommands: normalized.globalCommands,
+      globalGlobs: normalized.globalGlobs,
+      decisionLogPath: normalized.decisionLogPath,
+      lockPath: normalized.lockPath,
+      lockTimeoutMs: normalized.lockTimeoutMs,
+      lockStaleMs: normalized.lockStaleMs
+    });
+    for (const decision of apply.decisions) {
+      if (autonomousDecisionIsTerminal(decision.status)) terminalJobIds.add(decision.jobId);
+      else blockedJobIds.add(decision.jobId);
+    }
+    const iterationLockSummary = summarizeAutonomousDecisionLockScopes(apply.decisions);
+    iterations.push({
+      index: index + 1,
+      collection,
+      admission,
+      admissionPath,
+      admittedJobIds,
+      deferredJobIds,
+      readyJobIds: allReadyJobIds,
+      groupingPath: grouping.path,
+      grouping: grouping.artifact,
+      apply,
+      lockKeys: iterationLockSummary.lockKeys,
+      lockScopeCounts: iterationLockSummary.lockScopeCounts,
+      terminalJobIds: [...terminalJobIds].sort(),
+      blockedJobIds: [...blockedJobIds].sort()
+    });
+    remainingReadyCount = allReadyJobIds.filter((jobId) => !terminalJobIds.has(jobId) && !blockedJobIds.has(jobId)).length;
+    if (!apply.decisions.length || remainingReadyCount === 0) break;
+  }
+  const lockSummary = summarizeAutonomousDecisionLockScopes(iterations.flatMap((iteration) => iteration.apply?.decisions ?? []));
+  const artifacts = createAutoDrainArtifactMetadata({ outDir, autoDrainPath, generatedAt, iterations });
+  const latestIteration = iterations[iterations.length - 1];
+  const admittedCount = uniqueStrings(iterations.flatMap((iteration) => iteration.admittedJobIds)).length;
+  const deferredCount = latestIteration?.deferredJobIds.length ?? 0;
+  const result: FrontierCodexSwarmAutoDrainResult = {
+    kind: FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND,
+    version: FRONTIER_SWARM_CODEX_AUTO_DRAIN_VERSION,
+    ok: [...blockedJobIds].length === 0,
+    enabled: true,
+    cwd: input.cwd,
+    runDir: input.outDir,
+    outDir,
+    generatedAt,
+    iterations,
+    lockKeys: lockSummary.lockKeys,
+    lockScopeCounts: lockSummary.lockScopeCounts,
+    terminalJobIds: [...terminalJobIds].sort(),
+    blockedJobIds: [...blockedJobIds].sort(),
+    artifacts,
+    summary: {
+      iterationCount: iterations.length,
+      collectionCount: iterations.length,
+      applyCount: iterations.filter((iteration) => iteration.apply).length,
+      terminalCount: terminalJobIds.size,
+      blockedCount: blockedJobIds.size,
+      remainingReadyCount,
+      admittedCount,
+      deferredCount,
+      reviewerAssignmentCount: latestCollection?.reviewerLanePlan?.summary.assignmentCount ?? 0,
+      reviewerTaskCount: latestCollection?.reviewerLanePlan?.summary.taskCount ?? 0,
+      patchStackCount: latestCollection?.patchStackPlan?.summary.stackCount ?? 0
+    }
+  };
+  await writeJsonAtomic(autoDrainPath, result);
+  return result;
+}
+
+async function writeAutoDrainReviewArtifacts(outDir: string, collection: FrontierCodexCollectResult): Promise<void> {
+  await writeJsonAtomic(path.join(outDir, 'merge-index.json'), collection.mergeIndex);
+  if (collection.mergeAdmission) await writeJsonAtomic(path.join(outDir, 'merge-admission.json'), collection.mergeAdmission);
+  if (collection.reviewerLanePlan) await writeJsonAtomic(path.join(outDir, 'reviewer-lane-plan.json'), collection.reviewerLanePlan);
+  if (collection.patchStackPlan) await writeJsonAtomic(path.join(outDir, 'patch-stack-plan.json'), collection.patchStackPlan);
+}
+
+function buildAutoDrainAdmission(input: {
+  collection: FrontierCodexCollectResult;
+  options: FrontierCodexSwarmAutoDrainOptions;
+  iteration: number;
+  runDir: string;
+  candidateJobIds?: readonly string[];
+}): FrontierSwarmMergeAdmission {
+  const index = input.candidateJobIds ? filterMergeIndexForJobIds(input.collection.mergeIndex, input.candidateJobIds) : input.collection.mergeIndex;
+  return createSwarmMergeAdmission({
+    index,
+    maxReady: input.options.maxReady ?? index.entries.length,
+    ...(input.options.maxChangedPaths !== undefined ? { maxChangedPaths: input.options.maxChangedPaths } : {}),
+    ...(input.options.maxChangedRegions !== undefined ? { maxChangedRegions: input.options.maxChangedRegions } : {}),
+    ...(input.options.maxHighRisk !== undefined ? { maxHighRisk: input.options.maxHighRisk } : {}),
+    allowRisks: input.options.allowRisks ?? ['low', 'medium', 'unknown'],
+    metadata: {
+      source: FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND,
+      iteration: input.iteration,
+      collectionDir: input.collection.outDir,
+      candidateJobIds: input.candidateJobIds ? [...input.candidateJobIds] : undefined,
+      runDir: input.runDir
+    }
+  });
+}
+
+function filterMergeIndexForJobIds(index: FrontierSwarmMergeIndex, jobIds: readonly string[]): FrontierSwarmMergeIndex {
+  const wanted = new Set(jobIds);
+  const entries = index.entries
+    .filter((entry) => wanted.has(entry.jobId))
+    .map((entry) => ({
+      ...entry,
+      conflictingJobIds: entry.conflictingJobIds.filter((jobId) => wanted.has(jobId)).sort()
+    }));
+  const conflicts = index.conflicts
+    .filter((conflict) => conflict.jobIds.every((jobId) => wanted.has(jobId)))
+    .map((conflict) => ({ ...conflict, jobIds: [...conflict.jobIds].sort() }));
+  const byDisposition: Record<string, string[]> = {};
+  const byPath: Record<string, string[]> = {};
+  const byRegion: Record<string, string[]> = {};
+  const addGroup = (groups: Record<string, string[]>, key: string, jobId: string) => {
+    const values = groups[key] ?? [];
+    if (!values.includes(jobId)) values.push(jobId);
+    groups[key] = values.sort();
+  };
+  for (const entry of entries) {
+    addGroup(byDisposition, entry.disposition, entry.jobId);
+    for (const file of entry.changedPaths) addGroup(byPath, file, entry.jobId);
+    for (const region of entry.changedRegions) addGroup(byRegion, region, entry.jobId);
+  }
+  const conflictedJobIds = new Set(conflicts.flatMap((conflict) => conflict.jobIds));
+  return {
+    ...index,
+    id: `${index.id}:pending:${stableHash([...wanted].sort())}`,
+    entries,
+    conflicts,
+    byDisposition,
+    byPath,
+    byRegion,
+    summary: {
+      entryCount: entries.length,
+      readyToApplyCount: entries.filter((entry) => entry.disposition === 'auto-mergeable' && entry.autoMergeable && !entry.conflictingJobIds.length).length,
+      needsHumanPortCount: entries.filter((entry) => entry.disposition === 'needs-port').length,
+      failedEvidenceCount: entries.filter((entry) => entry.disposition === 'rejected' || entry.disposition === 'blocked' || entry.ownershipViolations.length > 0).length,
+      staleAgainstHeadCount: entries.filter((entry) => entry.staleAgainstHead || entry.disposition === 'stale-against-head').length,
+      discoveryOnlyCount: entries.filter((entry) => entry.disposition === 'discovery-only').length,
+      conflictCount: conflicts.length,
+      conflictedJobCount: conflictedJobIds.size
+    }
+  };
+}
+
+function limitAutoDrainAdmittedJobIds(jobIds: readonly string[], options: FrontierCodexSwarmAutoDrainOptions): string[] {
+  return options.limit === undefined
+    ? [...jobIds]
+    : jobIds.slice(0, Math.max(0, Math.floor(options.limit)));
+}
+
+interface AutoDrainGroupingRecord {
+  jobId: string;
+  taskId?: string;
+  lane?: string;
+  queueItemIds: string[];
+  mergePath: string;
+  patchPath?: string;
+  changedPaths: string[];
+  changedRegions: string[];
+  scopeKeys: string[];
+}
+
+interface AutoDrainGroupingInternalGroup {
+  index: number;
+  records: AutoDrainGroupingRecord[];
+}
+
+async function writeAutoDrainGroupingArtifact(input: {
+  collection: FrontierCodexCollectResult;
+  outDir: string;
+  iteration: number;
+  readyJobIds: readonly string[];
+  admittedJobIds: readonly string[];
+  deferredJobIds: readonly string[];
+}): Promise<{ path: string; artifact: FrontierCodexSwarmAutoDrainGroupingArtifact }> {
+  const artifact = createAutoDrainGroupingArtifact(input);
+  const artifactPath = path.join(input.outDir, `auto-drain-groups-${String(input.iteration).padStart(2, '0')}.json`);
+  await writeJsonAtomic(artifactPath, artifact);
+  return { path: artifactPath, artifact };
+}
+
+function createAutoDrainGroupingArtifact(input: {
+  collection: FrontierCodexCollectResult;
+  iteration: number;
+  readyJobIds: readonly string[];
+  admittedJobIds: readonly string[];
+  deferredJobIds: readonly string[];
+}): FrontierCodexSwarmAutoDrainGroupingArtifact {
+  const generatedAt = Date.now();
+  const readyEntries = new Map(input.collection.buckets['ready-to-apply'].map((entry) => [entry.jobId, entry]));
+  const admittedRecords = input.admittedJobIds
+    .map((jobId) => {
+      const entry = readyEntries.get(jobId);
+      return entry ? autoDrainGroupingRecord(entry) : undefined;
+    })
+    .filter((entry): entry is AutoDrainGroupingRecord => entry !== undefined);
+  const internalGroups: AutoDrainGroupingInternalGroup[] = [];
+  const placedRecords: AutoDrainGroupingRecord[] = [];
+  const placements = new Map<string, {
+    group: AutoDrainGroupingInternalGroup;
+    conflicts: FrontierCodexSwarmAutoDrainGroupingConflict[];
+  }>();
+  const conflicts: FrontierCodexSwarmAutoDrainGroupingConflict[] = [];
+
+  for (const record of admittedRecords) {
+    const priorConflicts = dedupeAutoDrainGroupingConflicts(
+      placedRecords.flatMap((placed) => autoDrainGroupingConflicts(placed, record))
+    );
+    let group = internalGroups.find((candidate) => candidate.records.every((member) => autoDrainGroupingConflicts(member, record).length === 0));
+    if (!group) {
+      group = { index: internalGroups.length + 1, records: [] };
+      internalGroups.push(group);
+    }
+    group.records.push(record);
+    placedRecords.push(record);
+    placements.set(record.jobId, { group, conflicts: priorConflicts });
+    conflicts.push(...priorConflicts);
+  }
+
+  const groupArtifacts: FrontierCodexSwarmAutoDrainGroup[] = internalGroups.map((group) => {
+    const records = group.records;
+    const serializesAfterJobIds = uniqueStrings(records.flatMap((record) => placements.get(record.jobId)?.conflicts.flatMap((conflict) => conflict.jobIds.filter((jobId) => jobId !== record.jobId)) ?? [])).sort();
+    const jobIds = records.map((record) => record.jobId);
+    return {
+      id: `frontier-swarm-codex-auto-drain-group:${stableHash([input.collection.outDir, input.iteration, group.index, jobIds])}`,
+      index: group.index,
+      jobIds,
+      queueItemIds: uniqueStrings(records.flatMap((record) => record.queueItemIds)).sort(),
+      changedPaths: uniqueWorkspacePaths(records.flatMap((record) => record.changedPaths)).sort(),
+      changedRegions: uniqueStrings(records.flatMap((record) => record.changedRegions)).sort(),
+      scopeKeys: uniqueStrings(records.flatMap((record) => record.scopeKeys)).sort(),
+      parallelizable: records.length > 1,
+      requiresSerialization: serializesAfterJobIds.length > 0,
+      serializesAfterJobIds
+    };
+  });
+  const groupIds = new Map(groupArtifacts.flatMap((group) => group.jobIds.map((jobId) => [jobId, group.id] as const)));
+  const admittedJobs = admittedRecords.map((record): FrontierCodexSwarmAutoDrainGroupingJob => {
+    const placement = placements.get(record.jobId);
+    const recordConflicts = placement?.conflicts ?? [];
+    const serializesAfterJobIds = uniqueStrings(recordConflicts.flatMap((conflict) => conflict.jobIds.filter((jobId) => jobId !== record.jobId))).sort();
+    return {
+      jobId: record.jobId,
+      ...(record.taskId ? { taskId: record.taskId } : {}),
+      ...(record.lane ? { lane: record.lane } : {}),
+      queueItemIds: [...record.queueItemIds],
+      bundlePath: record.mergePath,
+      ...(record.patchPath ? { patchPath: record.patchPath } : {}),
+      changedPaths: [...record.changedPaths],
+      changedRegions: [...record.changedRegions],
+      scopeKeys: [...record.scopeKeys],
+      placement: serializesAfterJobIds.length ? 'serialized' : 'compatible',
+      ...(groupIds.get(record.jobId) ? { groupId: groupIds.get(record.jobId) } : {}),
+      serializesAfterJobIds,
+      conflicts: recordConflicts
+    };
+  });
+  const deferredJobs = input.deferredJobIds.map((jobId): FrontierCodexSwarmAutoDrainGroupingJob => {
+    const entry = readyEntries.get(jobId);
+    const record = entry ? autoDrainGroupingRecord(entry) : undefined;
+    return {
+      jobId,
+      ...(record?.taskId ? { taskId: record.taskId } : {}),
+      ...(record?.lane ? { lane: record.lane } : {}),
+      queueItemIds: record ? [...record.queueItemIds] : [jobId],
+      ...(record ? { bundlePath: record.mergePath } : {}),
+      ...(record?.patchPath ? { patchPath: record.patchPath } : {}),
+      changedPaths: record ? [...record.changedPaths] : [],
+      changedRegions: record ? [...record.changedRegions] : [],
+      scopeKeys: record ? [...record.scopeKeys] : [],
+      placement: 'deferred',
+      serializesAfterJobIds: [],
+      conflicts: [],
+      reason: 'auto-drain-admission'
+    };
+  });
+  const dedupedConflicts = dedupeAutoDrainGroupingConflicts(conflicts);
+  const serializedJobCount = admittedJobs.filter((job) => job.placement === 'serialized').length;
+  return {
+    kind: FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_KIND,
+    version: FRONTIER_SWARM_CODEX_AUTO_DRAIN_GROUPING_VERSION,
+    id: `frontier-swarm-codex-auto-drain-grouping:${stableHash([input.collection.outDir, input.iteration, input.readyJobIds, input.admittedJobIds, groupArtifacts, dedupedConflicts])}`,
+    ...(input.collection.mergeIndex.runId ? { runId: input.collection.mergeIndex.runId } : {}),
+    generatedAt,
+    iteration: input.iteration,
+    collectionDir: input.collection.outDir,
+    readyJobIds: [...input.readyJobIds],
+    admittedJobIds: [...input.admittedJobIds],
+    deferredJobIds: [...input.deferredJobIds],
+    groups: groupArtifacts,
+    jobs: [...admittedJobs, ...deferredJobs],
+    conflicts: dedupedConflicts,
+    summary: {
+      readyCount: input.readyJobIds.length,
+      admittedCount: input.admittedJobIds.length,
+      deferredCount: input.deferredJobIds.length,
+      groupCount: groupArtifacts.length,
+      compatibleGroupCount: groupArtifacts.filter((group) => !group.requiresSerialization).length,
+      serializedJobCount,
+      conflictCount: dedupedConflicts.length,
+      pathConflictCount: dedupedConflicts.filter((conflict) => conflict.kind === 'path').length,
+      regionConflictCount: dedupedConflicts.filter((conflict) => conflict.kind === 'region').length,
+      unscopedConflictCount: dedupedConflicts.filter((conflict) => conflict.kind === 'unscoped').length
+    }
+  };
+}
+
+function autoDrainGroupingRecord(entry: FrontierCodexCollectedBundle): AutoDrainGroupingRecord {
+  const bundle = entry.bundle;
+  const changedPaths = uniqueWorkspacePaths(bundle.changedPaths).sort();
+  const changedRegions = uniqueStrings(bundle.changedRegions).sort();
+  const patchPath = bundle.patchPath
+    ? path.isAbsolute(bundle.patchPath) ? bundle.patchPath : path.resolve(path.dirname(entry.mergePath), bundle.patchPath)
+    : undefined;
+  return {
+    jobId: bundle.jobId,
+    ...(bundle.taskId ? { taskId: bundle.taskId } : {}),
+    ...(bundle.lane ? { lane: bundle.lane } : {}),
+    queueItemIds: bundle.queueItemIds.length ? [...bundle.queueItemIds].sort() : [bundle.taskId ?? bundle.jobId],
+    mergePath: entry.mergePath,
+    ...(patchPath ? { patchPath } : {}),
+    changedPaths,
+    changedRegions,
+    scopeKeys: autoDrainScopeKeys(changedPaths, changedRegions)
+  };
+}
+
+function autoDrainScopeKeys(changedPaths: readonly string[], changedRegions: readonly string[]): string[] {
+  return uniqueStrings([
+    ...changedRegions.map((region) => `region:${region}`),
+    ...changedPaths.map((file) => `path:${file}`)
+  ]).sort();
+}
+
+function autoDrainGroupingConflicts(
+  left: AutoDrainGroupingRecord,
+  right: AutoDrainGroupingRecord
+): FrontierCodexSwarmAutoDrainGroupingConflict[] {
+  const jobIds = [left.jobId, right.jobId].sort() as [string, string];
+  const conflicts: FrontierCodexSwarmAutoDrainGroupingConflict[] = [];
+  const rightRegions = new Set(right.changedRegions);
+  for (const region of left.changedRegions) {
+    if (rightRegions.has(region)) conflicts.push({ kind: 'region', key: `region:${region}`, value: region, jobIds });
+  }
+  const rightPaths = new Set(right.changedPaths);
+  for (const file of left.changedPaths) {
+    if (rightPaths.has(file)) conflicts.push({ kind: 'path', key: `path:${file}`, value: file, jobIds });
+  }
+  if (left.scopeKeys.length === 0 || right.scopeKeys.length === 0) {
+    conflicts.push({ kind: 'unscoped', key: 'unscoped:*', jobIds });
+  }
+  return dedupeAutoDrainGroupingConflicts(conflicts);
+}
+
+function dedupeAutoDrainGroupingConflicts(
+  conflicts: readonly FrontierCodexSwarmAutoDrainGroupingConflict[]
+): FrontierCodexSwarmAutoDrainGroupingConflict[] {
+  const byKey = new Map<string, FrontierCodexSwarmAutoDrainGroupingConflict>();
+  for (const conflict of conflicts) {
+    const jobIds = [...conflict.jobIds].sort() as [string, string];
+    byKey.set(`${conflict.kind}:${conflict.key}:${jobIds.join(',')}`, {
+      ...conflict,
+      jobIds
+    });
+  }
+  return Array.from(byKey.values()).sort((left, right) => (
+    left.key.localeCompare(right.key)
+      || left.jobIds.join(',').localeCompare(right.jobIds.join(','))
+      || left.kind.localeCompare(right.kind)
+  ));
+}
+
+function normalizeSwarmAutoDrainOptions(input: FrontierCodexSwarmRunOptions['autoDrain']): FrontierCodexSwarmAutoDrainOptions & { enabled: boolean } {
+  if (input === false) return { enabled: false };
+  if (input === true || input === undefined) return { enabled: true };
+  return { ...input, enabled: input.enabled !== false };
+}
+
+export function deriveCodexAutonomousApplyLockKeys(input: {
+  changedRegions?: readonly string[];
+  changedPaths?: readonly string[];
+}): FrontierCodexAutonomousApplyLockKeys {
+  const changedRegions = uniqueStrings(input.changedRegions ?? []);
+  if (changedRegions.length) {
+    return {
+      scope: 'semantic',
+      keys: changedRegions.map((region) => `region:${region}`).sort()
+    };
+  }
+  const changedPaths = uniqueWorkspacePaths(input.changedPaths ?? []);
+  if (changedPaths.length) {
+    return {
+      scope: 'path',
+      keys: changedPaths.map((file) => `path:${file}`).sort()
+    };
+  }
+  return { scope: 'repo', keys: [AUTONOMOUS_APPLY_REPO_LOCK_KEY] };
+}
+
+function autonomousDecisionIsTerminal(status: FrontierCodexAutonomousDecisionStatus): boolean {
+  return status === 'checked'
+    || status === 'applied'
+    || status === 'committed'
+    || status === 'rejected'
+    || status === 'skipped';
+}
+
+function emptyAutonomousLockScopeCounts(): FrontierCodexAutonomousLockScopeCounts {
+  return { semantic: 0, path: 0, repo: 0 };
+}
+
+function summarizeAutonomousDecisionLockScopes(decisions: readonly FrontierCodexAutonomousMergeDecision[]): {
+  lockKeys: string[];
+  lockScopeCounts: FrontierCodexAutonomousLockScopeCounts;
+} {
+  const lockScopeCounts = emptyAutonomousLockScopeCounts();
+  for (const decision of decisions) lockScopeCounts[decision.lockScope] += 1;
+  return {
+    lockKeys: uniqueStrings(decisions.flatMap((decision) => decision.lockKeys)).sort(),
+    lockScopeCounts
+  };
 }
 
 export async function runCodexJob(
@@ -1406,6 +2335,8 @@ export async function writeSwarmCoordinatorSnapshot(
     summary: input.run.summary,
     byLane,
     mergeReadiness,
+    autoDrain: input.autoDrain ?? null,
+    autoDrainArtifacts: input.autoDrainArtifacts ?? input.autoDrain?.artifacts ?? null,
     eventStream: input.eventStream ?? null,
     pidManifestPath: input.pidManifestPath ?? null,
     proof: input.proof
@@ -1521,6 +2452,24 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     bundles: collectedBundles,
     patchStatuses
   });
+  const mergeAdmission = createSwarmMergeAdmission({
+    index: mergeIndex,
+    maxReady: buckets['ready-to-apply'].length,
+    allowRisks: ['low', 'medium', 'unknown'],
+    generatedAt,
+    metadata: { source: FRONTIER_SWARM_CODEX_COLLECTION_KIND }
+  });
+  const reviewerLanePlan = createSwarmReviewerLanePlan({
+    index: mergeIndex,
+    admission: mergeAdmission,
+    generatedAt,
+    metadata: { source: FRONTIER_SWARM_CODEX_COLLECTION_KIND }
+  });
+  const patchStackPlan = createSwarmPatchStackPlan({
+    index: mergeIndex,
+    generatedAt,
+    metadata: { source: FRONTIER_SWARM_CODEX_COLLECTION_KIND }
+  });
   const queueOverlay = createSwarmQueueOverlay({
     runId: path.basename(runDir),
     bundles: collectedBundles
@@ -1530,8 +2479,21 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     'ready-to-apply': buckets['ready-to-apply'].length,
     'needs-human-port': buckets['needs-human-port'].length,
     'failed-evidence': buckets['failed-evidence'].length,
-    'stale-against-head': buckets['stale-against-head'].length
+    'stale-against-head': buckets['stale-against-head'].length,
+    admittedCount: mergeAdmission.summary.admittedCount,
+    deferredCount: mergeAdmission.summary.deferredCount,
+    reviewerAssignmentCount: reviewerLanePlan.summary.assignmentCount,
+    reviewerTaskCount: reviewerLanePlan.summary.taskCount,
+    patchStackCount: patchStackPlan.summary.stackCount
   };
+  const artifacts = createCollectArtifacts({
+    outDir,
+    summary,
+    patchStatuses,
+    mergeAdmission,
+    reviewerLanePlan,
+    patchStackPlan
+  });
   const result: FrontierCodexCollectResult = {
     kind: FRONTIER_SWARM_CODEX_COLLECTION_KIND,
     version: FRONTIER_SWARM_CODEX_COLLECTION_VERSION,
@@ -1541,14 +2503,215 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     generatedAt,
     buckets,
     mergeIndex,
+    mergeAdmission,
+    reviewerLanePlan,
+    patchStackPlan,
     queueOverlay,
-    summary
+    summary,
+    artifacts
   };
   await fs.mkdir(outDir, { recursive: true });
-  await fs.writeFile(path.join(outDir, 'collection.json'), JSON.stringify(result, null, 2) + '\n');
-  await fs.writeFile(path.join(outDir, 'merge-index.json'), JSON.stringify(mergeIndex, null, 2) + '\n');
-  await fs.writeFile(path.join(outDir, 'queue-overlay.json'), JSON.stringify(queueOverlay, null, 2) + '\n');
+  await fs.writeFile(artifacts.collectionPath, JSON.stringify(result, null, 2) + '\n');
+  await fs.writeFile(artifacts.mergeIndexPath, JSON.stringify(mergeIndex, null, 2) + '\n');
+  await fs.writeFile(artifacts.mergeAdmissionPath, JSON.stringify(mergeAdmission, null, 2) + '\n');
+  await fs.writeFile(artifacts.reviewerLanePlanPath, JSON.stringify(reviewerLanePlan, null, 2) + '\n');
+  await fs.writeFile(artifacts.patchStackPlanPath, JSON.stringify(patchStackPlan, null, 2) + '\n');
+  await fs.writeFile(artifacts.queueOverlayPath, JSON.stringify(queueOverlay, null, 2) + '\n');
   return result;
+}
+
+function createCollectArtifacts(input: {
+  outDir: string;
+  summary: FrontierCodexCollectResult['summary'];
+  patchStatuses: Record<string, 'unknown' | 'applies' | 'missing' | 'stale'>;
+  mergeAdmission: FrontierSwarmMergeAdmission;
+  reviewerLanePlan: FrontierSwarmReviewerLanePlan;
+  patchStackPlan: FrontierSwarmPatchStackPlan;
+}): FrontierCodexCollectArtifacts {
+  return {
+    collectionPath: path.join(input.outDir, 'collection.json'),
+    mergeIndexPath: path.join(input.outDir, 'merge-index.json'),
+    queueOverlayPath: path.join(input.outDir, 'queue-overlay.json'),
+    mergeAdmissionPath: path.join(input.outDir, 'merge-admission.json'),
+    reviewerLanePlanPath: path.join(input.outDir, 'reviewer-lane-plan.json'),
+    patchStackPlanPath: path.join(input.outDir, 'patch-stack-plan.json'),
+    bucketDirs: {
+      'ready-to-apply': path.join(input.outDir, 'ready-to-apply'),
+      'needs-human-port': path.join(input.outDir, 'needs-human-port'),
+      'failed-evidence': path.join(input.outDir, 'failed-evidence'),
+      'stale-against-head': path.join(input.outDir, 'stale-against-head')
+    },
+    counts: {
+      groupedBundleCount: input.summary.total,
+      readyToApplyCount: input.summary['ready-to-apply'],
+      needsHumanPortCount: input.summary['needs-human-port'],
+      failedEvidenceCount: input.summary['failed-evidence'],
+      staleAgainstHeadCount: input.summary['stale-against-head'],
+      admittedCount: input.mergeAdmission.summary.admittedCount,
+      deferredCount: input.mergeAdmission.summary.deferredCount,
+      reviewerAssignmentCount: input.reviewerLanePlan.summary.assignmentCount,
+      reviewerTaskCount: input.reviewerLanePlan.summary.taskCount,
+      patchStackCount: input.patchStackPlan.summary.stackCount,
+      patchStackJobCount: input.patchStackPlan.summary.jobCount,
+      conflictedPatchStackCount: input.patchStackPlan.summary.conflictedStackCount,
+      patchCount: Object.values(input.patchStatuses).filter((status) => status !== 'missing').length
+    }
+  };
+}
+
+function collectArtifactsForSnapshot(collection: FrontierCodexCollectResult): FrontierCodexCollectArtifacts {
+  return collection.artifacts ?? {
+    collectionPath: path.join(collection.outDir, 'collection.json'),
+    mergeIndexPath: path.join(collection.outDir, 'merge-index.json'),
+    queueOverlayPath: path.join(collection.outDir, 'queue-overlay.json'),
+    mergeAdmissionPath: path.join(collection.outDir, 'merge-admission.json'),
+    reviewerLanePlanPath: path.join(collection.outDir, 'reviewer-lane-plan.json'),
+    patchStackPlanPath: path.join(collection.outDir, 'patch-stack-plan.json'),
+    bucketDirs: {
+      'ready-to-apply': path.join(collection.outDir, 'ready-to-apply'),
+      'needs-human-port': path.join(collection.outDir, 'needs-human-port'),
+      'failed-evidence': path.join(collection.outDir, 'failed-evidence'),
+      'stale-against-head': path.join(collection.outDir, 'stale-against-head')
+    },
+    counts: {
+      groupedBundleCount: collection.summary.total,
+      readyToApplyCount: collection.summary['ready-to-apply'],
+      needsHumanPortCount: collection.summary['needs-human-port'],
+      failedEvidenceCount: collection.summary['failed-evidence'],
+      staleAgainstHeadCount: collection.summary['stale-against-head'],
+      admittedCount: collection.summary.admittedCount ?? 0,
+      deferredCount: collection.summary.deferredCount ?? 0,
+      reviewerAssignmentCount: collection.summary.reviewerAssignmentCount ?? 0,
+      reviewerTaskCount: collection.summary.reviewerTaskCount ?? 0,
+      patchStackCount: collection.summary.patchStackCount ?? 0,
+      patchStackJobCount: collection.patchStackPlan?.summary.jobCount ?? 0,
+      conflictedPatchStackCount: collection.patchStackPlan?.summary.conflictedStackCount ?? 0,
+      patchCount: 0
+    }
+  };
+}
+
+function createAutoDrainArtifactMetadata(input: {
+  outDir: string;
+  autoDrainPath: string;
+  generatedAt?: number;
+  iterations: readonly FrontierCodexSwarmAutoDrainIteration[];
+}): FrontierCodexAutoDrainArtifactMetadata {
+  const iterations: FrontierCodexAutoDrainArtifactIteration[] = input.iterations.map((iteration) => {
+    const collectionArtifacts = collectArtifactsForSnapshot(iteration.collection);
+    const applyPath = iteration.apply ? path.join(iteration.apply.outDir, 'autonomous-apply.json') : undefined;
+    const autonomousQueueOverlayPath = iteration.apply ? path.join(iteration.apply.outDir, 'autonomous-queue-overlay.json') : undefined;
+    const patchPaths = uniqueStrings((iteration.apply?.decisions ?? [])
+      .map((decision) => decision.patchPath)
+      .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0));
+    return {
+      index: iteration.index,
+      collectionPath: collectionArtifacts.collectionPath,
+      mergeIndexPath: collectionArtifacts.mergeIndexPath,
+      queueOverlayPath: collectionArtifacts.queueOverlayPath,
+      mergeAdmissionPath: collectionArtifacts.mergeAdmissionPath,
+      reviewerLanePlanPath: collectionArtifacts.reviewerLanePlanPath,
+      patchStackPlanPath: collectionArtifacts.patchStackPlanPath,
+      groupingPath: iteration.groupingPath,
+      ...(applyPath ? { applyPath } : {}),
+      ...(autonomousQueueOverlayPath ? { autonomousQueueOverlayPath } : {}),
+      ...(iteration.apply?.decisionLogPath ? { decisionLogPath: iteration.apply.decisionLogPath } : {}),
+      patchPaths,
+      readyJobCount: iteration.readyJobIds.length,
+      groupedBundleCount: collectionArtifacts.counts.groupedBundleCount,
+      readyToApplyCount: collectionArtifacts.counts.readyToApplyCount,
+      needsHumanPortCount: collectionArtifacts.counts.needsHumanPortCount,
+      failedEvidenceCount: collectionArtifacts.counts.failedEvidenceCount,
+      staleAgainstHeadCount: collectionArtifacts.counts.staleAgainstHeadCount,
+      decisionCount: iteration.apply?.decisions.length ?? 0,
+      admittedCount: iteration.admittedJobIds.length,
+      deferredCount: iteration.deferredJobIds.length,
+      reviewerAssignmentCount: collectionArtifacts.counts.reviewerAssignmentCount,
+      reviewerTaskCount: collectionArtifacts.counts.reviewerTaskCount,
+      patchStackCount: collectionArtifacts.counts.patchStackCount,
+      patchStackJobCount: collectionArtifacts.counts.patchStackJobCount,
+      conflictedPatchStackCount: collectionArtifacts.counts.conflictedPatchStackCount
+    };
+  });
+  const admissionPaths = compactArtifactPaths(iterations.map((iteration) => iteration.mergeAdmissionPath));
+  const groupingPaths = compactArtifactPaths(iterations.flatMap((iteration) => [
+    iteration.collectionPath,
+    iteration.mergeIndexPath,
+    iteration.queueOverlayPath,
+    iteration.groupingPath
+  ]));
+  const reviewerPaths = compactArtifactPaths(iterations.flatMap((iteration) => [
+    iteration.reviewerLanePlanPath,
+    iteration.decisionLogPath
+  ]));
+  const patchStackPaths = compactArtifactPaths(iterations.flatMap((iteration) => [
+    iteration.patchStackPlanPath,
+    iteration.applyPath,
+    iteration.autonomousQueueOverlayPath,
+    ...iteration.patchPaths
+  ]));
+  const sum = (select: (iteration: FrontierCodexAutoDrainArtifactIteration) => number): number =>
+    iterations.reduce((total, iteration) => total + select(iteration), 0);
+  return {
+    kind: FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND,
+    version: FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_VERSION,
+    outDir: input.outDir,
+    autoDrainPath: input.autoDrainPath,
+    generatedAt: input.generatedAt ?? Date.now(),
+    admission: {
+      paths: admissionPaths,
+      count: admissionPaths.length,
+      admittedCount: sum((iteration) => iteration.admittedCount),
+      deferredCount: sum((iteration) => iteration.deferredCount)
+    },
+    grouping: {
+      paths: groupingPaths,
+      count: groupingPaths.length,
+      collectionCount: iterations.length,
+      groupedBundleCount: sum((iteration) => iteration.groupedBundleCount),
+      readyToApplyCount: sum((iteration) => iteration.readyToApplyCount),
+      needsHumanPortCount: sum((iteration) => iteration.needsHumanPortCount),
+      failedEvidenceCount: sum((iteration) => iteration.failedEvidenceCount),
+      staleAgainstHeadCount: sum((iteration) => iteration.staleAgainstHeadCount)
+    },
+    reviewer: {
+      paths: reviewerPaths,
+      count: reviewerPaths.length,
+      assignmentCount: sum((iteration) => iteration.reviewerAssignmentCount),
+      taskCount: sum((iteration) => iteration.reviewerTaskCount),
+      decisionCount: sum((iteration) => iteration.decisionCount)
+    },
+    patchStack: {
+      paths: patchStackPaths,
+      count: patchStackPaths.length,
+      stackCount: sum((iteration) => iteration.patchStackCount),
+      jobCount: sum((iteration) => iteration.patchStackJobCount),
+      conflictedStackCount: sum((iteration) => iteration.conflictedPatchStackCount),
+      patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length
+    },
+    iterations,
+    summary: {
+      pathCount: compactArtifactPaths([
+        input.autoDrainPath,
+        ...admissionPaths,
+        ...groupingPaths,
+        ...reviewerPaths,
+        ...patchStackPaths
+      ]).length,
+      iterationCount: iterations.length,
+      collectionCount: iterations.length,
+      applyCount: iterations.filter((iteration) => !!iteration.applyPath).length,
+      admissionCount: admissionPaths.length,
+      reviewerPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.reviewerLanePlanPath)).length,
+      patchStackPlanCount: compactArtifactPaths(iterations.map((iteration) => iteration.patchStackPlanPath)).length,
+      decisionCount: sum((iteration) => iteration.decisionCount),
+      patchCount: compactArtifactPaths(iterations.flatMap((iteration) => iteration.patchPaths)).length
+    }
+  };
+}
+
+function compactArtifactPaths(paths: readonly (string | undefined)[]): string[] {
+  return uniqueStrings(paths.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0));
 }
 
 export async function applyCodexSwarmCollection(input: FrontierCodexApplyInput): Promise<FrontierCodexApplyResult> {
@@ -1605,6 +2768,109 @@ export async function applyCodexSwarmCollection(input: FrontierCodexApplyInput):
   };
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'apply-ledger.json'), JSON.stringify(result, null, 2) + '\n');
+  return result;
+}
+
+export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomousApplyInput): Promise<FrontierCodexAutonomousApplyResult> {
+  const generatedAt = Date.now();
+  const cwd = path.resolve(input.cwd ?? process.cwd());
+  const dryRun = input.dryRun ?? false;
+  if (!input.collection && !input.run) throw new Error('autonomous apply requires --collection <dir> or --run <run-dir>');
+  if (!dryRun && !input.allowDirty) {
+    const dirty = await gitDirty(cwd);
+    if (dirty.length) throw new Error(`refusing to autonomous-apply into dirty worktree; pass allowDirty to override (${dirty.slice(0, 8).join(', ')})`);
+  }
+  const baseOutDir = path.resolve(cwd, input.outDir ?? (
+    input.collection
+      ? path.join(path.resolve(cwd, input.collection), 'autonomous-apply')
+      : path.join(await resolveRunDirectory(String(input.run ?? '')), 'autonomous-apply')
+  ));
+  const collectionDir = input.collection
+    ? path.resolve(cwd, input.collection)
+    : (await collectCodexSwarmRun({
+      run: String(input.run ?? ''),
+      cwd,
+      outDir: path.join(baseOutDir, 'collection'),
+      checkStale: input.checkStale ?? true,
+      branchPrefix: input.branchPrefix
+    })).outDir;
+  const outDir = baseOutDir;
+  const decisionLogPath = path.resolve(cwd, input.decisionLogPath ?? path.join(outDir, 'autonomous-merge-decisions.jsonl'));
+  const lockPath = input.lockPath
+    ? path.resolve(cwd, input.lockPath)
+    : await defaultAutonomousApplyLockPath(cwd, outDir);
+  await fs.mkdir(outDir, { recursive: true });
+  await fs.mkdir(path.dirname(decisionLogPath), { recursive: true });
+  await fs.appendFile(decisionLogPath, '');
+
+  const readyRoot = path.join(collectionDir, 'ready-to-apply');
+  const wanted = new Set(input.jobIds ?? []);
+  const allMergePaths = (await findFilesByName(readyRoot, 'merge.json')).sort();
+  const limit = input.limit ? Math.max(0, Math.floor(input.limit)) : undefined;
+  const decisions: FrontierCodexAutonomousMergeDecision[] = [];
+  const lock = await acquireAutonomousApplyLock({
+    cwd,
+    lockPath,
+    timeoutMs: input.lockTimeoutMs,
+    staleMs: input.lockStaleMs,
+    dryRun
+  });
+  try {
+    for (const mergePath of allMergePaths) {
+      if (limit !== undefined && decisions.length >= limit) break;
+      const raw = JSON.parse(await fs.readFile(mergePath, 'utf8')) as FrontierSwarmMergeBundle;
+      const bundle = normalizeCollectedMergeBundle(raw, mergePath);
+      if (wanted.size && !wanted.has(bundle.jobId)) continue;
+      const decision = await applyCodexMergeBundleAutonomously({
+        cwd,
+        bundle,
+        mergePath,
+        dryRun,
+        commit: input.commit ?? false,
+        branchPrefix: input.branchPrefix,
+        input,
+        lock
+      });
+      decisions.push(decision);
+      await appendAutonomousDecision(decisionLogPath, decision);
+    }
+  } finally {
+    await releaseAutonomousApplyLock(lock).catch(() => {});
+  }
+
+  const queueOverlay = createAutonomousQueueOverlay({ decisions, generatedAt, runId: readRunIdFromDecisions(decisions) });
+  const lockSummary = summarizeAutonomousDecisionLockScopes(decisions);
+  const statuses: FrontierCodexAutonomousDecisionStatus[] = [
+    'checked',
+    'applied',
+    'committed',
+    'rejected',
+    'rerun',
+    'conflict-blocked',
+    'human-blocked',
+    'skipped',
+    'failed'
+  ];
+  const summary = Object.fromEntries(statuses.map((status) => [status, decisions.filter((decision) => decision.status === status).length])) as Record<FrontierCodexAutonomousDecisionStatus, number>;
+  const result: FrontierCodexAutonomousApplyResult = {
+    kind: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND,
+    version: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_VERSION,
+    ok: decisions.every((decision) => decision.status === 'checked' || decision.status === 'applied' || decision.status === 'committed' || decision.status === 'skipped' || decision.status === 'rejected'),
+    cwd,
+    collectionDir,
+    outDir,
+    generatedAt,
+    dryRun,
+    decisionLogPath,
+    lockPath,
+    decisions,
+    lockKeys: lockSummary.lockKeys,
+    lockScopeCounts: lockSummary.lockScopeCounts,
+    queueOverlay,
+    summary: { ...summary, total: decisions.length }
+  };
+  await fs.writeFile(path.join(outDir, 'autonomous-apply.json'), JSON.stringify(result, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'autonomous-queue-overlay.json'), JSON.stringify(queueOverlay, null, 2) + '\n');
   return result;
 }
 
@@ -1698,6 +2964,352 @@ async function applyCodexMergeBundle(input: {
     status: 'committed',
     commit: rev.stdoutTail[0]
   };
+}
+
+interface FrontierCodexAutonomousApplyLock {
+  cwd: string;
+  lockPath: string;
+  token: string;
+  acquiredAt: number;
+  expiresAt: number;
+  dryRun: boolean;
+}
+
+async function applyCodexMergeBundleAutonomously(input: {
+  cwd: string;
+  bundle: FrontierSwarmMergeBundle;
+  mergePath: string;
+  dryRun: boolean;
+  commit: boolean;
+  branchPrefix?: string;
+  input: FrontierCodexAutonomousApplyInput;
+  lock: FrontierCodexAutonomousApplyLock;
+}): Promise<FrontierCodexAutonomousMergeDecision> {
+  const startedAt = Date.now();
+  const commands: FrontierCodexAutonomousMergeDecision['commands'] = [];
+  const patchPath = await resolveApplyPatchPath(input.bundle, input.mergePath);
+  const queueItemIds = input.bundle.queueItemIds.length ? [...input.bundle.queueItemIds] : [input.bundle.taskId ?? input.bundle.jobId];
+  const lockKeys = deriveCodexAutonomousApplyLockKeys(input.bundle);
+  const finish = (
+    status: FrontierCodexAutonomousDecisionStatus,
+    reason: string,
+    extra: {
+      headBefore?: string;
+      headAfter?: string;
+      error?: string;
+    } = {}
+  ): FrontierCodexAutonomousMergeDecision => ({
+    kind: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_KIND,
+    version: FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_VERSION,
+    id: `frontier-swarm-codex-autonomous-decision:${input.bundle.jobId}:${randomUUID()}`,
+    ...(input.bundle.runId ? { runId: input.bundle.runId } : {}),
+    ...(input.bundle.planId ? { planId: input.bundle.planId } : {}),
+    jobId: input.bundle.jobId,
+    ...(input.bundle.taskId ? { taskId: input.bundle.taskId } : {}),
+    queueItemIds,
+    status,
+    reason,
+    bundlePath: input.mergePath,
+    ...(patchPath ? { patchPath } : {}),
+    changedPaths: [...input.bundle.changedPaths],
+    changedRegions: [...input.bundle.changedRegions],
+    lockScope: lockKeys.scope,
+    lockKeys: [...lockKeys.keys],
+    startedAt,
+    finishedAt: Date.now(),
+    dryRun: input.dryRun,
+    ...(extra.headBefore ? { headBefore: extra.headBefore } : {}),
+    ...(extra.headAfter ? { headAfter: extra.headAfter } : {}),
+    lockPath: input.lock.lockPath,
+    lockToken: input.lock.token,
+    commands,
+    ...(extra.error ? { error: extra.error } : {})
+  });
+
+  if (input.bundle.staleAgainstHead || input.bundle.disposition === 'stale-against-head') {
+    return finish('rerun', 'bundle is stale against the current repository head');
+  }
+  if (!input.bundle.changedPaths.length || input.bundle.disposition === 'discovery-only') {
+    return finish('skipped', 'bundle has no source patch to apply');
+  }
+  if (!patchPath) {
+    return finish('rejected', 'missing patch');
+  }
+  if (input.bundle.ownershipViolations.length) {
+    return finish('human-blocked', `ownership violations: ${input.bundle.ownershipViolations.join(', ')}`);
+  }
+  if (input.bundle.disposition !== 'auto-mergeable' || !input.bundle.autoMergeable) {
+    return finish('human-blocked', 'bundle is not marked auto-mergeable');
+  }
+
+  const headBefore = await readGitHead(input.cwd, commands);
+  if (!headBefore) return finish('failed', 'unable to read repository head before apply');
+  const check = await runLoggedProcess('git', ['apply', '--check', patchPath], input.cwd);
+  commands.push(check);
+  if (check.status !== 0) return finish('conflict-blocked', 'git apply --check failed', { headBefore });
+  const checkedHead = await readGitHead(input.cwd, commands);
+  if (checkedHead && checkedHead !== headBefore) {
+    return finish('rerun', 'repository head changed while checking patch', { headBefore, headAfter: checkedHead });
+  }
+  if (input.dryRun) return finish('checked', 'patch checked under autonomous apply lock', { headBefore, headAfter: checkedHead ?? headBefore });
+
+  const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(input.bundle.jobId)}` : input.bundle.branchName;
+  if (branchName) {
+    const branch = await runLoggedProcess('git', ['switch', '-c', branchName], input.cwd);
+    commands.push(branch);
+    if (branch.status !== 0) return finish('failed', 'git switch -c failed', { headBefore });
+  }
+  const apply = await runLoggedProcess('git', ['apply', patchPath], input.cwd);
+  commands.push(apply);
+  if (apply.status !== 0) return finish('failed', 'git apply failed', { headBefore });
+
+  const gates = autonomousVerificationCommands(input.bundle, input.input);
+  for (const gate of gates) {
+    const gateCwd = gate.cwd ? path.resolve(input.cwd, gate.cwd) : input.cwd;
+    const run = await runLoggedProcess(gate.command, gate.args, gateCwd);
+    commands.push(run);
+    if (run.status !== 0 && gate.required !== false) {
+      const rollback = await runLoggedProcess('git', ['apply', '-R', patchPath], input.cwd);
+      commands.push(rollback);
+      const headAfterRollback = await readGitHead(input.cwd, commands);
+      if (rollback.status !== 0) {
+        return finish('failed', `verification failed and rollback failed: ${gate.name}`, {
+          headBefore,
+          headAfter: headAfterRollback,
+          error: `required gate failed: ${gate.name}`
+        });
+      }
+      return finish('rejected', `verification failed: ${gate.name}`, {
+        headBefore,
+        headAfter: headAfterRollback,
+        error: `required gate failed: ${gate.name}`
+      });
+    }
+  }
+
+  if (!input.commit) {
+    const headAfter = await readGitHead(input.cwd, commands);
+    return finish('applied', gates.length ? 'patch applied and verification passed' : 'patch applied after git apply check', {
+      headBefore,
+      headAfter
+    });
+  }
+  const add = await runLoggedProcess('git', ['add', '--', ...input.bundle.changedPaths], input.cwd);
+  commands.push(add);
+  if (add.status !== 0) {
+    const rollback = await runLoggedProcess('git', ['apply', '-R', patchPath], input.cwd);
+    commands.push(rollback);
+    const headAfterRollback = await readGitHead(input.cwd, commands);
+    return finish('failed', rollback.status === 0 ? 'git add failed; patch rolled back' : 'git add failed and rollback failed', {
+      headBefore,
+      headAfter: headAfterRollback,
+      error: 'git add failed'
+    });
+  }
+  const commit = await runLoggedProcess('git', ['commit', '-m', `Apply swarm bundle ${input.bundle.jobId}`], input.cwd);
+  commands.push(commit);
+  if (commit.status !== 0) {
+    const reset = await runLoggedProcess('git', ['reset', '--', ...input.bundle.changedPaths], input.cwd);
+    commands.push(reset);
+    const rollback = await runLoggedProcess('git', ['apply', '-R', patchPath], input.cwd);
+    commands.push(rollback);
+    const headAfterRollback = await readGitHead(input.cwd, commands);
+    return finish('failed', rollback.status === 0 ? 'git commit failed; patch rolled back' : 'git commit failed and rollback failed', {
+      headBefore,
+      headAfter: headAfterRollback,
+      error: 'git commit failed'
+    });
+  }
+  const headAfter = await readGitHead(input.cwd, commands);
+  return finish('committed', gates.length ? 'patch committed and verification passed' : 'patch committed after git apply check', {
+    headBefore,
+    headAfter
+  });
+}
+
+function autonomousVerificationCommands(bundle: FrontierSwarmMergeBundle, input: FrontierCodexAutonomousApplyInput): FrontierSwarmCommand[] {
+  const focused = normalizeScoreCommands(input.focusedCommands ?? []);
+  const global = bundle.changedPaths.some((file) => (input.globalGlobs ?? []).some((glob) => matchesGlob(file, glob)))
+    ? normalizeScoreCommands(input.globalCommands ?? [])
+    : [];
+  return [...focused, ...global];
+}
+
+async function readGitHead(cwd: string, commands: FrontierCodexAutonomousMergeDecision['commands']): Promise<string | undefined> {
+  const rev = await runLoggedProcess('git', ['rev-parse', 'HEAD'], cwd);
+  commands.push(rev);
+  if (rev.status !== 0) return undefined;
+  return rev.stdoutTail[rev.stdoutTail.length - 1]?.trim();
+}
+
+async function defaultAutonomousApplyLockPath(cwd: string, outDir: string): Promise<string> {
+  const result = await runProcess('git', ['rev-parse', '--git-path', 'frontier-swarm/autonomous-apply.lock'], { cwd, allowFailure: true });
+  const resolved = result.stdout.trim();
+  return result.status === 0 && resolved ? path.resolve(cwd, resolved) : path.join(outDir, 'autonomous-apply.lock');
+}
+
+async function acquireAutonomousApplyLock(input: {
+  cwd: string;
+  lockPath: string;
+  timeoutMs?: number;
+  staleMs?: number;
+  dryRun: boolean;
+}): Promise<FrontierCodexAutonomousApplyLock> {
+  const timeoutMs = Math.max(0, input.timeoutMs ?? 30_000);
+  const staleMs = Math.max(1_000, input.staleMs ?? 10 * 60_000);
+  const deadline = Date.now() + timeoutMs;
+  await fs.mkdir(path.dirname(input.lockPath), { recursive: true });
+  for (;;) {
+    const acquiredAt = Date.now();
+    const lock: FrontierCodexAutonomousApplyLock = {
+      cwd: input.cwd,
+      lockPath: input.lockPath,
+      token: randomUUID(),
+      acquiredAt,
+      expiresAt: acquiredAt + staleMs,
+      dryRun: input.dryRun
+    };
+    try {
+      const handle = await fs.open(input.lockPath, 'wx');
+      try {
+        await handle.writeFile(JSON.stringify({
+          kind: 'frontier.swarm-codex.autonomous-apply-lock',
+          version: 1,
+          token: lock.token,
+          pid: process.pid,
+          cwd: input.cwd,
+          dryRun: input.dryRun,
+          acquiredAt: lock.acquiredAt,
+          expiresAt: lock.expiresAt
+        }, null, 2) + '\n');
+      } finally {
+        await handle.close();
+      }
+      return lock;
+    } catch (error) {
+      if (!isFileExistsError(error)) throw error;
+      if (await autonomousApplyLockIsStale(input.lockPath, staleMs)) {
+        await fs.rm(input.lockPath, { force: true }).catch(() => {});
+        continue;
+      }
+      if (Date.now() >= deadline) throw new Error(`timed out waiting for autonomous apply lock: ${input.lockPath}`);
+      await sleep(250);
+    }
+  }
+}
+
+async function autonomousApplyLockIsStale(lockPath: string, staleMs: number): Promise<boolean> {
+  const text = await fs.readFile(lockPath, 'utf8').catch(() => '');
+  if (text) {
+    try {
+      const parsed = JSON.parse(text) as { expiresAt?: unknown };
+      if (typeof parsed.expiresAt === 'number') return parsed.expiresAt < Date.now();
+    } catch {
+      return true;
+    }
+  }
+  const stat = await fs.stat(lockPath).catch(() => undefined);
+  return stat ? Date.now() - stat.mtimeMs > staleMs : true;
+}
+
+async function releaseAutonomousApplyLock(lock: FrontierCodexAutonomousApplyLock): Promise<void> {
+  const text = await fs.readFile(lock.lockPath, 'utf8').catch(() => '');
+  if (!text) return;
+  let parsed: { token?: unknown };
+  try {
+    parsed = JSON.parse(text) as { token?: unknown };
+  } catch {
+    return;
+  }
+  if (parsed.token === lock.token) await fs.rm(lock.lockPath, { force: true });
+}
+
+async function appendAutonomousDecision(file: string, decision: FrontierCodexAutonomousMergeDecision): Promise<void> {
+  await fs.appendFile(file, JSON.stringify(decision) + '\n');
+}
+
+function createAutonomousQueueOverlay(input: {
+  decisions: readonly FrontierCodexAutonomousMergeDecision[];
+  generatedAt: number;
+  runId?: string;
+}): FrontierSwarmQueueOverlay {
+  const entries: FrontierSwarmQueueOverlay['entries'] = [];
+  for (const decision of input.decisions) {
+    const queueItemIds = decision.queueItemIds.length ? decision.queueItemIds : [decision.taskId ?? decision.jobId];
+    for (const queueItemId of queueItemIds) {
+      entries.push({
+        queueItemId,
+        jobId: decision.jobId,
+        status: queueStatusFromAutonomousDecision(decision.status),
+        mergeReadiness: decision.status === 'conflict-blocked' || decision.status === 'human-blocked' ? 'blocked' : 'verified-patch',
+        disposition: dispositionFromAutonomousDecision(decision.status),
+        riskLevel: decision.status === 'conflict-blocked' || decision.status === 'human-blocked' || decision.status === 'failed' ? 'high' : 'low',
+        ...(decision.patchPath ? { patchPath: decision.patchPath } : {}),
+        evidencePaths: [decision.bundlePath],
+        changedPaths: [...decision.changedPaths],
+        changedRegions: [...decision.changedRegions],
+        reasons: [decision.reason],
+        generatedAt: decision.finishedAt
+      });
+    }
+  }
+  const byQueueItemId = groupAutonomousQueueOverlayEntries(entries);
+  const lockSummary = summarizeAutonomousDecisionLockScopes(input.decisions);
+  return {
+    kind: FRONTIER_SWARM_QUEUE_OVERLAY_KIND,
+    version: FRONTIER_SWARM_QUEUE_OVERLAY_VERSION,
+    id: `frontier-swarm-codex-autonomous-queue-overlay:${stableHash([input.runId, entries, input.generatedAt])}`,
+    ...(input.runId ? { runId: input.runId } : {}),
+    generatedAt: input.generatedAt,
+    entries,
+    byQueueItemId,
+    summary: {
+      entryCount: entries.length,
+      queueItemCount: Object.keys(byQueueItemId).length,
+      readyToApplyCount: entries.filter((entry) => entry.status === 'ready-to-apply').length,
+      needsHumanPortCount: entries.filter((entry) => entry.status === 'needs-human-port').length,
+      failedEvidenceCount: entries.filter((entry) => entry.status === 'failed-evidence').length,
+      staleAgainstHeadCount: entries.filter((entry) => entry.status === 'stale-against-head').length,
+      discoveryOnlyCount: entries.filter((entry) => entry.status === 'discovery-only').length
+    },
+    metadata: {
+      source: FRONTIER_SWARM_CODEX_AUTONOMOUS_APPLY_KIND,
+      terminalCount: entries.filter((entry) => entry.status === 'satisfied').length,
+      lockKeys: lockSummary.lockKeys,
+      lockScopeCounts: {
+        semantic: lockSummary.lockScopeCounts.semantic,
+        path: lockSummary.lockScopeCounts.path,
+        repo: lockSummary.lockScopeCounts.repo
+      }
+    }
+  };
+}
+
+function queueStatusFromAutonomousDecision(status: FrontierCodexAutonomousDecisionStatus): string {
+  if (status === 'checked') return 'ready-to-apply';
+  if (status === 'rerun') return 'stale-against-head';
+  if (status === 'conflict-blocked' || status === 'human-blocked') return 'blocked';
+  if (status === 'failed') return 'failed-evidence';
+  return 'satisfied';
+}
+
+function dispositionFromAutonomousDecision(status: FrontierCodexAutonomousDecisionStatus): string {
+  if (status === 'checked') return 'auto-mergeable';
+  if (status === 'rerun') return 'stale-against-head';
+  if (status === 'conflict-blocked' || status === 'human-blocked' || status === 'failed') return 'blocked';
+  if (status === 'rejected') return 'rejected';
+  return 'auto-mergeable';
+}
+
+function groupAutonomousQueueOverlayEntries(entries: readonly FrontierSwarmQueueOverlay['entries'][number][]): Record<string, FrontierSwarmQueueOverlay['entries'][number][]> {
+  const out: Record<string, FrontierSwarmQueueOverlay['entries'][number][]> = {};
+  for (const entry of entries) out[entry.queueItemId] = [...(out[entry.queueItemId] ?? []), entry];
+  return out;
+}
+
+function readRunIdFromDecisions(decisions: readonly FrontierCodexAutonomousMergeDecision[]): string | undefined {
+  const runIds = [...new Set(decisions.map((decision) => decision.runId).filter((runId): runId is string => typeof runId === 'string' && runId.length > 0))];
+  return runIds.length === 1 ? runIds[0] : undefined;
 }
 
 async function scoreCodexMergeBundle(input: {
@@ -1828,9 +3440,18 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
 }
 
 async function gitDirty(cwd: string): Promise<string[]> {
-  const result = await runProcess('git', ['status', '--porcelain'], { cwd, allowFailure: true });
+  const result = await runProcess('git', ['status', '--porcelain', '--untracked-files=all'], { cwd, allowFailure: true });
   if (result.status !== 0) return [];
   return result.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.slice(3));
+}
+
+async function gitDirtyExcluding(cwd: string, excludedRoots: readonly string[]): Promise<string[]> {
+  const roots = excludedRoots.map((root) => path.resolve(cwd, root));
+  const dirty = await gitDirty(cwd);
+  return dirty.filter((entry) => {
+    const absolute = path.resolve(cwd, entry);
+    return !roots.some((root) => absolute === root || absolute.startsWith(root + path.sep));
+  });
 }
 
 async function copyWorkspacePath(cwd: string, workspacePath: string, include: string, excludes: readonly string[]): Promise<void> {
@@ -1952,9 +3573,19 @@ async function noIndexWorkspacePatch(sourceRoot: string, workspace: string, chan
     const left = sourceExists ? source : '/dev/null';
     const right = targetExists ? target : '/dev/null';
     const result = await runProcess('git', ['diff', '--no-index', '--', left, right], { cwd: sourceRoot, allowFailure: true });
-    if (result.stdout.trim()) chunks.push(result.stdout);
+    if (result.stdout.trim()) chunks.push(normalizeNoIndexWorkspacePatch(result.stdout, file, sourceExists, targetExists));
   }
   return chunks.join('\n');
+}
+
+function normalizeNoIndexWorkspacePatch(diff: string, file: string, sourceExists: boolean, targetExists: boolean): string {
+  const normalized = file.replace(/\\/g, '/');
+  return diff.split(/\r?\n/).map((line) => {
+    if (line.startsWith('diff --git ')) return `diff --git a/${normalized} b/${normalized}`;
+    if (line.startsWith('--- ')) return sourceExists ? `--- a/${normalized}` : '--- /dev/null';
+    if (line.startsWith('+++ ')) return targetExists ? `+++ b/${normalized}` : '+++ /dev/null';
+    return line;
+  }).join('\n');
 }
 
 function filterWorkspaceChangedPaths(paths: readonly string[], plan: FrontierCodexWorkspacePlan): ChangedPathCollection {
@@ -2420,6 +4051,14 @@ async function pathExists(file: string): Promise<boolean> {
   }
 }
 
+function isFileExistsError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'EEXIST';
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function resolvePidManifestPath(runPath: string): Promise<string> {
   const absolute = path.resolve(runPath);
   const stat = await fs.lstat(absolute).catch(() => undefined);
@@ -2443,7 +4082,12 @@ async function findFilesByName(root: string, name: string): Promise<string[]> {
     for (const entry of entries) {
       const absolute = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === 'collected' || entry.name === 'node_modules' || entry.name === '.git') continue;
+        if (entry.name === 'collected'
+          || entry.name === 'auto-drain'
+          || entry.name === 'apply-ledger'
+          || entry.name === 'patch-scores'
+          || entry.name === 'node_modules'
+          || entry.name === '.git') continue;
         await walk(absolute);
       } else if (entry.isFile() && entry.name === name) {
         out.push(absolute);

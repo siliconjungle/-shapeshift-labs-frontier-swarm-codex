@@ -16,6 +16,7 @@ import {
   type FrontierCodexApplyResult,
   type FrontierCodexPatchScoreResult,
   type FrontierCodexResourceAllocation,
+  type FrontierCodexSwarmAutoDrainOptions,
   type FrontierCodexSwarmRunResult
 } from '../dist/index.js';
 
@@ -25,6 +26,13 @@ const plan = createCodexSwarmPlan({
 });
 
 const job = plan.jobs[0];
+const autoDrainOptions: FrontierCodexSwarmAutoDrainOptions = {
+  maxReady: 2,
+  maxChangedPaths: 4,
+  maxChangedRegions: 3,
+  maxHighRisk: 0,
+  allowRisks: ['low', 'medium']
+};
 const args = buildCodexArgs(job, {
   outDir: '.',
   workspacePath: '.',
@@ -46,6 +54,7 @@ const args = buildCodexArgs(job, {
 const resultPromise: Promise<FrontierCodexSwarmRunResult> = runCodexSwarm(plan, {
   outDir: '.',
   dryRun: true,
+  autoDrain: autoDrainOptions,
   workspace: {
     mode: 'copy',
     includes: ['package.json'],
@@ -70,6 +79,7 @@ const scorePromise: Promise<FrontierCodexPatchScoreResult> = scoreCodexSwarmPatc
 const handoffArtifactsPromise: Promise<FrontierCodexHandoffArtifact[]> = discoverCodexHandoffArtifacts({ root: '.' });
 
 args satisfies string[];
+autoDrainOptions satisfies FrontierCodexSwarmAutoDrainOptions;
 workspacePlan satisfies FrontierCodexWorkspacePlan;
 resourceAllocation.env satisfies Record<string, string>;
 workspaceManifest.kind satisfies string;
