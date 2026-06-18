@@ -66,6 +66,8 @@ The run directory is the operator console. Check these files while the run is ac
 
 After a run, use `coordinator-dashboard.json.operatorSummary` for human-facing queue status. It is the display contract for the top-line status, headline, cards, and counts; use lower-level queue metadata only when drilling into diagnostics. Treat blocker UI as reserved for `operatorSummary.status === "blocked"`, the true-blockers card, or explicit `humanQuestions`.
 
+`humanQuestions` is intentionally narrower than every blocked-looking artifact. A dashboard human question must come from the latest autonomous decision for that queue item, have `status: "human-blocked"`, and carry an explicit question-shaped `reason`: either start it with `human-question:`, `human question:`, `human/authority question:`, `question:`, or phrase it with a `?`. Generic ownership notes, stale/rerun records, `conflict-blocked`, failed/rejected applies, coordinator review tasks, discovery evidence, and generated evidence stay in their queue buckets and must not populate `humanQuestions`.
+
 If auto-drain is disabled or you want to drain a previous run explicitly, use `autonomous-apply`:
 
 ```sh
@@ -116,7 +118,7 @@ When auto-drain is enabled, workers hand off evidence and the coordinator consum
 
 For scaled runs, assign coordinator agents by lease scope rather than by raw bundle count. Multiple agents can classify independent semantic/path scopes at the same time, but the same `leaseKey` should have one active local leader. If work outgrows a local scope, promote it upward and let the parent scope serialize the broader decision. Do not let two agents independently apply patches to the same checkout; apply remains centralized through autonomous apply and its lock records.
 
-Treat `queue-local` and `promote` as unresolved coordinator work, not human questions. `queue-local` stays in the same scope until capacity or the local leader changes. `promote` becomes parent-queue work and remains non-terminal until that parent queue applies, queues, reruns, rejects, records, or blocks it. Treat `rerun`, `reject`, `record-only`, and true `block` as terminal queue decisions; stale/rerun cleanup should close the old bundle and create a fresh narrow task only when the objective is still valuable. Ask a human only for an explicit `block` or `human-blocked` decision that names the missing authority, owner, surface, or policy/risk choice.
+Treat `queue-local` and `promote` as unresolved coordinator work, not human questions. `queue-local` stays in the same scope until capacity or the local leader changes. `promote` becomes parent-queue work and remains non-terminal until that parent queue applies, queues, reruns, rejects, records, or blocks it. Treat `rerun`, `reject`, `record-only`, and true `block` as terminal queue decisions; stale/rerun cleanup should close the old bundle and create a fresh narrow task only when the objective is still valuable. Ask a human only for an explicit `block` or question-shaped `human-blocked` decision that names the missing authority, owner, surface, or policy/risk choice.
 
 ## Interpret Outcomes
 

@@ -90,6 +90,12 @@ export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND = 'frontier.swa
 export const FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_KIND = 'frontier.swarm-codex.dashboard-operator-queue';
 export const FRONTIER_SWARM_CODEX_DASHBOARD_OPERATOR_QUEUE_VERSION = 1;
+const DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIXES = [
+  'human-question:',
+  'human question:',
+  'human/authority question:',
+  'question:'
+];
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 
@@ -3070,17 +3076,7 @@ function createDashboardQueueMetadata(
   const staleOrRerunCount = Math.max(staleCount, queueRerunCount)
     + decisionSummary.rerunDecisionCount
     + decisionSummary.conflictBlockedDecisionCount;
-  const humanQuestions: FrontierCodexDashboardHumanQuestions = {
-    kind: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND,
-    version: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION,
-    source: autoDrain ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND : 'not-collected',
-    available: !!autoDrain,
-    count: decisionSummary.humanBlockedDecisionCount,
-    decisionCount: decisionSummary.humanBlockedDecisionCount,
-    jobIds: decisionSummary.humanQuestionJobIds,
-    taskIds: decisionSummary.humanQuestionTaskIds,
-    reasons: decisionSummary.humanQuestionReasons
-  };
+  const humanQuestions = createDashboardHumanQuestions(autoDrain, decisionSummary);
   const queueHealth: FrontierCodexDashboardQueueHealth = {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_HEALTH_VERSION,
@@ -3469,23 +3465,52 @@ function summarizeDashboardAutonomousDecisions(autoDrain: FrontierCodexSwarmAuto
   committedDecisionCount: number;
   rerunDecisionCount: number;
   conflictBlockedDecisionCount: number;
-  humanBlockedDecisionCount: number;
+  humanQuestionDecisionCount: number;
   humanQuestionJobIds: string[];
   humanQuestionTaskIds: string[];
   humanQuestionReasons: string[];
 } {
   const decisions = latestDashboardAutonomousDecisions((autoDrain?.iterations ?? []).flatMap((iteration) => iteration.apply?.decisions ?? []));
-  const humanQuestionDecisions = decisions.filter((decision) => decision.status === 'human-blocked');
+  const humanQuestionDecisions = decisions.filter(dashboardAutonomousDecisionIsExplicitHumanQuestion);
   return {
     appliedDecisionCount: decisions.filter((decision) => decision.status === 'applied' || decision.status === 'committed').length,
     committedDecisionCount: decisions.filter((decision) => decision.status === 'committed').length,
     rerunDecisionCount: decisions.filter((decision) => decision.status === 'rerun').length,
     conflictBlockedDecisionCount: decisions.filter((decision) => decision.status === 'conflict-blocked').length,
-    humanBlockedDecisionCount: humanQuestionDecisions.length,
+    humanQuestionDecisionCount: humanQuestionDecisions.length,
     humanQuestionJobIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.jobId)).sort(),
     humanQuestionTaskIds: uniqueStrings(humanQuestionDecisions.map((decision) => decision.taskId).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)).sort(),
     humanQuestionReasons: uniqueStrings(humanQuestionDecisions.map((decision) => decision.reason).filter((entry) => entry.length > 0)).sort()
   };
+}
+
+function createDashboardHumanQuestions(
+  autoDrain: FrontierCodexSwarmAutoDrainResult | null,
+  decisionSummary: ReturnType<typeof summarizeDashboardAutonomousDecisions>
+): FrontierCodexDashboardHumanQuestions {
+  return {
+    kind: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_KIND,
+    version: FRONTIER_SWARM_CODEX_DASHBOARD_HUMAN_QUESTIONS_VERSION,
+    source: autoDrain ? FRONTIER_SWARM_CODEX_AUTO_DRAIN_KIND : 'not-collected',
+    available: !!autoDrain,
+    count: decisionSummary.humanQuestionDecisionCount,
+    decisionCount: decisionSummary.humanQuestionDecisionCount,
+    jobIds: decisionSummary.humanQuestionJobIds,
+    taskIds: decisionSummary.humanQuestionTaskIds,
+    reasons: decisionSummary.humanQuestionReasons
+  };
+}
+
+function dashboardAutonomousDecisionIsExplicitHumanQuestion(decision: FrontierCodexAutonomousMergeDecision): boolean {
+  if (decision.status !== 'human-blocked') return false;
+  return dashboardTextIsExplicitHumanQuestion(decision.reason);
+}
+
+function dashboardTextIsExplicitHumanQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes('?')) return true;
+  return DASHBOARD_EXPLICIT_HUMAN_QUESTION_REASON_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 function latestDashboardAutonomousDecisions(
