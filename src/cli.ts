@@ -107,11 +107,16 @@ try {
   } else if (command === 'collect') {
     const run = String(args.run ?? '');
     if (!run) throw new Error('collect requires --run <run-dir|swarm-results.json>');
+    const disablePatchCandidatePromotion = boolArg(args.noPromotePatchCandidates ?? args['no-promote-patch-candidates'], false);
     const result = await collectCodexSwarmRun({
       run,
       outDir: stringArg(args.outDir ?? args.out),
       checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
-      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix'])
+      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
+      promotePatchCandidates: disablePatchCandidatePromotion ? false : optionalBoolArg(args.promotePatchCandidates ?? args['promote-patch-candidates']),
+      promotionFocusedCommands: commandListArg(args.promotionFocusedCommand ?? args['promotion-focused-command'] ?? args.focusedCommand ?? args['focused-command']),
+      promotionGlobalCommands: commandListArg(args.promotionGlobalCommand ?? args['promotion-global-command'] ?? args.globalCommand ?? args['global-command']),
+      promotionGlobalGlobs: listArg(args.promotionGlobalGlob ?? args['promotion-global-glob'] ?? args.globalGlob ?? args['global-glob'])
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
@@ -131,6 +136,7 @@ try {
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
   } else if (command === 'autonomous-apply' || command === 'drain') {
+    const disablePatchCandidatePromotion = boolArg(args.noPromotePatchCandidates ?? args['no-promote-patch-candidates'], false);
     const result = await autonomousApplyCodexSwarmRun({
       collection: stringArg(args.collection),
       run: stringArg(args.run),
@@ -142,6 +148,7 @@ try {
       branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
       limit: numberArg(args.limit, undefined),
       checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
+      promotePatchCandidates: disablePatchCandidatePromotion ? false : optionalBoolArg(args.promotePatchCandidates ?? args['promote-patch-candidates']),
       focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
       globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
       globalGlobs: listArg(args.globalGlob ?? args['global-glob']),
@@ -212,6 +219,8 @@ function printHelp() {
     '  --auto-drain-allow-risk <risk>',
     '  --auto-drain-promote-patch-candidates[=true|false]',
     '  --no-auto-drain-promote-patch-candidates',
+    '  --promote-patch-candidates[=true|false] --no-promote-patch-candidates (collect/drain: promote safe patch candidates only when coordinator gates are configured)',
+    '  --promotion-focused-command <cmd> --promotion-global-command <cmd> --promotion-global-glob <glob> (collect promotion gates; aliases: --focused-command/--global-command/--global-glob)',
     '  --auto-drain-decision-log <path> --auto-drain-lock-path <path>',
     '  --auto-drain-lock-timeout-ms <n> --auto-drain-lock-stale-ms <n>',
     '  --focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)',

@@ -589,6 +589,7 @@ export interface FrontierCodexAutonomousApplyInput {
   branchPrefix?: string;
   limit?: number;
   checkStale?: boolean;
+  promotePatchCandidates?: boolean;
   focusedCommands?: readonly (string | FrontierSwarmCommand)[];
   globalCommands?: readonly (string | FrontierSwarmCommand)[];
   globalGlobs?: readonly string[];
@@ -2719,6 +2720,17 @@ function shouldAutoDrainPromotePatchCandidates(options: FrontierCodexSwarmAutoDr
 }
 
 function hasAutoDrainCoordinatorVerification(options: FrontierCodexSwarmAutoDrainOptions): boolean {
+  if (hasAutoDrainVerificationCommands(options.focusedCommands)) return true;
+  return hasAutoDrainVerificationCommands(options.globalCommands) && (options.globalGlobs ?? []).length > 0;
+}
+
+function shouldAutonomousApplyPromotePatchCandidates(options: FrontierCodexAutonomousApplyInput): boolean {
+  if (options.promotePatchCandidates === false) return false;
+  if (options.promotePatchCandidates === true) return true;
+  return hasAutonomousApplyCoordinatorVerification(options);
+}
+
+function hasAutonomousApplyCoordinatorVerification(options: FrontierCodexAutonomousApplyInput): boolean {
   if (hasAutoDrainVerificationCommands(options.focusedCommands)) return true;
   return hasAutoDrainVerificationCommands(options.globalCommands) && (options.globalGlobs ?? []).length > 0;
 }
@@ -5333,7 +5345,11 @@ export async function autonomousApplyCodexSwarmRun(input: FrontierCodexAutonomou
       cwd,
       outDir: path.join(baseOutDir, 'collection'),
       checkStale: input.checkStale ?? true,
-      branchPrefix: input.branchPrefix
+      branchPrefix: input.branchPrefix,
+      promotePatchCandidates: shouldAutonomousApplyPromotePatchCandidates(input),
+      promotionFocusedCommands: input.focusedCommands,
+      promotionGlobalCommands: input.globalCommands,
+      promotionGlobalGlobs: input.globalGlobs
     })).outDir;
   const outDir = baseOutDir;
   const decisionLogPath = path.resolve(cwd, input.decisionLogPath ?? path.join(outDir, 'autonomous-merge-decisions.jsonl'));

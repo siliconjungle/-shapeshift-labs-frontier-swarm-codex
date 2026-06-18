@@ -673,6 +673,8 @@ const cliHelp = await execFileP(process.execPath, [
 assert.ok(cliHelp.stdout.includes('Default run auto-drain is autonomous coordinator drain work.'));
 assert.ok(cliHelp.stdout.includes('frontier.swarm.coordinator-agent-drain-work contract'));
 assert.ok(cliHelp.stdout.includes('--auto-drain-commit (after required gates pass, run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)'));
+assert.ok(cliHelp.stdout.includes('--promote-patch-candidates[=true|false] --no-promote-patch-candidates'));
+assert.ok(cliHelp.stdout.includes('--promotion-focused-command <cmd> --promotion-global-command <cmd> --promotion-global-glob <glob>'));
 assert.ok(cliHelp.stdout.includes('Terminal coordinator decisions such as applied, committed, checked,'));
 assert.ok(cliHelp.stdout.includes('queue outcomes, not\nhuman blockers.'));
 assert.ok(cliHelp.stdout.includes('--no-auto-drain (raw worker diagnostics only; skips coordinator drain-work)'));
@@ -1474,6 +1476,31 @@ assert.strictEqual(autoDrainUngatedCandidateDashboard.queueMetadata.actionCounts
 const autoDrainUngatedCandidateOperatorCards = new Map(autoDrainUngatedCandidateDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
 assert.strictEqual(autoDrainUngatedCandidateOperatorCards.get('applied-decisions').value, 0);
 
+const cliCollectPromotedOutDir = path.join(tmp, 'cli-collect-promoted-collection');
+const cliCollectPromoted = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'collect',
+  '--run',
+  autoDrainUngatedCandidateOutDir,
+  '--outDir',
+  cliCollectPromotedOutDir,
+  '--promote-patch-candidates',
+  '--focused-command',
+  "node -e \"const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
+], { cwd: autoDrainUngatedCandidateRepo });
+const cliCollectPromotedResult = JSON.parse(cliCollectPromoted.stdout);
+assert.strictEqual(cliCollectPromotedResult.ok, true);
+assert.strictEqual(cliCollectPromotedResult.summary['ready-to-apply'], 1);
+assert.strictEqual(cliCollectPromotedResult.summary['needs-human-port'], 0);
+assert.strictEqual(cliCollectPromotedResult.summary.promotedPatchCandidateCount, 1);
+assert.strictEqual(cliCollectPromotedResult.artifacts.counts.promotedPatchCandidateCount, 1);
+const cliCollectPromotedBundle = cliCollectPromotedResult.buckets['ready-to-apply'][0].bundle;
+assert.strictEqual(cliCollectPromotedBundle.mergeReadiness, 'verified-patch');
+assert.strictEqual(cliCollectPromotedBundle.disposition, 'auto-mergeable');
+assert.strictEqual(cliCollectPromotedBundle.autoMergeable, true);
+assert.strictEqual(cliCollectPromotedBundle.metadata.coordinatorPatchCandidatePromotion.originalMergeReadiness, 'patch-candidate');
+assert.ok(await exists(path.join(cliCollectPromotedResult.buckets['ready-to-apply'][0].outputDir, 'merge.json')));
+
 const autoDrainCandidateRun = await runCodexSwarm(autoDrainCandidatePlan, {
   outDir: autoDrainCandidateOutDir,
   cwd: autoDrainCandidateRepo,
@@ -1531,6 +1558,50 @@ assert.strictEqual(autoDrainCandidateDashboard.queueMetadata.operatorSummary.sta
 const autoDrainCandidateOperatorCards = new Map(autoDrainCandidateDashboard.queueMetadata.operatorSummary.cards.map((card) => [card.id, card]));
 assert.strictEqual(autoDrainCandidateOperatorCards.get('applied-decisions').value, 1);
 assert.strictEqual(autoDrainCandidateOperatorCards.get('stale-rerun').value, 0);
+
+const cliAutonomousPromoteRepo = await createApplyFixtureRepo(tmp, 'cli-autonomous-promote-run-repo');
+const cliAutonomousPromoteOutDir = path.join(cliAutonomousPromoteRepo, 'agent-runs', 'cli-autonomous-promote-run');
+const cliAutonomousPromoteRun = await runCodexSwarm(autoDrainCandidatePlan, {
+  outDir: cliAutonomousPromoteOutDir,
+  cwd: cliAutonomousPromoteRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(cliAutonomousPromoteOutDir, 'workspaces'),
+    includes: ['src'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: false,
+  autoDrain: false,
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'cli autonomous promotion candidate\n');
+    return { exitCode: 0, changedPaths: ['src/apply.ts'], lastMessage: 'cli autonomous promotion candidate' };
+  }
+});
+assert.strictEqual(cliAutonomousPromoteRun.ok, true);
+const cliAutonomousPromote = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'autonomous-apply',
+  '--run',
+  cliAutonomousPromoteOutDir,
+  '--outDir',
+  path.join(cliAutonomousPromoteRepo, 'agent-runs', 'cli-autonomous-promote-apply'),
+  '--allow-dirty',
+  '--promote-patch-candidates',
+  '--focused-command',
+  "node -e \"const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\""
+], { cwd: cliAutonomousPromoteRepo });
+const cliAutonomousPromoteResult = JSON.parse(cliAutonomousPromote.stdout);
+assert.strictEqual(cliAutonomousPromoteResult.ok, true);
+assert.strictEqual(cliAutonomousPromoteResult.summary.applied, 1);
+assert.strictEqual(cliAutonomousPromoteResult.decisions[0].status, 'applied');
+assert.strictEqual(await fs.readFile(path.join(cliAutonomousPromoteRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+const cliAutonomousPromoteCollection = JSON.parse(await fs.readFile(path.join(cliAutonomousPromoteResult.collectionDir, 'collection.json'), 'utf8'));
+assert.strictEqual(cliAutonomousPromoteCollection.summary.promotedPatchCandidateCount, 1);
+assert.strictEqual(cliAutonomousPromoteCollection.summary['ready-to-apply'], 1);
+assert.strictEqual(cliAutonomousPromoteCollection.summary['needs-human-port'], 0);
 
 const autoDrainDirtyRepo = await createApplyFixtureRepo(tmp, 'auto-drain-dirty-run-repo');
 await fs.writeFile(path.join(autoDrainDirtyRepo, 'src', 'dirty.ts'), 'dirty\n');
@@ -2684,6 +2755,8 @@ assert.ok(cliSource.includes('--auto-drain-max-changed-paths <n>'));
 assert.ok(cliSource.includes('--auto-drain-max-changed-regions <n>'));
 assert.ok(cliSource.includes('--auto-drain-promote-patch-candidates[=true|false]'));
 assert.ok(cliSource.includes('--no-auto-drain-promote-patch-candidates'));
+assert.ok(cliSource.includes('--promote-patch-candidates[=true|false] --no-promote-patch-candidates'));
+assert.ok(cliSource.includes('--promotion-focused-command <cmd> --promotion-global-command <cmd> --promotion-global-glob <glob>'));
 assert.ok(cliSource.includes('--auto-drain-decision-log <path>'));
 assert.ok(cliSource.includes('--auto-drain-lock-path <path>'));
 assert.ok(cliSource.includes('--auto-drain-lock-timeout-ms <n>'));
@@ -2692,6 +2765,8 @@ assert.ok(cliSource.includes("args['auto-drain-limit']"));
 assert.ok(cliSource.includes("args['auto-drain-max-iterations']"));
 assert.ok(cliSource.includes("args['no-auto-drain-promote-patch-candidates']"));
 assert.ok(cliSource.includes("promotePatchCandidates: disableAutoDrainPatchCandidatePromotion ? false : optionalBoolArg(args.autoDrainPromotePatchCandidates ?? args['auto-drain-promote-patch-candidates'])"));
+assert.ok(cliSource.includes("args['no-promote-patch-candidates']"));
+assert.ok(cliSource.includes("promotePatchCandidates: disablePatchCandidatePromotion ? false : optionalBoolArg(args.promotePatchCandidates ?? args['promote-patch-candidates'])"));
 assert.ok(cliSource.includes("args['auto-drain-decision-log']"));
 assert.ok(cliSource.includes("args['auto-drain-lock-path']"));
 assert.ok(cliSource.includes('autonomous coordinator drain work'));
