@@ -1522,6 +1522,129 @@ assert.strictEqual(dependencyGateResult.summary.applied, 1);
 assert.deepStrictEqual(dependencyGateResult.decisions[0].verification.names, ['frontier-swarm-test', 'frontier-swarm-codex-test']);
 assert.strictEqual(await fs.readFile(dependencyGateLog, 'utf8'), 'frontier-swarm\nfrontier-swarm-codex\n');
 
+const packageLocalGateRepo = path.join(tmp, 'package-local-gate-repo');
+await fs.mkdir(path.join(packageLocalGateRepo, 'config'), { recursive: true });
+await fs.mkdir(path.join(packageLocalGateRepo, 'packages', 'shared-core', 'src'), { recursive: true });
+await fs.mkdir(path.join(packageLocalGateRepo, 'packages', 'worker-runner', 'src'), { recursive: true });
+await fs.writeFile(path.join(packageLocalGateRepo, 'config', 'release-train.json'), JSON.stringify({
+  packages: [
+    {
+      id: 'shared-core',
+      name: '@example/shared-core',
+      deps: [],
+      candidates: ['packages/shared-core']
+    },
+    {
+      id: 'worker-runner',
+      name: '@example/worker-runner',
+      deps: ['shared-core'],
+      candidates: ['packages/worker-runner']
+    }
+  ]
+}, null, 2) + '\n');
+await fs.writeFile(path.join(packageLocalGateRepo, 'packages', 'shared-core', 'src', 'apply.ts'), 'core\n');
+await fs.writeFile(path.join(packageLocalGateRepo, 'packages', 'worker-runner', 'src', 'apply.ts'), 'old\n');
+await execFileP('git', ['init'], { cwd: packageLocalGateRepo });
+await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: packageLocalGateRepo });
+await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: packageLocalGateRepo });
+await execFileP('git', ['add', '--', 'config/release-train.json', 'packages/shared-core/src/apply.ts', 'packages/worker-runner/src/apply.ts'], { cwd: packageLocalGateRepo });
+await execFileP('git', ['commit', '-m', 'Initial package-local gate fixture'], { cwd: packageLocalGateRepo });
+const packageLocalGateCollection = path.join(tmp, 'package-local-gate-collection');
+const packageLocalGateReadyDir = path.join(packageLocalGateCollection, 'ready-to-apply', 'package-local-worker-job');
+await fs.mkdir(packageLocalGateReadyDir, { recursive: true });
+await fs.writeFile(path.join(packageLocalGateReadyDir, 'changes.patch'), [
+  'diff --git a/packages/worker-runner/src/apply.ts b/packages/worker-runner/src/apply.ts',
+  '--- a/packages/worker-runner/src/apply.ts',
+  '+++ b/packages/worker-runner/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'));
+await fs.writeFile(path.join(packageLocalGateReadyDir, 'merge.json'), JSON.stringify({
+  ...mergeBundle,
+  jobId: 'package-local-worker-job',
+  taskId: 'package-local-worker-task',
+  lane: 'package-local-gates',
+  status: 'verified',
+  mergeReadiness: 'verified-patch',
+  disposition: 'auto-mergeable',
+  riskLevel: 'low',
+  autoMergeable: true,
+  changedPaths: ['packages/worker-runner/src/apply.ts'],
+  changedRegions: ['packages/worker-runner/src/apply.ts#apply'],
+  ownedFilesTouched: ['packages/worker-runner/src/apply.ts'],
+  allowedWrites: ['packages/worker-runner/**'],
+  ownershipViolations: [],
+  patchPath: 'changes.patch',
+  commandsPassed: [],
+  commandsFailed: [],
+  queueItemIds: ['package-local-worker-task'],
+  staleAgainstHead: false,
+  reasons: []
+}, null, 2) + '\n');
+const packageLocalGateLog = path.join(tmp, 'package-local-gate.log');
+const packageLocalGateScript = (label, expectedContent, requiredPrevious) => [
+  "const fs = require('fs');",
+  `const logPath = ${JSON.stringify(packageLocalGateLog)};`,
+  "const current = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';",
+  requiredPrevious ? `if (!current.includes(${JSON.stringify(`${requiredPrevious}\n`)})) process.exit(1);` : '',
+  `if (fs.readFileSync('src/apply.ts', 'utf8') !== ${JSON.stringify(expectedContent)}) process.exit(1);`,
+  `fs.appendFileSync(logPath, ${JSON.stringify(`${label}\n`)});`
+].filter(Boolean).join('\n');
+const packageLocalGateResult = await autonomousApplyCodexSwarmRun({
+  collection: packageLocalGateCollection,
+  cwd: packageLocalGateRepo,
+  outDir: path.join(tmp, 'package-local-gate-out'),
+  focusedCommands: [
+    {
+      name: 'scope=package:worker-runner test',
+      command: process.execPath,
+      args: ['-e', packageLocalGateScript('worker-runner', 'new\n', 'shared-core')],
+      cwd: 'packages/worker-runner',
+      metadata: { packageId: 'worker-runner', packagePath: 'packages/worker-runner', verificationScope: 'package-local' }
+    },
+    {
+      name: 'scope=package:shared-core test',
+      command: process.execPath,
+      args: ['-e', packageLocalGateScript('shared-core', 'core\n')],
+      cwd: 'packages/shared-core',
+      metadata: { packageId: 'shared-core', packagePath: 'packages/shared-core', verificationScope: 'package-local' }
+    }
+  ],
+  globalCommands: [{
+    name: 'scope=repo root test',
+    command: process.execPath,
+    args: ['-e', 'process.exit(42)'],
+    metadata: { verificationScope: 'repo' }
+  }],
+  globalGlobs: ['docs/**']
+});
+assert.strictEqual(packageLocalGateResult.ok, true);
+assert.strictEqual(packageLocalGateResult.summary.applied, 1);
+assert.deepStrictEqual(packageLocalGateResult.decisions[0].verification.names, [
+  'scope=package:shared-core test',
+  'scope=package:worker-runner test'
+]);
+assert.deepStrictEqual(packageLocalGateResult.decisions[0].finalGateSummary.gates.map((gate) => ({
+  name: gate.name,
+  required: gate.required,
+  status: gate.status
+})), [
+  { name: 'scope=package:shared-core test', required: true, status: 'passed' },
+  { name: 'scope=package:worker-runner test', required: true, status: 'passed' }
+]);
+assert.strictEqual(await fs.readFile(packageLocalGateLog, 'utf8'), 'shared-core\nworker-runner\n');
+assert.strictEqual(await fs.readFile(path.join(packageLocalGateRepo, 'packages', 'worker-runner', 'src', 'apply.ts'), 'utf8'), 'new\n');
+const packageLocalGateArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'package-local-gate-out', 'autonomous-apply.json'), 'utf8'));
+assert.deepStrictEqual(packageLocalGateArtifact.finalGateSummary.gates.map((gate) => gate.name), [
+  'scope=package:shared-core test',
+  'scope=package:worker-runner test'
+]);
+assert.ok(!packageLocalGateArtifact.finalGateSummary.gates.some((gate) => gate.name === 'scope=repo root test'));
+assert.deepStrictEqual(packageLocalGateArtifact.decisions[0].changedPaths, ['packages/worker-runner/src/apply.ts']);
+assert.deepStrictEqual(packageLocalGateArtifact.decisions[0].lockKeys, ['region:packages/worker-runner/src/apply.ts#apply']);
+
 const autonomousHumanQuestionRepo = await createApplyFixtureRepo(tmp, 'autonomous-human-question-repo');
 const autonomousHumanQuestionCollection = path.join(tmp, 'autonomous-human-question-collection');
 const autonomousHumanQuestionDir = path.join(autonomousHumanQuestionCollection, 'ready-to-apply', 'human-question-job');

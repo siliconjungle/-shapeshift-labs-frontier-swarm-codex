@@ -215,6 +215,12 @@ npm install @shapeshift-labs/frontier-swarm-codex
 
 `@shapeshift-labs/frontier-swarm-codex` keeps `@shapeshift-labs/frontier-swarm` as an exact semver dependency so package metadata remains publishable. Local package tests run `npm run test:local-deps` before build and typecheck; that guard checks the declared version against the adjacent `packages/frontier-swarm` package and fails when a package-local install would resolve to a registry copy. The full smoke test repeats the guard after `build.mjs` has relinked local Frontier dependencies and requires resolution to land on the adjacent `packages/frontier-swarm` candidate. Build scripts also take a per-package `node_modules/.cache/frontier-package-dist.lock` while deleting, rebuilding, or typechecking against local package `dist` declarations. This keeps autonomous package gates from typechecking through an adjacent package while another gate is recreating its `dist` directory; set `FRONTIER_PACKAGE_DIST_LOCK_TIMEOUT_MS` only when a queue needs a longer wait for large local builds. Do not replace the dependency with `workspace:`, `file:`, or `link:` unless the release tooling is updated to rewrite those specifiers before publish.
 
+## Autonomous Gate Scope
+
+Coordinator apply gates should be as narrow as the changed package surface. For package-local changes, pass package-local focused commands and make the scope visible in the gate name, for example `scope=package:frontier-swarm test` or `scope=package:frontier-swarm-codex test`. API callers can also include `metadata.packageId`, `metadata.packageName`, or `metadata.packagePath`; when `config/release-train.json` is available, autonomous apply uses that package catalog to order selected package gates by dependency before running them. The selection stays repository-generic because package ids, names, paths, and dependencies come from command metadata and the package catalog rather than from a special-case coordinator API.
+
+`globalCommands` are reserved for gates that should run only when their `globalGlobs` match the bundle's changed paths. If a bundle only touches `packages/frontier-swarm/**` or `packages/frontier-swarm-codex/**`, the coordinator can pass the matching package-local command set and leave broad repository gates out. The resulting `autonomous-apply.json` and decision log record the selected gate names and commands under `finalGateSummary.gates[]`, so apply reviewers can see whether the decision ran a package-local or repository-wide scope.
+
 ## CLI
 
 ```sh
