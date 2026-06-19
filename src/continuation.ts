@@ -13,21 +13,12 @@ import {
   type FrontierSwarmModelRoutingPolicyInput,
   type FrontierSwarmTaskInput
 } from '@shapeshift-labs/frontier-swarm';
-import {
-  FRONTIER_SWARM_CODEX_CONTINUATION_KIND,
-  FRONTIER_SWARM_CODEX_CONTINUATION_VERSION
-} from './constants.js';
+import { FRONTIER_SWARM_CODEX_CONTINUATION_KIND, FRONTIER_SWARM_CODEX_CONTINUATION_VERSION } from './constants.js';
 import { uniqueStrings } from './common.js';
 import { collectCodexSwarmRun } from './collect.js';
-import {
-  readContinuationChildBacklogs,
-  resolveContinuationChildBacklogNames
-} from './continuation-child-backlogs.js';
-import {
-  createContinuationFeedback,
-  createContinuationRoutingCostSummary,
-  createContinuationTournamentSummary
-} from './continuation-feedback.js';
+import { readContinuationChildBacklogs, resolveContinuationChildBacklogNames } from './continuation-child-backlogs.js';
+import { createContinuationFeedback, createContinuationRoutingCostSummary, createContinuationTournamentSummary } from './continuation-feedback.js';
+import { createContinuationHumanActionState } from './continuation-human-actions.js';
 import { projectContinuationTerminalOutcomes } from './continuation-terminal-outcomes.js';
 import { coerceCodexSwarmTasksInput, createCodexSwarmPlan } from './index.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
@@ -54,6 +45,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
       childBacklogPaths: childBacklogs.map((entry) => entry.path)
     }
   });
+  const humanActionState = await createContinuationHumanActionState({ continuation: input, cwd, outDir, collection, generatedAt });
   const feedback = createContinuationFeedback({
     collection,
     repository: input.repository ?? path.basename(cwd),
@@ -93,6 +85,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     backlog: nextBacklog,
     tasks: planTasks,
     collection,
+    answeredHumanActions: humanActionState.answeredActions,
     generatedAt
   });
   const nextPlan = manifest ? createCodexSwarmPlan({
@@ -122,6 +115,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
   await fs.mkdir(path.dirname(routingPolicyPath), { recursive: true });
   await fs.writeFile(backlogPath, JSON.stringify(projected.backlog, null, 2) + '\n');
   await fs.writeFile(routingPolicyPath, JSON.stringify(nextRoutingPolicy, null, 2) + '\n');
+  await fs.writeFile(humanActionState.statePath, JSON.stringify(humanActionState, null, 2) + '\n');
   if (nextPlan && nextPlanPath) await fs.writeFile(nextPlanPath, JSON.stringify(nextPlan, null, 2) + '\n');
   const result: FrontierCodexContinuationResult = {
     kind: FRONTIER_SWARM_CODEX_CONTINUATION_KIND,
@@ -134,12 +128,15 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     ...(collection?.runDir ? { runDir: collection.runDir } : {}),
     backlogPath,
     routingPolicyPath,
+    humanActionStatePath: humanActionState.statePath,
     ...(nextPlanPath ? { nextPlanPath } : {}),
     childBacklogNames,
     childBacklogPaths,
     feedbackCount: feedback.length,
     nextBacklog: projected.backlog,
     nextRoutingPolicy,
+    humanActions: humanActionState.actions,
+    humanAnswers: humanActionState.answers,
     ...(nextPlan ? { nextPlan } : {}),
     summary: {
       childBacklogCount: childBacklogs.length,
@@ -148,6 +145,11 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
       totalRoutingFeedbackCount: nextRoutingPolicy.feedback.length,
       backlogEntryCount: projected.backlog.entries.length,
       terminalOutcomeProjection: projected.summary,
+      humanActions: {
+        ...humanActionState.summary,
+        answerPaths: humanActionState.answerPaths,
+        statePath: humanActionState.statePath
+      },
       routingPreferenceCount: nextRoutingPolicy.preferences.length,
       routingPreferences: {
         defaultMode: nextRoutingPolicy.defaultMode,
@@ -185,6 +187,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
         ...(collection?.runDir ? { runDir: collection.runDir } : {}),
         backlogPath,
         routingPolicyPath,
+        humanActionStatePath: humanActionState.statePath,
         ...(nextPlanPath ? { nextPlanPath } : {}),
         childBacklogPaths
       }
@@ -224,16 +227,10 @@ async function readContinuationCollection(collectionPath: string, cwd: string): 
 
 async function readContinuationBacklog(input: FrontierCodexContinuationInput, cwd: string): Promise<FrontierSwarmBacklog> {
   const raw = await readOptionalJsonPath(input.backlogPath, cwd, input.backlog);
-  return raw ? createSwarmBacklog(raw as FrontierSwarmBacklogInput) : createSwarmBacklog({
-    id: 'swarm-backlog:continuation',
-    title: 'Continuation Backlog'
-  });
+  return raw ? createSwarmBacklog(raw as FrontierSwarmBacklogInput) : createSwarmBacklog({ id: 'swarm-backlog:continuation', title: 'Continuation Backlog' });
 }
 
-async function readContinuationRoutingPolicy(
-  input: FrontierCodexContinuationInput,
-  cwd: string
-): Promise<FrontierSwarmModelRoutingPolicyInput | FrontierSwarmModelRoutingPolicy | undefined> {
+async function readContinuationRoutingPolicy(input: FrontierCodexContinuationInput, cwd: string): Promise<FrontierSwarmModelRoutingPolicyInput | FrontierSwarmModelRoutingPolicy | undefined> {
   return readOptionalJsonPath(input.routingPolicyPath, cwd, input.routingPolicy) as Promise<FrontierSwarmModelRoutingPolicyInput | FrontierSwarmModelRoutingPolicy | undefined>;
 }
 

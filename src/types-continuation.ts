@@ -27,6 +27,9 @@ export interface FrontierCodexContinuationInput {
   backlogPath?: string;
   routingPolicy?: FrontierSwarmModelRoutingPolicyInput | FrontierSwarmModelRoutingPolicy | unknown;
   routingPolicyPath?: string;
+  humanAnswers?: unknown;
+  humanAnswersPath?: string;
+  humanAnswerPaths?: readonly string[];
   manifest?: unknown;
   manifestPath?: string;
   tasks?: unknown;
@@ -51,12 +54,15 @@ export interface FrontierCodexContinuationResult {
   runDir?: string;
   backlogPath: string;
   routingPolicyPath: string;
+  humanActionStatePath: string;
   nextPlanPath?: string;
   childBacklogNames: string[];
   childBacklogPaths: string[];
   feedbackCount: number;
   nextBacklog: FrontierSwarmBacklog;
   nextRoutingPolicy: FrontierSwarmModelRoutingPolicy;
+  humanActions: Record<string, unknown>[];
+  humanAnswers: Record<string, unknown>[];
   nextPlan?: FrontierSwarmPlan;
   summary: {
     childBacklogCount: number;
@@ -74,6 +80,17 @@ export interface FrontierCodexContinuationResult {
       blockedEntryCount: number;
       blockedTaskCount: number;
       decisionCount: number;
+      answeredHumanBlockerEntryCount: number;
+      answeredHumanBlockerTaskCount: number;
+    };
+    humanActions: {
+      actionCount: number;
+      answerCount: number;
+      answeredActionCount: number;
+      openActionCount: number;
+      unresolvedAnswerCount: number;
+      answerPaths: string[];
+      statePath: string;
     };
     routingPreferenceCount: number;
     routingPreferences: {
@@ -129,6 +146,7 @@ export interface FrontierCodexContinuationResult {
       runDir?: string;
       backlogPath: string;
       routingPolicyPath: string;
+      humanActionStatePath: string;
       nextPlanPath?: string;
       childBacklogPaths: string[];
     };

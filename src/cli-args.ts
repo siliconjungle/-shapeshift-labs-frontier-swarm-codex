@@ -91,6 +91,7 @@ export function continuationInputFromRunArgs(args: CliArgs, runDir: string) {
     branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
     backlogPath: stringArg(args.backlog),
     routingPolicyPath: stringArg(args.routingPolicy ?? args['routing-policy']),
+    humanAnswersPath: stringArg(args.humanAnswers ?? args['human-answers'] ?? args.humanActionAnswers ?? args['human-action-answers']),
     manifestPath: stringArg(args.manifest),
     tasksPath: stringArg(args.tasks),
     routingMode: routingModeArg(args.routingMode ?? args['routing-mode']),

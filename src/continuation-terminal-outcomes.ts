@@ -7,6 +7,7 @@ import {
   type FrontierSwarmTaskInput
 } from '@shapeshift-labs/frontier-swarm';
 import { uniqueStrings } from './common.js';
+import { humanActionSubjectAliases } from './human-actions.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
 
 export interface ContinuationTerminalOutcomeProjection {
@@ -21,6 +22,8 @@ export interface ContinuationTerminalOutcomeProjection {
     reviewTaskCount: number;
     blockedEntryCount: number;
     blockedTaskCount: number;
+    answeredHumanBlockerEntryCount: number;
+    answeredHumanBlockerTaskCount: number;
     decisionCount: number;
   };
 }
@@ -29,6 +32,7 @@ export function projectContinuationTerminalOutcomes(input: {
   backlog: FrontierSwarmBacklog;
   tasks: readonly FrontierSwarmTaskInput[];
   collection?: FrontierCodexCollectResult;
+  answeredHumanActions?: readonly Record<string, unknown>[];
   generatedAt: number;
 }): ContinuationTerminalOutcomeProjection {
   const model = input.collection?.queueOutcomeModel;
@@ -40,8 +44,9 @@ export function projectContinuationTerminalOutcomes(input: {
     };
   }
   const decisionsByAlias = latestDecisionsByAlias(model);
-  const entries = input.backlog.entries.map((entry) => projectBacklogEntry(entry, decisionsByAlias, input.generatedAt));
-  const projectedTasks = input.tasks.map((task) => projectTaskInput(task, decisionsByAlias, input.generatedAt));
+  const answeredAliases = answeredHumanActionAliases(input.answeredHumanActions ?? []);
+  const entries = input.backlog.entries.map((entry) => projectBacklogEntry(entry, decisionsByAlias, input.generatedAt, answeredAliases));
+  const projectedTasks = input.tasks.map((task) => projectTaskInput(task, decisionsByAlias, input.generatedAt, answeredAliases));
   const tasks = projectedTasks.filter((task) => !taskClosedByTerminalProjection(task));
   const summary = summarizeProjection(input.backlog.entries, entries, input.tasks, projectedTasks, model);
   return {
@@ -75,11 +80,13 @@ function latestDecisionsByAlias(model: FrontierSwarmQueueOutcomeModel): Map<stri
 function projectBacklogEntry(
   entry: FrontierSwarmBacklogEntry,
   decisionsByAlias: ReadonlyMap<string, FrontierSwarmQueueOutcomeDecision>,
-  generatedAt: number
+  generatedAt: number,
+  answeredAliases: ReadonlySet<string>
 ): FrontierSwarmBacklogEntry {
-  const decision = decisionForAliases(entryAliases(entry), decisionsByAlias);
+  const aliases = entryAliases(entry);
+  const decision = decisionForAliases(aliases, decisionsByAlias);
   if (!decision) return entry;
-  const projection = projectionForDecision(decision);
+  const projection = projectionForDecision(decision, aliases, answeredAliases);
   return {
     ...entry,
     status: projection.status,
@@ -94,11 +101,13 @@ function projectBacklogEntry(
 function projectTaskInput(
   task: FrontierSwarmTaskInput,
   decisionsByAlias: ReadonlyMap<string, FrontierSwarmQueueOutcomeDecision>,
-  generatedAt: number
+  generatedAt: number,
+  answeredAliases: ReadonlySet<string>
 ): FrontierSwarmTaskInput {
-  const decision = decisionForAliases(taskAliases(task), decisionsByAlias);
+  const aliases = taskAliases(task);
+  const decision = decisionForAliases(aliases, decisionsByAlias);
   if (!decision) return task;
-  const projection = projectionForDecision(decision);
+  const projection = projectionForDecision(decision, aliases, answeredAliases);
   return {
     ...task,
     status: projection.status,
@@ -128,10 +137,18 @@ function decisionForAliases(
   return latest;
 }
 
-function projectionForDecision(decision: FrontierSwarmQueueOutcomeDecision): { status: string; tags: string[] } {
+function projectionForDecision(
+  decision: FrontierSwarmQueueOutcomeDecision,
+  aliases: readonly string[],
+  answeredAliases: ReadonlySet<string>
+): { status: string; tags: string[] } {
   if (decision.outcome === 'rerun') return { status: 'ready', tags: ['terminal:rerun'] };
   if (decision.outcome === 'needs-port' || decision.coordinatorReview) return { status: 'coordinator-review', tags: ['terminal:coordinator-review'] };
-  if (decision.outcome === 'human-question' || decision.humanBlocked) return { status: 'blocked', tags: ['terminal:human-question'] };
+  if (decision.outcome === 'human-question' || decision.humanBlocked) {
+    return aliases.some((alias) => answeredAliases.has(alias))
+      ? { status: 'ready', tags: ['terminal:human-question', 'human-answer:answered'] }
+      : { status: 'blocked', tags: ['terminal:human-question'] };
+  }
   if (decision.outcome === 'conflict-blocked' || decision.conflict) return { status: 'blocked', tags: ['terminal:conflict'] };
   if (decision.outcome === 'rejected') return { status: 'rejected', tags: ['terminal:rejected'] };
   if (decision.outcome === 'ready') return { status: 'ready', tags: ['terminal:ready'] };
@@ -166,8 +183,14 @@ function summarizeProjection(
     reviewTaskCount: countChangedTo(beforeTasks, afterTasks, (status) => status === 'coordinator-review'),
     blockedEntryCount: countChangedTo(beforeEntries, afterEntries, (status) => status === 'blocked'),
     blockedTaskCount: countChangedTo(beforeTasks, afterTasks, (status) => status === 'blocked'),
+    answeredHumanBlockerEntryCount: countMatching(afterEntries, (status, tags) => status === 'ready' && tags.includes('human-answer:answered')),
+    answeredHumanBlockerTaskCount: countMatching(afterTasks, (status, tags) => status === 'ready' && tags.includes('human-answer:answered')),
     decisionCount: model.summary.latestDecisionCount
   };
+}
+
+function answeredHumanActionAliases(actions: readonly Record<string, unknown>[]): Set<string> {
+  return new Set(actions.flatMap(humanActionSubjectAliases));
 }
 
 function countChangedTo<T extends { status?: string; tags?: readonly string[] }>(
@@ -181,6 +204,13 @@ function countChangedTo<T extends { status?: string; tags?: readonly string[] }>
     if (predicate(after[index]?.status, after[index]?.tags ?? [])) count += 1;
   }
   return count;
+}
+
+function countMatching<T extends { status?: string; tags?: readonly string[] }>(
+  items: readonly T[],
+  predicate: (status: string | undefined, tags: readonly string[]) => boolean
+): number {
+  return items.filter((item) => predicate(item.status, item.tags ?? [])).length;
 }
 
 function entryAliases(entry: FrontierSwarmBacklogEntry): string[] {
@@ -209,6 +239,8 @@ function emptyTerminalOutcomeProjectionSummary(): ContinuationTerminalOutcomePro
     reviewTaskCount: 0,
     blockedEntryCount: 0,
     blockedTaskCount: 0,
+    answeredHumanBlockerEntryCount: 0,
+    answeredHumanBlockerTaskCount: 0,
     decisionCount: 0
   };
 }

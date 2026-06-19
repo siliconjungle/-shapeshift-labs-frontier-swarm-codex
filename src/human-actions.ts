@@ -4,10 +4,31 @@ import type { FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
 import { isObject, pathExists, stableHash, uniqueStrings } from './common.js';
 
 const HUMAN_ACTION_FILES = ['human-question.json', 'human-questions.json'];
+const HUMAN_ANSWER_FILES = ['human-action-answers.jsonl', 'human-action-answers.json', 'human-answers.jsonl', 'human-answers.json'];
 
 export interface FrontierCodexHumanActionReadResult {
   paths: string[];
   actions: Record<string, unknown>[];
+}
+
+export interface FrontierCodexHumanActionAnswerReadResult {
+  paths: string[];
+  answers: Record<string, unknown>[];
+}
+
+export interface FrontierCodexResolvedHumanActions {
+  actions: Record<string, unknown>[];
+  answers: Record<string, unknown>[];
+  answeredActions: Record<string, unknown>[];
+  openActions: Record<string, unknown>[];
+  unansweredActions: Record<string, unknown>[];
+  summary: {
+    actionCount: number;
+    answerCount: number;
+    answeredActionCount: number;
+    openActionCount: number;
+    unresolvedAnswerCount: number;
+  };
 }
 
 export async function readCodexHumanActionArtifacts(input: {
@@ -33,6 +54,32 @@ export async function readCodexHumanActionArtifacts(input: {
   return { paths: uniqueStrings(paths), actions };
 }
 
+export async function readCodexHumanActionAnswerArtifacts(input: {
+  cwd: string;
+  generatedAt: number;
+  answers?: unknown;
+  answerPath?: string;
+  answerPaths?: readonly string[];
+  roots?: readonly (string | undefined)[];
+}): Promise<FrontierCodexHumanActionAnswerReadResult> {
+  const answers: Record<string, unknown>[] = [];
+  const paths: string[] = [];
+  answers.push(...normalizeHumanActionAnswers(input.answers, { generatedAt: input.generatedAt }));
+  const candidates = uniqueStrings([
+    input.answerPath,
+    ...(input.answerPaths ?? []),
+    ...(input.roots ?? []).flatMap((root) => root ? HUMAN_ANSWER_FILES.map((name) => path.join(root, name)) : [])
+  ].filter((entry): entry is string => !!entry));
+  for (const candidate of candidates) {
+    const file = path.resolve(input.cwd, candidate);
+    if (!await pathExists(file)) continue;
+    const parsed = await readHumanAnswerFile(file);
+    paths.push(file);
+    answers.push(...normalizeHumanActionAnswers(parsed, { generatedAt: input.generatedAt, file }));
+  }
+  return { paths: uniqueStrings(paths), answers };
+}
+
 export function humanActionsFromMergeBundles(bundles: readonly FrontierSwarmMergeBundle[]): Record<string, unknown>[] {
   return bundles.flatMap((bundle) => {
     const metadata = isObject(bundle.metadata) ? bundle.metadata : {};
@@ -47,10 +94,102 @@ export function humanActionsFromMergeBundles(bundles: readonly FrontierSwarmMerg
   });
 }
 
+export function humanActionsFromDashboard(value: unknown): Record<string, unknown>[] {
+  const dashboard = isObject(value) ? value : {};
+  const metadata = isObject(dashboard.metadata) ? dashboard.metadata : {};
+  return [
+    ...humanActionRecords(dashboard.humanActions),
+    ...humanActionRecords(metadata.humanActions)
+  ];
+}
+
+export function resolveCodexHumanActions(input: {
+  actions: unknown;
+  answers: unknown;
+  generatedAt: number;
+}): FrontierCodexResolvedHumanActions {
+  const actions = humanActionRecords(input.actions);
+  const answers = normalizeHumanActionAnswers(input.answers, { generatedAt: input.generatedAt });
+  const answerKeys = new Map<string, Record<string, unknown>>();
+  for (const answer of answers) {
+    for (const key of humanActionRecordKeys(answer)) answerKeys.set(key, answer);
+  }
+  const usedAnswerIds = new Set<string>();
+  const resolved = actions.map((action) => {
+    const answer = firstMatchingAnswer(action, answerKeys);
+    if (!answer) return action;
+    const answerId = stringValue(answer.id) ?? stringValue(answer.code) ?? stableHash(answer);
+    usedAnswerIds.add(answerId);
+    return {
+      ...action,
+      status: stringValue(answer.status) ?? 'answered',
+      answer: stringValue(answer.answer) ?? stringValue(answer.text) ?? stringValue(answer.value) ?? '',
+      answeredAt: timestampValue(answer.answeredAt) ?? input.generatedAt,
+      resolution: stringValue(answer.resolution) ?? stringValue(answer.answer) ?? stringValue(answer.text) ?? stringValue(answer.value) ?? 'answered',
+      humanAnswer: answer
+    };
+  });
+  const answeredActions = resolved.filter((action) => isObject(action.humanAnswer));
+  const openActions = resolved.filter((action) => humanActionIsOpen(action));
+  return {
+    actions: resolved,
+    answers,
+    answeredActions,
+    openActions,
+    unansweredActions: openActions,
+    summary: {
+      actionCount: resolved.length,
+      answerCount: answers.length,
+      answeredActionCount: answeredActions.length,
+      openActionCount: openActions.length,
+      unresolvedAnswerCount: answers.filter((answer) => !usedAnswerIds.has(stringValue(answer.id) ?? stringValue(answer.code) ?? stableHash(answer))).length
+    }
+  };
+}
+
+export function humanActionSubjectAliases(action: Record<string, unknown>): string[] {
+  const taskId = stringValue(action.taskId);
+  const jobId = stringValue(action.jobId);
+  return uniqueStrings([
+    taskId,
+    taskId ? `task:${taskId}` : undefined,
+    taskId ? `queue:${taskId}` : undefined,
+    jobId,
+    jobId ? `job:${jobId}` : undefined
+  ].filter((entry): entry is string => !!entry));
+}
+
+async function readHumanAnswerFile(file: string): Promise<unknown> {
+  const text = await fs.readFile(file, 'utf8');
+  if (file.endsWith('.jsonl')) {
+    return text.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line) as unknown);
+  }
+  return JSON.parse(text) as unknown;
+}
+
 function humanActionRecords(value: unknown): Record<string, unknown>[] {
   if (Array.isArray(value)) return value.filter(isObject);
   if (isObject(value) && Array.isArray(value.actions)) return value.actions.filter(isObject);
   return isObject(value) ? [value] : [];
+}
+
+function normalizeHumanActionAnswers(value: unknown, context: { generatedAt: number; file?: string }): Record<string, unknown>[] {
+  return humanActionRecords(value).map((record, index) => {
+    const code = stringValue(record.code) ?? stringValue(record.actionCode);
+    const actionId = stringValue(record.actionId) ?? stringValue(record.humanActionId);
+    const id = stringValue(record.id) ?? (code ? `human-answer:${code}` : actionId ? `human-answer:${actionId}` : `human-answer:${stableHash([record, index])}`);
+    return {
+      kind: 'human-answer',
+      source: 'human',
+      status: stringValue(record.status) ?? 'answered',
+      ...record,
+      id,
+      ...(code ? { code } : {}),
+      ...(actionId ? { actionId } : {}),
+      answeredAt: timestampValue(record.answeredAt) ?? context.generatedAt,
+      ...(context.file ? { evidencePath: context.file } : {})
+    };
+  });
 }
 
 function normalizeHumanActionRecord(
@@ -96,4 +235,38 @@ function stringValue(value: unknown): string | undefined {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function firstMatchingAnswer(action: Record<string, unknown>, answers: ReadonlyMap<string, Record<string, unknown>>): Record<string, unknown> | undefined {
+  for (const key of humanActionRecordKeys(action)) {
+    const answer = answers.get(key);
+    if (answer) return answer;
+  }
+  return undefined;
+}
+
+function humanActionRecordKeys(record: Record<string, unknown>): string[] {
+  const code = stringValue(record.code) ?? stringValue(record.actionCode);
+  const id = stringValue(record.id);
+  const actionId = stringValue(record.actionId) ?? stringValue(record.humanActionId);
+  return uniqueStrings([
+    code ? `code:${code}` : undefined,
+    id ? `id:${id}` : undefined,
+    actionId ? `id:${actionId}` : undefined,
+    actionId ? `action:${actionId}` : undefined
+  ].filter((entry): entry is string => !!entry));
+}
+
+function humanActionIsOpen(action: Record<string, unknown>): boolean {
+  const status = stringValue(action.status)?.toLowerCase();
+  if (status === 'answered' || status === 'resolved' || status === 'dismissed' || status === 'cancelled' || status === 'closed') return false;
+  if (stringValue(action.answer) || stringValue(action.resolution) || timestampValue(action.answeredAt) || timestampValue(action.resolvedAt)) return false;
+  return true;
+}
+
+function timestampValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

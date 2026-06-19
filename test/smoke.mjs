@@ -28,6 +28,7 @@ import { testContinuation } from './smoke/continuation.mjs';
 import { testContinuationRoutingCost } from './smoke/continuation-routing-cost.mjs';
 import { testDashboardUi } from './smoke/dashboard-ui.mjs';
 import { testHumanActionArtifacts } from './smoke/human-actions.mjs';
+import { testHumanActionAnswers } from './smoke/human-action-answers.mjs';
 import './smoke/collection-noise.mjs';
 import './smoke/workspace-lockdown.mjs';
 
@@ -47,6 +48,7 @@ const continuation = await testContinuation(context, collectionDir);
 await testContinuationRoutingCost(context, collectionDir);
 await testDashboardUi(context, collectionDir, continuation);
 await testHumanActionArtifacts(context);
+await testHumanActionAnswers(context);
 await testArtifactArchiveCompaction(context, collectionDir);
 await testTournamentCli(context);
 await testSemanticImportQuality(context, mergeBundle);
