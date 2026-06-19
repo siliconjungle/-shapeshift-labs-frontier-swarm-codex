@@ -136,5 +136,7 @@ scorePromise.then((score) => {
   const proofFailures: number | undefined = score.entries[0]?.semanticEvidence.proofSpecFailedObligations;
   const paradigmRecords: number | undefined = score.entries[0]?.semanticEvidence.paradigmSemanticsRecords;
   const lineageEvents: number | undefined = score.entries[0]?.semanticEvidence.semanticLineageEvents;
+  const dependencyEdges: string[] | undefined = score.entries[0]?.semanticEvidence.dependencyEdges;
+  dependencyEdges?.forEach((edge) => edge satisfies string);
   return (proofFailures ?? 0) + (paradigmRecords ?? 0) + (lineageEvents ?? 0);
 });

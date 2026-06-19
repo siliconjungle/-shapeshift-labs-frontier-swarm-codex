@@ -19,6 +19,7 @@ export interface FrontierCodexSemanticImportRecord {
   status: 'imported' | 'skipped' | 'error';
   reason?: string;
   bytes?: number;
+  dependencyEdges?: string[];
   baseSource?: {
     path: string;
     source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head';
@@ -228,6 +229,7 @@ export interface FrontierCodexSemanticImportSidecar {
     };
     semanticFacts: FrontierCodexSemanticFactSummary;
     dependencies: FrontierCodexSemanticDependencySummary;
+    dependencyEdges: string[];
     semanticSidecars: {
       total: number;
       symbols: number;
@@ -295,6 +297,7 @@ export interface FrontierCodexSemanticImportQuality {
   semanticFactSummary: Record<string, number>;
   dependencyRelations: number;
   dependencyPredicates: string[];
+  dependencyEdges: string[];
   sourceMapMappings: number;
   universalAstLayers: number;
   universalAstLayerNames: string[];

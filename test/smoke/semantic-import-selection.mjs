@@ -139,12 +139,13 @@ async function testCopiedWorkspacePackageSubdirSemanticImport(plan, tmp) {
       const runtimeDir = path.join(input.workspacePath, 'packages/domain/src/runtime');
       await fs.mkdir(runtimeDir, { recursive: true });
       await fs.writeFile(path.join(runtimeDir, 'action.ts'), 'export function action() { return 1; }\n');
+      await fs.writeFile(path.join(runtimeDir, 'generated.ts'), 'export const generated = 1;\n');
       await fs.writeFile(path.join(runtimeDir, 'secondary.ts'), 'export function secondary() { return 1; }\n');
       await fs.writeFile(path.join(runtimeDir, 'action.test.ts'), 'export const testValue = 1;\n');
     },
     executor: async (input) => {
       const runtimeDir = path.join(input.workspacePath, 'packages/domain/src/runtime');
-      await fs.writeFile(path.join(runtimeDir, 'action.ts'), 'export function helper() { return 2; }\nexport function action() { return helper(); }\n');
+      await fs.writeFile(path.join(runtimeDir, 'action.ts'), "import './generated.ts';\nexport function helper() { return 2; }\nexport function action() { return helper(); }\n");
       await fs.writeFile(path.join(runtimeDir, 'secondary.ts'), 'export function secondary() { return 2; }\n');
       await fs.writeFile(path.join(runtimeDir, 'action.test.ts'), 'export const testValue = 2;\n');
       await fs.writeFile(input.paths.lastMessagePath, 'copy semantic import done\n');
@@ -169,6 +170,10 @@ async function testCopiedWorkspacePackageSubdirSemanticImport(plan, tmp) {
   assert.strictEqual(semanticImports.summary.imported, 1);
   assert.strictEqual(semanticImports.records[0].path, 'packages/domain/src/runtime/action.ts');
   assert.strictEqual(semanticImports.records[0].language, 'typescript');
+  assert.ok(Array.isArray(semanticImports.records[0].dependencyEdges));
+  assert.ok(semanticImports.records[0].dependencyEdges.includes('import:./generated.ts'));
+  assert.ok(Array.isArray(semanticImports.summary.dependencyEdges));
+  assert.ok(semanticImports.summary.dependencyEdges.includes('import:./generated.ts'));
   await testCopiedWorkspaceEmptyChangedPathsFallback(copyPlan, tmp);
 }
 

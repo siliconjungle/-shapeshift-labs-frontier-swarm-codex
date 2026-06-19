@@ -29,6 +29,7 @@ export function createSemanticImportSidecar(
   const dependencies = mergeDependencySummaries(records
     .map((record) => record.dependencies)
     .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined));
+  const dependencyEdges = uniqueStrings(records.flatMap((record) => readStringArray(record.dependencyEdges))).slice(0, 48);
   const semanticFacts = mergeSemanticFactSummaries(records.map((record) => record.semanticFacts));
   const semanticSidecars = records.reduce((totals, record) => {
     const summary = record.semanticSidecar as { symbols?: number; ownershipRegions?: number; patchHints?: number; emptySemanticIndex?: boolean } | undefined;
@@ -144,6 +145,7 @@ export function createSemanticImportSidecar(
       semanticIndex,
       semanticFacts,
       dependencies,
+      dependencyEdges,
       semanticSidecars,
       universalAstLayers,
       proofSpec,

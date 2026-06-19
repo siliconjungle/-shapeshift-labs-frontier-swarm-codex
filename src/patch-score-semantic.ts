@@ -41,6 +41,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
       semanticFactSummary: {},
       dependencyRelations: 0,
       dependencyPredicates: [],
+      dependencyEdges: [],
       universalAstLayers: 0,
       universalAstLayerNames: [],
       proofSpecObligations: 0,
@@ -84,6 +85,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   const semanticFacts = semanticImportFactSummary(summary);
   const dependencyRelations = nonNegativeNumber((summary as { dependencies?: { total?: number } }).dependencies?.total);
   const dependencyPredicates = uniqueStrings(((summary as { dependencies?: { predicates?: readonly string[] } }).dependencies?.predicates ?? []).map(String));
+  const dependencyEdges = uniqueStrings(((summary as { dependencyEdges?: readonly string[] }).dependencyEdges ?? []).map(String));
   const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
   const universalAstLayers = universalAstLayerSummary.total;
   const universalAstLayerNames = universalAstLayerSummary.names;
@@ -257,6 +259,10 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
   }
   if (patchHints > 0) scoreAdjustment += 5;
   if (dependencyRelations > 0) scoreAdjustment += 3;
+  if (dependencyEdges.some((edge) => edge.startsWith('namespace-export:') || edge.startsWith('re-export:'))) {
+    reasons.push('semantic dependency edge changes public exports');
+    scoreAdjustment -= 3;
+  }
   if (semanticFacts.total > 0) scoreAdjustment += 2;
   if (proofSpec.discharged > 0 && proofSpec.failed === 0 && proofSpec.stale === 0 && proofSpec.open === 0 && proofSpec.unknown === 0) {
     scoreAdjustment += 5;
@@ -295,6 +301,7 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     semanticFactSummary: semanticFacts.byPredicate,
     dependencyRelations,
     dependencyPredicates,
+    dependencyEdges,
     universalAstLayers,
     universalAstLayerNames,
     proofSpecObligations: proofSpec.obligations,

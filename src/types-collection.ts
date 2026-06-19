@@ -448,6 +448,7 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   semanticFactSummary: Record<string, number>;
   dependencyRelations: number;
   dependencyPredicates: string[];
+  dependencyEdges: string[];
   universalAstLayers: number;
   universalAstLayerNames: string[];
   proofSpecObligations: number;

@@ -215,6 +215,7 @@ export async function createCodexSemanticImportSidecar(input: {
         : Array.isArray(importResult?.universalAst?.sourceMaps)
           ? importResult.universalAst.sourceMaps
           : [];
+      const dependencyEdges = summarizeSemanticDependencyEdges(sourceText);
       const semanticIndex = summarizeSemanticIndex(importResult?.semanticIndex);
       const semanticFacts = mergeSemanticFactSummaries([
         summarizeLangSidecarSemanticFacts(semanticSidecar),
@@ -226,6 +227,7 @@ export async function createCodexSemanticImportSidecar(input: {
         language: file.language,
         status: 'imported',
         bytes: stat.size,
+        ...(dependencyEdges.length > 0 ? { dependencyEdges } : {}),
         ...(baseSource ? { baseSource: summarizeSemanticImportBaseSource(baseSource) } : {}),
         ...(headSource ? { headSource: summarizeSemanticImportHeadSource(headSource) } : {}),
         importId: importResult?.id,
@@ -308,4 +310,27 @@ function summarizeSemanticImportHeadSource(headSource: {
     bytes: headSource.bytes,
     foundBy: headSource.foundBy
   };
+}
+
+function summarizeSemanticDependencyEdges(sourceText: string): string[] {
+  const edges = new Set<string>();
+  const importPattern = /^\s*import(?:\s+type)?(?:[\s\S]*?\s+from\s+|\s+)['"]([^'"]+)['"]/gm;
+  const namespaceExportPattern = /^\s*export\s+\*\s+as\s+[\w$]+\s+from\s+['"]([^'"]+)['"]/gm;
+  const exportFromPattern = /^\s*export\s+(?:\*\s+from|\{[\s\S]*?\}\s+from)\s+['"]([^'"]+)['"]/gm;
+
+  for (const pattern of [importPattern, namespaceExportPattern, exportFromPattern]) {
+    for (let match = pattern.exec(sourceText); match; match = pattern.exec(sourceText)) {
+      const specifier = match[1]?.trim();
+      if (!specifier) continue;
+      edges.add(
+        pattern === importPattern
+          ? `import:${specifier}`
+          : pattern === namespaceExportPattern
+            ? `namespace-export:${specifier}`
+            : `re-export:${specifier}`
+      );
+    }
+  }
+
+  return Array.from(edges).sort();
 }

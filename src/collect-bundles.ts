@@ -478,5 +478,6 @@ function nonActionableFailedEvidenceReason(reason: string): boolean {
     || normalized.includes('no source changes')
     || normalized.includes('non-actionable-worker-output')
     || normalized.includes('failed-output-recorded')
-    || normalized.includes('blocked-output-recorded');
+    || normalized.includes('blocked-output-recorded')
+    || normalized.includes('generated-failed-evidence');
 }
