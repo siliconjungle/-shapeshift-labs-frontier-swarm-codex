@@ -13,12 +13,14 @@ const nextStack = new Set(stack);
 nextStack.add(packageName);
 unlinkSelfPackage(packageName);
 
-for (const dependency of readLocalDependencies(packageJson)) {
-  const targetDir = localPackageDir(dependency);
-  if (!targetDir || targetDir === packageDir) continue;
-  linkLocalPackage(dependency, targetDir);
-  if (!stack.has(dependency) && !isPackageBuildCurrent(targetDir)) {
-    execFileSync('npm', ['--prefix', targetDir, 'run', 'build'], {
+const localDependencies = readLocalDependencies(packageJson)
+  .map((name) => ({ name, targetDir: localPackageDir(name) }))
+  .filter((dependency) => dependency.targetDir && dependency.targetDir !== packageDir);
+
+for (const dependency of localDependencies) {
+  linkLocalPackage(dependency.name, dependency.targetDir);
+  if (!stack.has(dependency.name) && !isPackageBuildCurrent(dependency.targetDir)) {
+    execFileSync('npm', ['--prefix', dependency.targetDir, 'run', 'build'], {
       stdio: 'inherit',
       env: {
         ...process.env,
@@ -28,15 +30,29 @@ for (const dependency of readLocalDependencies(packageJson)) {
   }
 }
 
+const localDependencyDirs = localDependencies.map((dependency) => dependency.targetDir);
+
 if (process.argv.includes('--typecheck')) {
-  runTsc(['-p', path.join(packageDir, 'tsconfig.json'), '--noEmit']);
-  runTsc(['-p', path.join(packageDir, 'test', 'tsconfig.json'), '--noEmit']);
+  const releaseDistLocks = await acquirePackageDistLocks([packageDir, ...localDependencyDirs]);
+  try {
+    assertLocalDependencyBuildsCurrent(localDependencyDirs);
+    runTsc(['-p', path.join(packageDir, 'tsconfig.json'), '--noEmit']);
+    runTsc(['-p', path.join(packageDir, 'test', 'tsconfig.json'), '--noEmit']);
+  } finally {
+    releaseDistLocks();
+  }
   process.exit(0);
 }
 
-fs.rmSync(path.join(packageDir, 'dist'), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-runTsc(['-b', path.join(packageDir, 'tsconfig.json'), '--force']);
-fs.chmodSync(path.join(packageDir, 'dist', 'cli.js'), 0o755);
+const releaseDistLocks = await acquirePackageDistLocks([packageDir, ...localDependencyDirs]);
+try {
+  assertLocalDependencyBuildsCurrent(localDependencyDirs);
+  fs.rmSync(path.join(packageDir, 'dist'), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  runTsc(['-b', path.join(packageDir, 'tsconfig.json'), '--force']);
+  fs.chmodSync(path.join(packageDir, 'dist', 'cli.js'), 0o755);
+} finally {
+  releaseDistLocks();
+}
 
 function readLocalDependencies(pkg) {
   const names = new Set();
@@ -90,6 +106,14 @@ function unlinkSelfPackage(name) {
   }
 }
 
+function assertLocalDependencyBuildsCurrent(targetDirs) {
+  for (const targetDir of targetDirs) {
+    if (isPackageBuildCurrent(targetDir)) continue;
+    const label = path.relative(rootDir, targetDir) || targetDir;
+    throw new Error(`Local dependency ${label} dist is not current after acquiring package dist locks; rerun the package gate so typecheck/build reads stable declarations.`);
+  }
+}
+
 function isPackageBuildCurrent(targetDir) {
   const distEntry = path.join(targetDir, 'dist', 'index.js');
   const distTypes = path.join(targetDir, 'dist', 'index.d.ts');
@@ -103,6 +127,105 @@ function isPackageBuildCurrent(targetDir) {
   const srcDir = path.join(targetDir, 'src');
   if (fs.existsSync(srcDir) && newestMtime(srcDir) > distMtime) return false;
   return true;
+}
+
+async function acquirePackageDistLocks(targetDirs) {
+  const releases = [];
+  const uniqueTargetDirs = Array.from(new Set(targetDirs.map((targetDir) => path.resolve(targetDir)))).sort();
+  try {
+    for (const targetDir of uniqueTargetDirs) releases.push(await acquirePackageDistLock(targetDir));
+  } catch (error) {
+    for (const release of releases.reverse()) release();
+    throw error;
+  }
+  return () => {
+    for (const release of releases.reverse()) release();
+  };
+}
+
+async function acquirePackageDistLock(targetDir) {
+  const cacheDir = path.join(targetDir, 'node_modules', '.cache');
+  const lockDir = path.join(cacheDir, 'frontier-package-dist.lock');
+  const ownerPath = path.join(lockDir, 'owner.json');
+  const timeoutMs = readPositiveIntegerEnv('FRONTIER_PACKAGE_DIST_LOCK_TIMEOUT_MS', 120000);
+  const deadline = Date.now() + timeoutMs;
+  fs.mkdirSync(cacheDir, { recursive: true });
+
+  while (true) {
+    const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try {
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(ownerPath, JSON.stringify({
+        pid: process.pid,
+        token,
+        packageDir: targetDir,
+        argv: process.argv,
+        createdAtMs: Date.now()
+      }, null, 2) + '\n');
+      return () => releasePackageDistLock(lockDir, ownerPath, token);
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (removeStalePackageDistLock(lockDir, ownerPath)) continue;
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for package dist lock at ${lockDir}; another local package gate may still be rebuilding dist.`);
+      }
+      await sleep(50);
+    }
+  }
+}
+
+function releasePackageDistLock(lockDir, ownerPath, token) {
+  try {
+    const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+    if (owner.token !== token) return;
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  fs.rmSync(lockDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
+function removeStalePackageDistLock(lockDir, ownerPath) {
+  const staleMs = readPositiveIntegerEnv('FRONTIER_PACKAGE_DIST_LOCK_STALE_MS', 600000);
+  let owner;
+  try {
+    owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+  } catch {
+    owner = undefined;
+  }
+  if (owner && Number.isInteger(owner.pid) && owner.pid > 0) {
+    if (isPidAlive(owner.pid)) return false;
+    fs.rmSync(lockDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    return true;
+  }
+  let lockMtime = 0;
+  try {
+    lockMtime = fs.statSync(lockDir).mtimeMs;
+  } catch {
+    return false;
+  }
+  const createdAtMs = Number.isFinite(owner?.createdAtMs) ? owner.createdAtMs : lockMtime;
+  if (Date.now() - createdAtMs <= staleMs) return false;
+  fs.rmSync(lockDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  return true;
+}
+
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
+function readPositiveIntegerEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function newestMtime(dir) {

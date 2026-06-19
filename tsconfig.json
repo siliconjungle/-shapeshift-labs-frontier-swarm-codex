@@ -15,7 +15,7 @@
     "skipLibCheck": true,
     "types": ["node"],
     "composite": true,
-    "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
+    "tsBuildInfoFile": "node_modules/.cache/tsconfig.tsbuildinfo",
     "ignoreDeprecations": "6.0"
   },
   "include": ["src/**/*.ts"]

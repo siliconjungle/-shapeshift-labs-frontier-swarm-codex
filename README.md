@@ -4,7 +4,20 @@ Node Codex CLI runner adapter for Frontier swarm plans.
 
 `frontier-swarm-codex` executes `@shapeshift-labs/frontier-swarm` plans with the Codex CLI. It owns Node process spawning, prompt rendering, worktree/snapshot workspace setup, command shaping, JSONL output capture, last-message capture, optional verification commands, changed-path ownership checks, and swarm result/proof artifacts.
 
-The default swarm compute profile records `gpt-5.5` with `model_reasoning_effort="xhigh"` for planning. The Codex CLI invocation defaults to the local Codex config instead of forwarding planned model flags, because model availability and accepted flag values vary by Codex binary and account. Pass `--model ...`, `--model-policy plan`, or `modelPolicy: 'plan'` when a runner should force the planned profile. The pure `frontier-swarm` package stays runtime-neutral.
+The default swarm compute profile records `gpt-5.5` with `model_reasoning_effort="xhigh"` for planning. The Codex CLI invocation defaults to the local Codex config instead of forwarding planned model flags, because model availability and accepted flag values vary by Codex binary and account. Pass `--model ...`, `--model-policy plan`, or `modelPolicy: 'plan'` when a runner should force the planned profile. Use `--model-policy adaptive` or `modelPolicy: 'adaptive'` to let the adapter choose a per-job runtime model from task risk, pricing, hard caps, and optional tournament/RSI feedback artifacts. Forwarded model IDs are validated against the package catalog (`gpt-5.5`, `gpt-5.4-mini`, `o4-mini`, and `gpt-4.1-mini`); unsupported explicit, planned, or adaptive cap model IDs fail before a worker is spawned. The pure `frontier-swarm` package stays runtime-neutral.
+
+By default, a swarm run is self-draining. After workers finish, coordinator-agent drain collects their merge bundles, builds scoped queues, and applies only admitted patches under the repo lock and configured gates. The scalable merge path is: workers produce bundles, coordinator agents lease semantic/path/repo queue scopes, same-scope work serializes locally, cross-scope work promotes upward, and repository mutation happens only through autonomous apply decisions. Dashboard queue counts are pending coordinator work, not landed code, until autonomous apply records an `applied` or `committed` decision. Human blockers are the narrow exception: `operatorSummary.status === "blocked"`, a true-blocker card, or explicit `humanQuestions`.
+
+Continuous pools can ask the package for the next refill instead of editing queue JSON by hand. The refill contract reads desired concurrency, active workers, queued work, generated rerun manifests, and a backlog task set, then emits either `next-task-set` with runnable tasks or an explicit `drained` state. Rerun work is selected before backlog work, and active or already queued task ids are excluded from the next task set.
+
+## Operator Docs
+
+- [Hierarchical merge queues](docs/hierarchical-merge-queues.md): local scoped apply, queue-local overflow, upward promotion, stale reruns, invalid evidence rejection, discovery recording, Loom semantic scopes, and rare true blocker states.
+- [Autonomous operator workflow](docs/autonomous-operator-workflow.md): run the default self-draining path, scale coordinator-agent drain work by queue scope, handle dirty collect-only runs, drain from a clean apply window, and interpret autonomous apply outcomes.
+- [Review debt drain policy](docs/review-debt-drain.md): convert coordinator-review items into terminal decisions instead of open-ended review buckets.
+- [Auto-drain artifact map](docs/auto-drain-artifacts.md): find the machine-readable files behind operator summary cards, queue pressure, promoted patch candidates, apply decisions, and explicit human questions.
+- [Autonomous decision ledger](docs/autonomous-decision-ledger.md): match coordinator-agent drain assignments to append-only apply decisions and distinguish terminal outcomes from queued or promoted coordinator work.
+- [Autonomous lock model](docs/autonomous-lock-model.md): understand the current repo-local mutation lock, recorded semantic/path/repo lock keys, stale-head checks, and the requirements for future finer-grained leases.
 
 
 ## Related Packages
@@ -202,6 +215,16 @@ Package source repositories:
 npm install @shapeshift-labs/frontier-swarm-codex
 ```
 
+## Local Development
+
+`@shapeshift-labs/frontier-swarm-codex` keeps `@shapeshift-labs/frontier-swarm` as an exact semver dependency so package metadata remains publishable. Local package tests run `npm run test:local-deps` before build and typecheck; that guard checks the declared version against the adjacent `packages/frontier-swarm` package and fails when a package-local install would resolve to a registry copy. The full smoke test repeats the guard after `build.mjs` has relinked local Frontier dependencies and requires resolution to land on the adjacent `packages/frontier-swarm` candidate. Build scripts also take a per-package `node_modules/.cache/frontier-package-dist.lock` while deleting, rebuilding, or typechecking against local package `dist` declarations. This keeps autonomous package gates from typechecking through an adjacent package while another gate is recreating its `dist` directory; set `FRONTIER_PACKAGE_DIST_LOCK_TIMEOUT_MS` only when a queue needs a longer wait for large local builds. Do not replace the dependency with `workspace:`, `file:`, or `link:` unless the release tooling is updated to rewrite those specifiers before publish.
+
+## Autonomous Gate Scope
+
+Coordinator apply gates should be as narrow as the changed package surface. For package-local changes, pass package-local focused commands and make the scope visible in the gate name, for example `scope=package:frontier-swarm test` or `scope=package:frontier-swarm-codex test`. CLI callers can pass a JSON command descriptor to `--focused-command`, `--promotion-focused-command`, or `--global-command` with `metadata.packageId`, `metadata.packageName`, or `metadata.packagePath`; API callers can pass the same metadata on `FrontierSwarmCommand`. When `config/release-train.json` is available, autonomous apply uses that package catalog to select gates for the changed package plus package dependencies, skip unrelated package-scoped gates, and order the selected package gates by dependency before running them. The selection stays repository-generic because package ids, names, paths, and dependencies come from command metadata and the package catalog rather than from a special-case coordinator API.
+
+`globalCommands` are reserved for gates that should run only when their `globalGlobs` match the bundle's changed paths. If a bundle only touches `packages/frontier-swarm/**` or `packages/frontier-swarm-codex/**`, the coordinator can pass the matching package-local command set and leave broad repository gates out. The resulting `autonomous-apply.json` and decision log record the selected gate names and commands under `finalGateSummary.gates[]`, so apply reviewers can see whether the decision ran a package-local or repository-wide scope.
+
 ## CLI
 
 ```sh
@@ -220,16 +243,31 @@ frontier-swarm-codex run \
   --link-path packages \
   --link-node-modules true \
   --semantic-import \
-  --sandbox workspace-write
+  --sandbox workspace-write \
+  --focused-command '{"name":"scope=package:frontier-swarm test","command":"npm","args":["--prefix","packages/frontier-swarm","run","test"],"metadata":{"packageId":"frontier-swarm","packagePath":"packages/frontier-swarm","packageName":"@shapeshift-labs/frontier-swarm"}}' \
+  --focused-command '{"name":"scope=package:frontier-swarm-codex test","command":"npm","args":["--prefix","packages/frontier-swarm-codex","run","test"],"metadata":{"packageId":"frontier-swarm-codex","packagePath":"packages/frontier-swarm-codex","packageName":"@shapeshift-labs/frontier-swarm-codex"}}'
 
-frontier-swarm doctor \
-  --semantic-import \
-  --out agent-runs/codex-swarm/dependency-health.json
+frontier-swarm-codex refill \
+  --desired-concurrency 8 \
+  --active-workers agent-runs/current/pids.json \
+  --queued agent-runs/current/queued-task-set.json \
+  --rerun-manifest agent-runs/previous/auto-drain/rerun-manifest.json \
+  --backlog work-queue.json \
+  --outDir agent-runs/current/refill
 
-frontier-swarm resume \
-  --run agent-runs/codex-swarm/run-1 \
-  --outDir agent-runs/codex-swarm/run-1-resume \
-  --max-concurrency 4
+frontier-swarm-codex run \
+  --manifest inkwell/agent-ownership.json \
+  --tasks agent-runs/current/refill/next-task-set.json \
+  --max-concurrency 8
+
+frontier-swarm-codex run \
+  --manifest inkwell/agent-ownership.json \
+  --tasks inkwell/parity-work-queue.json \
+  --model-policy adaptive \
+  --model-routing-feedback agent-runs/previous/tournament-results.jsonl \
+  --model-routing-feedback agent-runs/previous/rsi-feedback.json \
+  --adaptive-model-min gpt-5.4-mini \
+  --adaptive-model-max gpt-5.5
 
 frontier-swarm stop --run agent-runs/codex-swarm/run-1
 
@@ -237,20 +275,13 @@ frontier-swarm collect \
   --run agent-runs/codex-swarm/run-1 \
   --outDir agent-runs/codex-swarm/run-1/collected \
   --branch-prefix codex/swarm-slice
-
-frontier-swarm repair-links \
-  --root . \
-  --package-root packages \
-  --package-root .. \
-  --scope @shapeshift-labs \
-  --exclude-package @shapeshift-labs/frontier-swarm,@shapeshift-labs/frontier-swarm-codex,@shapeshift-labs/frontier-lang \
-  --write
 ```
 
 ## API
 
 ```ts
 import {
+  createCodexContinuousRefill,
   createCodexSwarmPlan,
   runCodexSwarm
 } from '@shapeshift-labs/frontier-swarm-codex';
@@ -271,39 +302,28 @@ await runCodexSwarm(plan, {
     replace: true
   }
 });
+
+const refill = createCodexContinuousRefill({
+  desiredConcurrency: 8,
+  activeWorkers: pidManifest,
+  queuedTasks: queuedTaskSet,
+  rerunManifests: [previousRerunManifest],
+  backlog
+});
+
+if (refill.taskSet) {
+  await runCodexSwarm(createCodexSwarmPlan({ manifest, tasks: refill.taskSet }), {
+    outDir: 'agent-runs/codex-swarm/refill-run',
+    maxConcurrency: refill.selectedTaskCount
+  });
+}
 ```
 
 App-specific adapters should keep orchestration inside this package and use hooks for local policy. `prepareJobWorkspace` can link generated package artifacts or shared fixtures, `renderJobPrompt` can append product-specific migration rules, `changedPathFilter` can hide runner-owned symlinks from ownership checks, and `onJobStarted`/`onJobFinished`/`onSwarmFinished` can mirror lifecycle records into project-specific JSONL streams.
 
-Use `modelPolicy: 'config-default'` for portable swarms that should respect each machine's Codex config. Use `modelPolicy: 'plan'` only when the installed Codex CLI and account are known to accept the planned model IDs. `approval: 'full-auto'` and `--approval-policy full-auto` are normalized to the current `--ask-for-approval never` spelling.
+Use `modelPolicy: 'config-default'` for portable swarms that should respect each machine's Codex config. Use `modelPolicy: 'plan'` only when the installed Codex CLI and account are known to accept the planned model IDs in the supported catalog: `gpt-5.5`, `gpt-5.4-mini`, `o4-mini`, and `gpt-4.1-mini`. Use `modelPolicy: 'adaptive'` when the runner should forward a model selected by the adapter. Adaptive routing normalizes tournament and RSI artifacts into `lower`, `same`, or `higher` recommendations with confidence, then combines that feedback with task risk, pricing, and `adaptiveModelMin`/`adaptiveModelMax` hard caps. Each job's `resource-allocation.json`, scheduled event, and prompt include the selected model, model pricing when known, routing score, feedback summary, and plain-English model-choice reasons. Unsupported explicit, plan-forwarded, or adaptive cap models fail during argument construction instead of entering worker args. `approval: 'full-auto'` and `--approval-policy full-auto` are normalized to the current `--ask-for-approval never` spelling.
 
-Pass `--semantic-import` or `semanticImport: true` to write a `semantic-imports.json` sidecar for changed source files. The sidecar uses the optional `@shapeshift-labs/frontier-lang` dependency to import supported native sources into Frontier Lang universal ASTs, summarize source maps/losses/semantic indexes/dependency relations/universal AST layers/proof-spec records/paradigm semantics records, record native compile/projection readiness when available, and attach semantic merge-candidate metadata to each worker merge bundle. Use `--semantic-import-include`, `--semantic-import-exclude`, `--semantic-import-max-files`, and `--semantic-import-max-bytes` to keep the import pass scoped. In copied/snapshot workspaces, semantic import selects changed source paths plus concrete task source/target refs so a worker can still produce symbols, call/use dependency edges, ownership regions, universal AST layer quality, proof obligation status, paradigm/lowering hints, and patch hints when changed-path collection is filtered. It snapshots selected worker sources before execution as `baseSource.source: "workspace-snapshot"` and records current coordinator/git text as `headSource`, letting semantic edit scripts distinguish base text, worker text, and current head when classifying portable, already-applied, stale, and conflicting edits. When Lang exposes semantic edit projection, the sidecar also records whether projected source reproduced the worker file hash; missing, blocked, mismatched, or unknown projection checks downgrade auto-merge readiness. Include globs support `**` and can match stripped copied-workspace suffixes, so a parent-root glob such as `snes/packages/domain/src/**/*.js` still matches a minimal workspace rooted at `packages/domain` or `src`. Use `--semantic-import-expected` when zero selected/imported files or zero universal AST layers should be called out in patch intent and collection dashboards. Patch intent, collected evidence, coordinator query, compact dashboard, and tournament query output include selected/eligible/imported/candidate counts, symbols, ownership regions, inferred lineage move/rename/delete counts when supplied by Lang or worker evidence, projection match/mismatch counts, quality warnings, `expectedSatisfied`, and `expectedMissingReasonCodes` so coordinators can sort empty or stale semantic sidecars without opening every worker directory.
-
-The sidecar source records are intentionally tiny and stable:
-
-```json
-{
-  "path": "src/runtime/apply.ts",
-  "baseSource": {
-    "source": "workspace-snapshot",
-    "path": "src/runtime/apply.ts",
-    "sha256": "base-text-sha256",
-    "text": "export function apply() { return 'old'; }"
-  },
-  "headSource": {
-    "source": "coordinator-workspace",
-    "path": "src/runtime/apply.ts",
-    "sha256": "head-text-sha256",
-    "text": "export function apply() { return 'current'; }"
-  }
-}
-```
-
-`baseSource.source` is usually `workspace-snapshot` for copied/snapshot workers and may be `coordinator-workspace` or `git-head` when the runner has a direct baseline. `headSource.source` is `coordinator-workspace` or `git-head`; it is omitted only when current head text is unavailable. Downstream tools should treat `path`, `source`, `sha256`, and `text` as the compatibility contract for semantic edit-script admission.
-
-Every run writes `dependency-health.json` before launching workers unless `dependencyHealth: false` or `--dependency-health=false` is passed. The preflight checks the adapter-local package resolution path plus the caller root, verifies the installed `@shapeshift-labs/frontier-swarm` version, and fails fast when semantic import would resolve a stale or missing optional `@shapeshift-labs/frontier-lang`. Use `frontier-swarm doctor --semantic-import` to run the same check without starting workers. This catches nested optional dependency drift after npm updates before a swarm spends time producing empty semantic sidecars.
-
-Use `frontier-swarm resume --run <prior-run-dir>` when a run was stopped or partially completed. The command reads the prior `swarm-plan.json`, `swarm-results.json`, merge bundles, evidence summaries, patch intent, log summaries, and `last-message.md` files, writes a `resume-overlay.json`, and classifies jobs as `completed`, `failed`, `blocked`, `evidence-only`, or `rerun-needed`. Completed and evidence-only jobs are skipped by default, while failed, blocked, and rerun-needed jobs are relaunched unless filtered by the include flags. Each resumed worker prompt starts with the prior evidence paths and status so the worker can continue from the partial handoff instead of rediscovering the same facts. Programmatic callers can use `createCodexResumeOverlay`, `createCodexResumePlan`, `renderCodexResumePromptPrefix`, or `resumeCodexSwarmRun`.
+Pass `--semantic-import` or `semanticImport: true` to write a `semantic-imports.json` sidecar for changed source files. The sidecar uses the optional `@shapeshift-labs/frontier-lang` dependency to import supported native sources into Frontier Lang universal ASTs, summarize source maps/losses/semantic indexes, and attach semantic merge-candidate metadata to each worker merge bundle. Use `--semantic-import-include`, `--semantic-import-exclude`, `--semantic-import-max-files`, and `--semantic-import-max-bytes` to keep the import pass scoped.
 
 ## Minimal Repro Workspaces
 
@@ -314,38 +334,65 @@ Large monorepos do not need one full git worktree per worker. The adapter suppor
 - `copy`: create a minimal copied workspace from declared includes, task `files`, `sourceRefs`, `targetRefs`, and task `snapshotIncludes`.
 - `snapshot`: same minimal-copy mechanics with snapshot-oriented naming for legacy SNES-style task manifests.
 
-For `copy` and `snapshot`, the runner replaces generated workspaces by default so changed include sets and source files do not reuse stale minimal repros. It excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, and build outputs) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Runner-owned artifacts are recorded in `workspace-proof.json` and filtered out of ownership checks, which keeps parent dirty files and copied workspace logs from falsely failing useful workers. Each job also writes `changes.patch` when a patch can be derived and `merge.json` with the touched owned files, evidence paths, verification results, queue item IDs, risk, and merge disposition. Use `linkPaths` for heavy shared directories such as `packages`, corpora, fixtures, generated assets, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, `snapshotLinkPaths`, `requiredIncludes`, and `optionalIncludes`.
+For `copy` and `snapshot`, the runner excludes heavy paths by default (`.git`, `node_modules`, `dist`, coverage, agent-runs, and build outputs) and passes `--skip-git-repo-check` to Codex. It snapshots the copied workspace before and after execution so changed-path ownership checks still work without git metadata. Runner-owned artifacts are recorded in `workspace-proof.json` and filtered out of ownership checks, which keeps parent dirty files and copied workspace logs from falsely failing useful workers. Each job also writes `changes.patch` when a patch can be derived and `merge.json` with the touched owned files, evidence paths, verification results, queue item IDs, risk, and merge disposition. Use `linkPaths` for heavy shared directories such as `packages`, corpora, fixtures, generated assets, or research checkouts that should not be duplicated. Task JSON may also declare `snapshotIncludes`, `snapshotExcludes`, `snapshotArtifactIncludes`, `snapshotLinkPaths`, `requiredIncludes`, and `optionalIncludes`.
 
 ## Scalable Scheduling
 
-`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. Browser lanes can declare capabilities, port pools, profile directory prefixes, and lower lane concurrency in the upstream swarm manifest. The adapter also derives deterministic evidence-lane resource hints from explicit lane ids, capabilities, and resource keys for `browser`, `static-check`, `api-check`, and `fuzzer`. Static-check lanes can use the wider `--max-concurrency` worker window, while browser, API-check, and fuzzer resources default to one-at-a-time quotas unless the manifest or `resourceScheduling` options provide a different quota. The adapter turns those declarations into a per-job resource allocation, writes `resource-allocation.json`, includes the allocation in the worker prompt and event stream, creates browser profile directories, and passes env vars such as `FRONTIER_SWARM_CAPABILITIES`, `FRONTIER_SWARM_RESOURCE_ALLOCATION`, `PORT`, `FRONTIER_SWARM_BROWSER_PORT`, and `FRONTIER_SWARM_BROWSER_PROFILE_DIR` into the Codex process. Pass `--adaptive --adaptive-mode balanced` to treat `--max-concurrency` as a ceiling while the runner derives lower effective caps from deterministic observations such as resource contention, failed evidence, stale patches, empty semantic sidecars, log noise, and discovery-only overproduction. The latest decision surface is written to `adaptive-load.json`.
+`runCodexSwarm` uses `@shapeshift-labs/frontier-swarm` schedules and leases internally. Jobs become runnable only when their dependency DAG is satisfied, lane/compute/contention limits have capacity, and a lease can be issued for the local Codex worker. Browser lanes can declare capabilities, port pools, profile directory prefixes, and lower lane concurrency in the upstream swarm manifest. The adapter turns those declarations into a per-job resource allocation, writes `resource-allocation.json`, includes the allocation in the worker prompt and event stream, creates browser profile directories, and passes env vars such as `PORT`, `FRONTIER_SWARM_BROWSER_PORT`, and `FRONTIER_SWARM_BROWSER_PROFILE_DIR` into the Codex process. This keeps the public runner simple while making the execution model compatible with much larger queues and external lease-backed workers.
 
 Task JSON may declare `dependsOn`, `concurrencyKey`, `budget`, and `review`; the adapter carries those fields into the compiled plan and prompt.
 
-After updating npm packages in a local multi-package checkout, use `frontier-swarm repair-links` to restore local workspace symlinks without replacing packages you intentionally want from npm. The command reads scoped dependencies from the target `package.json`, discovers matching local packages under one-level package roots, skips `--exclude-package` entries, and writes a JSON plan by default. Add `--write` to create or update symlinks. Existing real package directories are reported as conflicts unless `--replace` is passed, so npm-installed packages are preserved unless replacement is explicit.
+Raw worker execution and coordinator-agent drain are separate phases. The worker phase leases jobs from the local queue, runs Codex in the assigned workspace, and writes immutable output such as `merge.json`, `changes.patch`, `last-message.md`, verification records, semantic sidecars, and evidence artifacts. A worker should produce a patch, action, or concrete follow-up when the task makes that possible; evidence-only handoffs are for discovery, diagnostics, or true blockers, not a substitute for an obvious edit.
 
-Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, `dependency-health.json`, workspace proofs, patch files, merge bundles, per-job `evidence/evidence.json`, `patch-intent.json`, `log-summary.json`, and job results with merge-readiness classification. The normalized evidence file records changed paths, semantic regions, command pass/fail summaries, source citations, semantic sidecar stats, and ready-to-port patch hunk counts. `patch-intent.json` is the short review surface: what changed, why, risk, exact verification, semantic import quality, warnings, and whether the patch is safe to port manually. Raw Codex stdout/stderr capture is compacted by default; `log-summary.json` records original bytes, written bytes, and truncation counts, and `--max-event-bytes` / `--max-stderr-bytes` can tune the limits. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
+Worker stdout and stderr are streamed directly to `codex-events.jsonl` and `codex-stderr.log` with backpressure. The parent extracts token metrics incrementally from JSONL events and keeps only the latest bounded summary in memory, so log-heavy multi-worker runs do not need to reread or retain raw Codex event files before writing dashboards and merge bundles.
+
+Cost telemetry is priced in this adapter, not in the runtime-neutral `frontier-swarm` package. Known Codex models use the package-local `FRONTIER_SWARM_CODEX_MODEL_PRICING` catalog for uncached input, cached input, and output tokens. Resource allocations and dashboard worker rows expose the model, pricing source, token breakdown, and cost status for scheduled, running, and completed workers when that metadata is available. Unknown or missing model pricing is represented with `estimated: false`, `reason: "unknown-model-pricing"` or `reason: "missing-model"`, `unknownPricing`, and summary/model-level `costEstimateStatus: "unknown-pricing"` instead of a synthetic `$0` estimate. Missing input/output token fields are represented with `reason: "missing-input-tokens"`, `reason: "missing-output-tokens"`, or `reason: "missing-token-breakdown"`, `unknownCosts`, `incompleteTokenUsageJobCount`, and partial/unestimated statuses. Dashboard totals only add jobs whose full usage was actually priced, and fully unknown summaries omit `estimatedCostUsd`.
+
+Worker prompts include a Human Question Contract. Workers should ask a person only after repo context, tests, task JSON, ownership rules, and coordinator policy cannot decide the issue. Stale patches, failed applies, routine review, queue classification, and answerable implementation details should become patches, reruns, rejects, record-only/discovery evidence, or concrete follow-up, not questions. A true question must be one structured line: `human-question: owner=<role>; surface=<package/path>; missing-authority=<policy/fact/approval>; question=<single answerable question>; answer-code=<approve|reject|choose:<option-id>|provide:<fact-id>>`. The `answer-code` names the accepted answer shape so the coordinator can unblock the queue with a stable code.
+
+The default `runCodexSwarm` follow-up is coordinator-agent drain, so normal runs try to drain themselves after workers finish. Drain collects worker bundles, builds the merge index and hierarchical queue, assigns queue decisions such as `apply-local`, `queue-local`, `promote`, `rerun`, `reject`, `record-only`, and `block`, then applies only admitted work under the repo lock and configured gates. Local queues keep clean work near the lane, path, semantic region, or custom scope that can prove it; promotion moves work upward only when a parent queue needs to serialize a conflict, risk, or ownership decision.
+
+Each run writes event streams under `streams/`, a `coordinator-dashboard.json` snapshot, `pids.json`, workspace proofs, patch files, merge bundles, and job results with merge-readiness classification. Auto-drain writes `auto-drain/auto-drain.json` and mirrors the drain summary into `swarm-results.json` and `coordinator-dashboard.json`. If the coordinator checkout is dirty, auto-drain stays collect-only: it records `autoDrain.skippedReason: "dirty-worktree"`, queue/dashboard/operator-summary artifacts, and pending ready work, then waits for a clean checkout and an explicit `frontier-swarm-codex drain --run <run-dir>` with the same gates.
+
+Read unresolved queue counts as coordinator pressure, not landed work. Stale, conflicting, failed, invalid, evidence-poor, unreviewed, queued, or promoted work still needs a drain decision: rerun, reject, queue locally, record, close, apply, or commit. A true human blocker is rare and should name the owner, affected surface, and exact missing authority or question the coordinator cannot answer locally.
+
+Human answers can be written as JSONL records in `human-action-answers.jsonl` at the run root, or passed explicitly with `--auto-drain-human-answer-log`. Answer records match by `decisionId`, `questionId`, `questionCode`, `queueItemId`, `taskId`, or `jobId`. Auto-drain writes `auto-drain/human-answer-routing.json`, marks consumed answers, removes answered explicit decisions from open `humanQuestions`, and routes answered queue blockers as continuations so they no longer appear as open true blockers.
+
+When focused or matching global gates are configured, auto-drain may promote scoped patch candidates from `coordinator-review` into the coordinator apply queue. Treat `promotedPatchCandidateCount` as coordinator-gated queue pressure, not landed work or worker verification, until the matching autonomous apply decision is `applied` or `committed`.
+
+Dashboard consumers should treat `operatorSummary` as the human-facing queue status. Render `coordinator-dashboard.json.operatorSummary` or `queueMetadata.operatorSummary` for the top-line status, headline, cards, and display counts. Use `coordinator-dashboard.json.autonomousQueueHealth` when the UI needs project-generic buckets for active workers, coordinator review, completed autonomous history, rerun work, real blockers, and explicit human questions. Its `decisionHistory` marks append-only autonomous decisions as `current` or `superseded`, so committed/applied follow-up decisions leave older rerun or conflict records visible as completed history instead of active blockers. Keep `queueHealth`, `queueMetadata.actionCounts`, and `queueMetadata.bucketCounts` as drill-down diagnostics; do not derive separate blocker badges from `coordinator-review`, `stale-against-head`, rerun pressure, or conflict-blocked counters. Post-apply collection buckets can still contain stale or review artifacts for queue aliases that the decision ledger has already committed; dashboards should show those as diagnostics while `completed-history` and `applied-decisions` carry the successful outcome. Blocker UI should come from `operatorSummary.status`, the `true-blockers` card/count, `autonomousQueueHealth.sections`, and explicit `humanQuestions`.
+
+Use `--no-auto-drain` only for raw diagnostic runs that should not attempt coordinator apply; in that mode `queueMetadata.available` is false instead of asking dashboards to infer queue semantics from flat review buckets. `discoverCodexHandoffArtifacts` scans job directories for `last-message.md`, debug handoffs, replay logs, watchpoints, traces, diagnostics, logs, evidence JSON, and patches; `runCodexJob` adds those paths to result evidence and `metadata.codexHandoffArtifacts` so coordinator dashboards can link directly to replay/debug artifacts. `frontier-swarm stop --run <run-dir>` reads the pid manifest and terminates live worker processes without manually hunting process state.
 
 `frontier-swarm collect --run <run-dir>` derives status from immutable worker overlays instead of asking workers to edit a central queue. It scans `merge.json` files and writes:
 
 - `ready-to-apply/` for auto-mergeable verified slices,
-- `needs-human-port/` for patch candidates and discovery-only results,
-- `failed-evidence/` for failed workers, blockers, ownership violations, or failed required commands,
+- `coordinator-review/` for patch candidates and discovery-only results,
+- `failed-evidence/` for failed workers, evidence-poor outputs, ownership violations, or failed required commands,
 - `stale-against-head/` for patch bundles that no longer apply.
 
-It also writes `merge-index.json`, `queue-overlay.json`, `strategy-tournament.json`, `strategy-history.json`, `tournament-adaptive-feedback.json`, `evidence-index.json`, `merge-admission.json`, `coordinator-query.json`, and `compact-dashboard.json` so coordinator dashboards can show changed paths, tests, semantic selected/eligible/imported/candidate counts, semantic dependency relations, semantic regions, lineage moves/renames/deletes, semantic edit-script portable/conflict/stale/admission counts, semantic edit projection match/mismatch counts, semantic edit admission decisions, universal AST layer quality, proof obligation status, quality warnings, source citations, risk, ready-to-port hunks, stale patches, duplicate surfaces, semantic import quality, evidence scores, pid liveness, conflicts, derived queue status, strategy payoff standings, tournament history, adaptive feedback, and ready merge pressure without scraping every worker directory. `coordinator-query.json`, `compact-dashboard.json`, and collected `evidence.json` expose `semanticEditAdmission` directly with status, clean eligibility, auto-merge candidacy, and reasons. Use `frontier-swarm query --collection <dir> --symbol computeThing`, `--lineage`, `--semantic-edit-status conflict|portable|stale`, `--semantic-edit-admission auto-merge-candidate|needs-port|conflict|stale`, `--semantic-edit-projection projected|blocked|worker-match|worker-mismatch|worker-unknown`, or `--readiness ready-to-port|ready-to-apply|stale|discovery-only|blocked|evidence-only` for compact coordinator views. Stale checks distinguish patches that fail only because the coordinator worktree is dirty from patches whose base hashes no longer match HEAD. Copied/no-index workspace patches with source-side absolute paths are normalized back to repo-relative paths when possible; patches without comparable base hashes are treated as `needs-human-port`, not stale. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
+It also writes `merge-index.json`, `hierarchical-merge-queue.json`, and `queue-overlay.json` so coordinator dashboards can show queue pressure such as stale patches, conflicts, local-apply demand, local queue capacity, promotions, reruns, rejects, and record-only work separately from rare true blockers that need an explicit human answer. `collection.json.summary` and `collection.json.artifacts.counts` carry the same merge-queue action counts for consumers that read only the collection artifact. The optional `--branch-prefix` adds suggested tiny patch branch names to each collected bundle so accepted slices can become one small branch/commit per surface, evidence path, and queue status overlay.
 
-Collection is also the archive boundary for large swarm runs. `collect` writes `artifact-store/artifacts.jsonl`, `artifact-store/artifact-index.sqlite` when the runtime provides `node:sqlite`, SQL export text, and content-addressed blobs under `artifact-store/blobs/`. Text-heavy artifacts such as JSON, JSONL, logs, patches, Markdown, and text files are compressed with zstd when available and gzip otherwise, while metadata records keep job id, kind, path, hash, compression, tags, and semantic summaries queryable. Full `semantic-imports.json` sidecars stay in compressed blobs; artifact metadata keeps a compact `semanticCompactSummary` with selected/imported counts, symbols, ownership regions, dependency counts, lineage, source/base/head hashes when available, semantic edit status, projection worker-match evidence, and admission fields so coordinators can query sidecars without opening huge JSON. `frontier-swarm query` can read the SQLite index directly, including `--semantic-edit-status`, `--semantic-edit-admission`, and `--semantic-edit-projection` filters, so archived collections remain searchable even after JSONL has been removed. After reviewing the dry run, use `frontier-swarm cleanup --run <run-dir> --compact-artifacts --write` to delete run-side artifact source files and disposable worker workspaces that already have a `collected-and-indexed.json` marker and preserved blobs. Pass `--collection <dir>` when `collect --outDir` wrote the archive outside the default run directory. Cleanup keeps failed or active work by default and reports exactly what would be deleted unless `--write` is passed.
+Collected bundles also carry `metadata.frontierSwarmCodex.collection.head` when the repository head can be read. Autonomous apply treats that head as the source head for the collected patch and revalidates it under the repo lock before mutation.
 
-`frontier-swarm tournament query --collection <collection-dir>` reads `strategy-tournament.json` and emits filtered JSON views. When the collection also has `compact-dashboard.json` or `coordinator-query.json`, the query result includes a `semanticImport` block with aggregate quality plus per-job quality summaries. Use `--view summary|standings|matches|full`, `--strategy`, `--game`, `--outcome`, `--tag`, `--min-score`, `--max-score`, and `--limit` to narrow review. `frontier-swarm tournament compare --baseline <file> --current <file>` compares two tournaments, `frontier-swarm tournament history --tournament <file>` folds one or more tournaments into cross-run standings, and `frontier-swarm tournament feedback --collection <dir>` emits adaptive scheduler observations. Pass that feedback into a later run with `--adaptive --adaptive-feedback <tournament-adaptive-feedback.json>`.
+Pass `--promote-patch-candidates` to `collect` only when coordinator verification gates are available. Promotion is limited to owned, applying `patch-candidate` bundles with no ownership violations or failed commands, and requires either `--focused-command` / `--promotion-focused-command` or a matching `--global-command` plus `--global-glob` / `--promotion-global-glob`. Promoted bundles move from `coordinator-review/` to `ready-to-apply/` with `metadata.coordinatorPatchCandidatePromotion`, and `promotedPatchCandidateCount` records the queue pressure created for the coordinator.
 
 `frontier-swarm apply --collection <collection-dir>` reviews the `ready-to-apply/` bucket and writes `apply-ledger.json`. It defaults to `--dry-run`, which runs `git apply --check` without mutating the checkout. Non-dry-run apply refuses a dirty worktree unless `--allow-dirty` is passed, and can optionally create small branches with `--branch-prefix` and commits with `--commit`.
 
-`frontier-swarm score --collection <collection-dir>` applies each collected bundle in a throwaway workspace and writes `patch-score.json`. Use `--workspace-include` / `--workspace-exclude` to keep score workspaces small, `--focused-command` for the gate that proves the slice, and `--global-command` with `--global-glob` for shared-code smoke/type/build gates. Scores are classified as `accepted-clean`, `accepted-needs-port`, `conflict`, `test-fail`, `stale`, or `evidence-only`, so the coordinator can review the best patch candidates before manually reading every bundle. When semantic import sidecars are present, the score entries include `semanticEvidence` with source-map mapping counts, semantic symbols, dependency relation counts/predicates, ownership regions, patch hints, lineage counts, semantic edit-script admission, semantic edit projection status, losses, readiness, proof obligation counts, failed/stale proof status, paradigm/lowering record counts, and an advisory score adjustment. Missing or empty semantic evidence downgrades otherwise clean source patches to `accepted-needs-port` instead of treating textual apply success as merge readiness; blocked or ambiguous lineage evidence, stale semantic edit anchors, conflicting semantic edit scripts, or blocked semantic edit projections also prevent an `accepted-clean` classification. If the collection has an `apply-ledger/apply-ledger.json`, scoring also emits `calibration` with landed job ids, predicted clean job ids, semantic auto-merge-candidate job ids, semantic candidate precision, false positives, and false negatives so tournament/adaptive scheduling can learn from actual merges.
+`frontier-swarm autonomous-apply --collection <collection-dir>` (alias: `drain`) is the explicit coordinator self-merge path for an existing collection or run. It uses the same queue/admission decisions as default coordinator-agent auto-drain, but it does not launch workers or read raw worker output directly. It admits only `ready-to-apply/` bundles, takes a repo-local Git lock, re-reads the current head, compares it with the collected source head when available, re-checks the patch, applies it, runs `--focused-command` and matching `--global-command` gates, and rolls the patch back when a required gate fails. If the head changed since collection, autonomous apply records `rerun` when the patch still checks cleanly or `conflict-blocked` when `git apply --check` fails; it does not apply stale collected work. Each bundle writes an append-only `autonomous-merge-decisions.jsonl` record plus `autonomous-queue-overlay.json`; applied, committed, skipped, and rejected decisions become terminal queue overlay entries so coordinator-review debt can drain instead of piling up. It applies by default and refuses dirty worktrees unless `--allow-dirty` is passed.
+
+When `autonomous-apply` or `drain` is given `--run`, it first collects that run. With focused gates, or global gates whose `--global-glob` matches changed paths, patch-candidate promotion is enabled by default; use `--promote-patch-candidates=false` or `--no-promote-patch-candidates` to keep candidates in `coordinator-review/`. The same explicit `--promote-patch-candidates` flag is accepted for operator scripts that want promotion intent visible in the command line.
+
+Use `--auto-drain-commit` on `frontier-swarm-codex run` only when the coordinator is authorized to leave the repository with one commit per admitted bundle after the patch applies and required gates pass. Use `--commit` for the same contract on an explicit `frontier-swarm-codex autonomous-apply` or `drain` pass. Leave commit mode off when a human will batch, squash, amend, or inspect the final diff before committing. Commit mode does not change queue admission; it only changes the successful terminal outcome from `applied` to `committed`.
+
+Autonomous commit messages must identify the source bundle and queue work so any repository can trace the Git commit back to the swarm evidence. The built-in subject is `Autonomous apply: <taskId-or-jobId>` and the body records the autonomous decision kind, status, reason, job id, task id, queue item ids, lock scope, lock keys, and bundle path. The decision ledger, not the commit message, is the queue source of truth: a `committed` decision closes its `queueItemIds`, records the new head in `headAfter` and `commit`, and includes the required gate proof in `verification`. `autonomous-apply.json`, `auto-drain.json`, and `autoDrainArtifacts.summary` roll this up as committed, gated, and verification-gate counts for dashboard and self-merge audit consumers. If `git add` or `git commit` fails, autonomous apply records `failed`, resets staged paths after a commit failure, attempts to reverse-apply the patch, and does not close the queue item as satisfied.
+
+`frontier-swarm score --collection <collection-dir>` applies each collected bundle in a throwaway workspace and writes `patch-score.json`. Use `--focused-command` for the gate that proves the slice and `--global-command` with `--global-glob` for shared-code smoke/type/build gates. Scores are classified as `accepted-clean`, `accepted-needs-port`, `conflict`, `test-fail`, `stale`, or `evidence-only`, so the coordinator can review the best patch candidates before manually reading every bundle.
 
 ## Surface
 
 - `createCodexSwarmPlan`
+- `createCodexContinuousRefill`
 - `coerceCodexSwarmManifestInput`
 - `coerceCodexSwarmTasksInput`
 - `createCodexWorkspacePlan`
@@ -359,23 +406,13 @@ Collection is also the archive boundary for large swarm runs. `collect` writes `
 - `normalizeCodexModelFlag`, `normalizeCodexApprovalPolicy`
 - `initFileSwarmEventStream`, `appendFileSwarmEvent`, `writeSwarmCoordinatorSnapshot`
 - `appendCodexPidManifest`, `readCodexPidManifest`, `stopCodexSwarmRun`
-- `repairCodexWorkspacePackageLinks`
-- `checkCodexDependencyHealth`, `writeCodexDependencyHealthReport`
-- `createCodexResumeOverlay`, `createCodexResumePlan`, `resumeCodexSwarmRun`
 - `collectCodexSwarmRun`
 - `applyCodexSwarmCollection`
+- `autonomousApplyCodexSwarmRun`
 - `scoreCodexSwarmPatches`
-- `queryCodexSwarmTournament`
-- `compareCodexSwarmTournaments`
-- `createCodexSwarmTournamentHistory`
-- `readCodexTournamentAdaptiveFeedback`
 - `renderCodexPrompt`
 - `spawnCodexExecutor`
 - `FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND`
-- `FRONTIER_SWARM_CODEX_PATCH_INTENT_KIND`
-- `FRONTIER_SWARM_CODEX_COMPACT_DASHBOARD_KIND`
-- `FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_KIND`
-- `FRONTIER_SWARM_CODEX_RESUME_OVERLAY_KIND`
 
 ## Benchmarks
 
