@@ -100,11 +100,13 @@ const {
   deriveCodexAutonomousApplyLockKeys,
   discoverCodexHandoffArtifacts,
   getCodexModelPricing,
+  normalizeCodexModelRoutingFeedback,
   normalizeCodexApprovalPolicy,
   normalizeCodexModelFlag,
   normalizeCodexRunMetrics,
   readCodexPidManifest,
   renderCodexPrompt,
+  resolveCodexModelRouting,
   runCodexSwarm,
   scoreCodexSwarmPatches,
   spawnCodexExecutor,
@@ -264,6 +266,126 @@ const forwardedArgs = buildCodexArgs(plan.jobs[0], {
 assert.ok(forwardedArgs.includes('--model'));
 assert.ok(forwardedArgs.includes('gpt-5.5'));
 assert.ok(forwardedArgs.includes('model_reasoning_effort="xhigh"'));
+const tournamentLower = normalizeCodexModelRoutingFeedback({
+  kind: 'frontier.swarm.tournament',
+  winnerModel: 'gpt-5.4-mini',
+  loserModel: 'gpt-5.5',
+  confidence: 0.82
+});
+assert.strictEqual(tournamentLower.recommendation, 'lower');
+assert.strictEqual(tournamentLower.confidence, 0.82);
+assert.strictEqual(tournamentLower.signals[0].source, 'tournament');
+assert.strictEqual(tournamentLower.signals[0].recommendation, 'lower');
+const rsiHigher = normalizeCodexModelRoutingFeedback({
+  kind: 'frontier.swarm.rsi',
+  rsi: 22,
+  confidence: 0.7
+});
+assert.strictEqual(rsiHigher.recommendation, 'higher');
+assert.strictEqual(rsiHigher.signals[0].source, 'rsi');
+assert.strictEqual(rsiHigher.signals[0].confidence, 0.7);
+const sameFeedback = normalizeCodexModelRoutingFeedback({
+  source: 'rsi',
+  recommendation: 'same',
+  confidence: 0.64
+});
+assert.strictEqual(sameFeedback.recommendation, 'same');
+assert.strictEqual(sameFeedback.signals[0].recommendation, 'same');
+const simpleAdaptivePlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'simple-routing',
+    lanes: [{
+      id: 'docs',
+      layer: 'implementation',
+      allowedGlobs: ['README.md']
+    }]
+  },
+  tasks: {
+    items: [{
+      id: 'simple-readme-fix',
+      lane: 'docs',
+      title: 'Simple README fix',
+      objective: 'simple docs single-file update',
+      targetRefs: ['README.md'],
+      allowedWrites: ['README.md']
+    }]
+  }
+});
+const simpleAdaptiveRouting = resolveCodexModelRouting(simpleAdaptivePlan.jobs[0], { modelPolicy: 'adaptive' });
+assert.strictEqual(simpleAdaptiveRouting.selectedModel, 'gpt-5.4-mini');
+assert.strictEqual(simpleAdaptiveRouting.recommendation, 'lower');
+assert.ok(simpleAdaptiveRouting.routingScore < 0);
+assert.ok(simpleAdaptiveRouting.reasons.some((reason) => /lower-cost model/.test(reason)));
+const simpleAdaptiveArgs = buildCodexArgs(simpleAdaptivePlan.jobs[0], {
+  outDir: tmp,
+  workspacePath: tmp,
+  paths,
+  modelPolicy: 'adaptive'
+});
+assert.ok(simpleAdaptiveArgs.includes('--model'));
+assert.strictEqual(simpleAdaptiveArgs[simpleAdaptiveArgs.indexOf('--model') + 1], 'gpt-5.4-mini');
+const simpleAdaptiveAllocation = createCodexResourceAllocation(simpleAdaptivePlan.jobs[0], {
+  cwd: tmp,
+  outDir: tmp,
+  workspacePath: tmp,
+  modelPolicy: 'adaptive'
+});
+assert.strictEqual(simpleAdaptiveAllocation.model, 'gpt-5.4-mini');
+assert.strictEqual(simpleAdaptiveAllocation.modelPricing?.model, 'gpt-5.4-mini');
+assert.strictEqual(simpleAdaptiveAllocation.modelRouting?.routingScore, simpleAdaptiveRouting.routingScore);
+assert.ok(simpleAdaptiveAllocation.modelRouting?.reasons.some((reason) => /lower-cost model/.test(reason)));
+assert.strictEqual(simpleAdaptiveAllocation.env.FRONTIER_SWARM_CODEX_MODEL, 'gpt-5.4-mini');
+assert.strictEqual(simpleAdaptiveAllocation.env.FRONTIER_SWARM_CODEX_MODEL_ROUTING_RECOMMENDATION, 'lower');
+const highRiskAdaptivePlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'high-risk-routing',
+    compute: [
+      { id: 'codex.mini', kind: 'codex', model: 'gpt-5.4-mini', reasoningEffort: 'medium' },
+      { id: 'codex.deep', kind: 'codex', model: 'gpt-5.5', reasoningEffort: 'xhigh' }
+    ],
+    policy: { defaultCompute: 'codex.mini' },
+    lanes: [{
+      id: 'codec',
+      layer: 'implementation',
+      allowedGlobs: ['src/codec.ts', 'src/wire.ts', 'test/codec.mjs']
+    }]
+  },
+  tasks: {
+    items: [{
+      id: 'codec-wire-format-change',
+      lane: 'codec',
+      title: 'High-risk codec migration',
+      objective: 'high-risk codec wire-format migration',
+      targetRefs: ['src/codec.ts', 'src/wire.ts', 'test/codec.mjs'],
+      allowedWrites: ['src/codec.ts', 'src/wire.ts', 'test/codec.mjs'],
+      review: { alwaysReview: true },
+      tags: ['high-risk']
+    }]
+  }
+});
+const highRiskAdaptiveRouting = resolveCodexModelRouting(highRiskAdaptivePlan.jobs[0], { modelPolicy: 'adaptive' });
+assert.strictEqual(highRiskAdaptiveRouting.baseModel, 'gpt-5.4-mini');
+assert.strictEqual(highRiskAdaptiveRouting.selectedModel, 'gpt-5.5');
+assert.strictEqual(highRiskAdaptiveRouting.recommendation, 'higher');
+assert.ok(highRiskAdaptiveRouting.routingScore > 0);
+const cappedHighRiskRouting = resolveCodexModelRouting(highRiskAdaptivePlan.jobs[0], {
+  modelPolicy: 'adaptive',
+  adaptiveModelMax: 'gpt-5.4-mini'
+});
+assert.strictEqual(cappedHighRiskRouting.selectedModel, 'gpt-5.4-mini');
+assert.ok(cappedHighRiskRouting.hardCaps.applied.includes('max'));
+assert.ok(cappedHighRiskRouting.reasons.some((reason) => /Hard maximum model cap/.test(reason)));
+const feedbackDowngradeRouting = resolveCodexModelRouting(plan.jobs[0], {
+  modelPolicy: 'adaptive',
+  modelRoutingFeedback: tournamentLower,
+  adaptiveModelMin: 'gpt-5.4-mini',
+  adaptiveModelMax: 'gpt-5.5'
+});
+assert.strictEqual(feedbackDowngradeRouting.feedback?.recommendation, 'lower');
+assert.strictEqual(feedbackDowngradeRouting.selectedModel, 'gpt-5.4-mini');
+assert.strictEqual(feedbackDowngradeRouting.hardCaps.minModel, 'gpt-5.4-mini');
+assert.strictEqual(feedbackDowngradeRouting.hardCaps.maxModel, 'gpt-5.5');
+assert.ok(feedbackDowngradeRouting.routingScore < 0);
 assert.strictEqual(normalizeCodexModelFlag('default'), undefined);
 for (const supportedModel of ['gpt-5.5', 'gpt-5.4-mini', 'o4-mini', 'gpt-4.1-mini']) {
   assert.ok(FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.includes(supportedModel));

@@ -75,6 +75,9 @@ try {
       approval: stringArg(args.approval ?? args['ask-for-approval'] ?? args['approval-policy']),
       model: stringArg(args.model),
       modelPolicy: modelPolicyArg(args.modelPolicy ?? args['model-policy']),
+      modelRoutingFeedbackPaths: listArg(args.modelRoutingFeedback ?? args['model-routing-feedback'] ?? args.routingFeedback ?? args['routing-feedback']),
+      adaptiveModelMin: stringArg(args.adaptiveModelMin ?? args['adaptive-model-min'] ?? args.minAdaptiveModel ?? args['min-adaptive-model']),
+      adaptiveModelMax: stringArg(args.adaptiveModelMax ?? args['adaptive-model-max'] ?? args.maxAdaptiveModel ?? args['max-adaptive-model']),
       forwardPlanModel: boolArg(args.forwardPlanModel ?? args['forward-plan-model'], false),
       forwardPlanReasoningEffort: boolArg(args.forwardPlanReasoningEffort ?? args['forward-plan-reasoning-effort'], false),
       reasoningEffort: stringArg(args.reasoningEffort ?? args['reasoning-effort']),
@@ -238,7 +241,9 @@ function printHelp() {
     '  refill: --desired-concurrency <n> --active-workers <n|file> --queued <file> --backlog <file> --rerun-manifest <file>',
     '  refill: --queued-count <n> --max-tasks <n> --task-set-out <file> --outDir <dir>',
     `  --model <${FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.join('|')}> (validated; omit for local Codex config)`,
-    '  --model-policy config-default|plan|explicit',
+    '  --model-policy config-default|plan|explicit|adaptive',
+    '  --model-routing-feedback <file> (JSON or JSONL tournament/RSI feedback; repeatable or comma-separated)',
+    '  --adaptive-model-min <model> --adaptive-model-max <model> (hard caps for adaptive routing)',
     '  --approval never|on-request|on-failure|untrusted',
     '  --workspace current|copy|snapshot|git-worktree',
     '  --include <path> --exclude <path> --link <path>',
@@ -400,8 +405,8 @@ function stringArg(value: CliValue | undefined): string | undefined {
 function modelPolicyArg(value: CliValue | undefined): FrontierCodexModelPolicy | undefined {
   const policy = stringArg(value);
   if (policy === undefined) return undefined;
-  if (policy === 'config-default' || policy === 'plan' || policy === 'explicit') return policy;
-  throw new Error(`unsupported --model-policy ${policy}; expected config-default, plan, or explicit`);
+  if (policy === 'config-default' || policy === 'plan' || policy === 'explicit' || policy === 'adaptive') return policy;
+  throw new Error(`unsupported --model-policy ${policy}; expected config-default, plan, explicit, or adaptive`);
 }
 
 function readWorkspaceMode(value: CliValue | undefined) {

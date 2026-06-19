@@ -67,6 +67,12 @@ export const FRONTIER_SWARM_CODEX_SUPPORTED_MODELS = [
   'o4-mini',
   'gpt-4.1-mini'
 ] as const;
+export const FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER = [
+  'gpt-4.1-mini',
+  'o4-mini',
+  'gpt-5.4-mini',
+  'gpt-5.5'
+] as const;
 const FRONTIER_SWARM_CODEX_FALLBACK_PACKAGE_GATE_ORDER = [
   'frontier-swarm',
   'frontier-swarm-codex'
@@ -104,6 +110,8 @@ export const FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND = 'frontier.swarm
 export const FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND = 'frontier.swarm-codex.patch-score';
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_MODEL_ROUTING_FEEDBACK_KIND = 'frontier.swarm-codex.model-routing-feedback';
+export const FRONTIER_SWARM_CODEX_MODEL_ROUTING_FEEDBACK_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND = 'frontier.swarm-codex.semantic-imports';
 export const FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_DASHBOARD_QUEUE_METADATA_KIND = 'frontier.swarm-codex.dashboard-queue-metadata';
@@ -146,7 +154,9 @@ const CODEX_WORKER_HUMAN_QUESTION_CONTRACT = [
   'The answer-code must describe the allowed human answer shape so the coordinator can unblock the queue with a short stable code.'
 ];
 
-export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
+export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit' | 'adaptive';
+export type FrontierCodexModelRoutingRecommendation = 'lower' | 'same' | 'higher';
+export type FrontierCodexModelRoutingFeedbackInput = unknown;
 export type FrontierCodexCostEstimateReason =
   | 'missing-input-tokens'
   | 'missing-model'
@@ -175,6 +185,53 @@ export interface FrontierCodexModelPricing {
   outputUsdPerUnit: number;
   source: string;
   sourceCheckedAt: string;
+}
+
+export interface FrontierCodexModelRoutingFeedbackSignal {
+  source: string;
+  recommendation: FrontierCodexModelRoutingRecommendation;
+  confidence: number;
+  reason: string;
+  model?: string;
+  baselineModel?: string;
+  winnerModel?: string;
+  loserModel?: string;
+  score?: number;
+}
+
+export interface FrontierCodexModelRoutingFeedbackSummary {
+  kind: typeof FRONTIER_SWARM_CODEX_MODEL_ROUTING_FEEDBACK_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_MODEL_ROUTING_FEEDBACK_VERSION;
+  recommendation: FrontierCodexModelRoutingRecommendation;
+  confidence: number;
+  score: number;
+  signals: FrontierCodexModelRoutingFeedbackSignal[];
+  reasons: string[];
+  summary: {
+    signalCount: number;
+    sourceCount: number;
+    lowerCount: number;
+    sameCount: number;
+    higherCount: number;
+  };
+}
+
+export interface FrontierCodexModelRoutingDecision {
+  policy: FrontierCodexModelPolicy;
+  forwarded: boolean;
+  baseModel?: string;
+  selectedModel?: string;
+  recommendation: FrontierCodexModelRoutingRecommendation;
+  confidence: number;
+  routingScore: number;
+  reasons: string[];
+  hardCaps: {
+    minModel?: string;
+    maxModel?: string;
+    applied: string[];
+  };
+  pricing?: FrontierCodexModelPricing;
+  feedback?: FrontierCodexModelRoutingFeedbackSummary;
 }
 
 // Standard direct OpenAI API rates, verified against the official pricing page on 2026-06-18.
@@ -242,6 +299,10 @@ export interface FrontierCodexSwarmRunOptions {
   approval?: string | false;
   model?: string | false;
   modelPolicy?: FrontierCodexModelPolicy;
+  modelRoutingFeedback?: FrontierCodexModelRoutingFeedbackInput;
+  modelRoutingFeedbackPaths?: readonly string[];
+  adaptiveModelMin?: string;
+  adaptiveModelMax?: string;
   forwardPlanModel?: boolean;
   forwardPlanReasoningEffort?: boolean;
   reasoningEffort?: string | false;
@@ -458,6 +519,7 @@ export interface FrontierCodexResourceAllocation {
   model?: string;
   modelPricing?: FrontierCodexModelPricing;
   modelPricingUnknownReason?: FrontierCodexCostEstimateReason;
+  modelRouting?: FrontierCodexModelRoutingDecision;
   browser?: FrontierCodexBrowserAllocation;
 }
 
@@ -2782,6 +2844,8 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     root: path.join(outDir, 'streams'),
     lanes: Array.from(new Set(plan.jobs.map((job) => job.lane)))
   });
+  const modelRoutingFeedback = options.modelRoutingFeedback
+    ?? await loadCodexModelRoutingFeedback(options.modelRoutingFeedbackPaths, { cwd });
   await initFileSwarmEventStream(eventStream);
   const pidManifestPath = path.resolve(options.cwd ?? process.cwd(), options.pidManifestPath ?? path.join(outDir, 'pids.json'));
   await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', status: 'running', runId: plan.runId, startedAt: Date.now() }, plan.runId);
@@ -2791,7 +2855,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     const startedEvent = { type: 'swarm.started', runId: run.id, at: run.startedAt, data: { jobCount: plan.jobs.length } };
     run = recordSwarmEvent(run, startedEvent);
     await appendFileSwarmEvent(eventStream, startedEvent);
-    const runOptions = { ...options, eventStream, pidManifestPath };
+    const runOptions = { ...options, ...(modelRoutingFeedback ? { modelRoutingFeedback } : {}), eventStream, pidManifestPath };
     const results = await runScheduledJobPool(plan, Math.max(1, options.maxConcurrency ?? 1), (job, lease) => runCodexJob(job, runOptions, outDir, lease));
     for (const result of results) {
       const job = plan.jobs.find((entry) => entry.id === result.jobId);
@@ -4436,7 +4500,13 @@ export async function runCodexJob(
     cwd: options.cwd ?? process.cwd(),
     outDir,
     workspacePath: workspace,
-    lease
+    lease,
+    model: options.model,
+    modelPolicy: options.modelPolicy,
+    forwardPlanModel: options.forwardPlanModel,
+    modelRoutingFeedback: options.modelRoutingFeedback,
+    adaptiveModelMin: options.adaptiveModelMin,
+    adaptiveModelMax: options.adaptiveModelMax
   });
   if (resourceAllocation.browser?.profileDir) await fs.mkdir(resourceAllocation.browser.profileDir, { recursive: true });
   const hookInput = {
@@ -4469,6 +4539,11 @@ export async function runCodexJob(
       workspace: workspacePlan.path,
       capabilities: job.capabilities,
       resourceRequirements: job.resourceRequirements,
+      selectedModel: resourceAllocation.model,
+      modelPricing: resourceAllocation.modelPricing,
+      routingScore: resourceAllocation.modelRouting?.routingScore,
+      routingReasons: resourceAllocation.modelRouting?.reasons,
+      modelRouting: resourceAllocation.modelRouting,
       resourceAllocation
     }
   });
@@ -4809,15 +4884,127 @@ export function normalizeCodexApprovalPolicy(
   );
 }
 
+export async function loadCodexModelRoutingFeedback(
+  paths: readonly string[] | undefined,
+  input: { cwd?: string } = {}
+): Promise<FrontierCodexModelRoutingFeedbackSummary | undefined> {
+  const resolved = uniqueStrings(paths ?? []);
+  if (!resolved.length) return undefined;
+  const cwd = path.resolve(input.cwd ?? process.cwd());
+  const artifacts: unknown[] = [];
+  for (const rawPath of resolved) {
+    const file = path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd, rawPath);
+    const text = await fs.readFile(file, 'utf8');
+    artifacts.push(parseCodexModelRoutingFeedbackArtifact(text, file));
+  }
+  return normalizeCodexModelRoutingFeedback(artifacts);
+}
+
+export function normalizeCodexModelRoutingFeedback(input: FrontierCodexModelRoutingFeedbackInput): FrontierCodexModelRoutingFeedbackSummary {
+  if (isCodexModelRoutingFeedbackSummary(input)) return input;
+  const signals: FrontierCodexModelRoutingFeedbackSignal[] = [];
+  collectCodexModelRoutingFeedbackSignals(input, undefined, signals);
+  const lowerCount = signals.filter((signal) => signal.recommendation === 'lower').length;
+  const sameCount = signals.filter((signal) => signal.recommendation === 'same').length;
+  const higherCount = signals.filter((signal) => signal.recommendation === 'higher').length;
+  const weighted = signals.reduce((sum, signal) => sum + modelRoutingDirectionValue(signal.recommendation) * signal.confidence, 0);
+  const totalConfidence = signals.reduce((sum, signal) => sum + signal.confidence, 0);
+  const averageConfidence = signals.length ? totalConfidence / signals.length : 0;
+  const directionalConfidence = totalConfidence > 0 ? Math.abs(weighted) / totalConfidence : 0;
+  const recommendation: FrontierCodexModelRoutingRecommendation = weighted > 0.05
+    ? 'higher'
+    : weighted < -0.05
+      ? 'lower'
+      : 'same';
+  const confidence = roundRoutingNumber(directionalConfidence * averageConfidence);
+  const score = roundRoutingNumber(weighted);
+  const reasons = uniqueStrings(signals.map((signal) => signal.reason));
+  return {
+    kind: FRONTIER_SWARM_CODEX_MODEL_ROUTING_FEEDBACK_KIND,
+    version: FRONTIER_SWARM_CODEX_MODEL_ROUTING_FEEDBACK_VERSION,
+    recommendation,
+    confidence,
+    score,
+    signals,
+    reasons,
+    summary: {
+      signalCount: signals.length,
+      sourceCount: new Set(signals.map((signal) => signal.source)).size,
+      lowerCount,
+      sameCount,
+      higherCount
+    }
+  };
+}
+
+export function resolveCodexModelRouting(
+  job: FrontierSwarmJob,
+  input: Pick<FrontierCodexSwarmRunOptions,
+    | 'model'
+    | 'modelPolicy'
+    | 'forwardPlanModel'
+    | 'modelRoutingFeedback'
+    | 'adaptiveModelMin'
+    | 'adaptiveModelMax'
+  > = {}
+): FrontierCodexModelRoutingDecision {
+  const explicit = normalizeCodexModelFlag(input.model);
+  if (explicit || input.model === false) {
+    return createCodexModelRoutingDecision({
+      policy: 'explicit',
+      forwarded: !!explicit,
+      baseModel: normalizeCodexMetricsModel(job.compute.model ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL),
+      selectedModel: explicit,
+      recommendation: 'same',
+      confidence: explicit ? 1 : 0,
+      routingScore: 0,
+      reasons: explicit
+        ? [`Explicit model ${explicit} was requested for this job.`]
+        : ['Model forwarding was explicitly disabled for this job.'],
+      hardCaps: { applied: [] }
+    });
+  }
+
+  const policy = input.modelPolicy ?? (input.forwardPlanModel ? 'plan' : 'config-default');
+  if (policy === 'config-default') {
+    const baseModel = normalizeCodexMetricsModel(job.compute.model ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL);
+    return createCodexModelRoutingDecision({
+      policy,
+      forwarded: false,
+      baseModel,
+      selectedModel: baseModel,
+      recommendation: 'same',
+      confidence: 0,
+      routingScore: 0,
+      reasons: ['The local Codex config owns model selection because model policy is config-default.'],
+      hardCaps: { applied: [] }
+    });
+  }
+  const baseModel = normalizeCodexModelFlag(job.compute.model ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL) ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL;
+  if (policy === 'plan' || policy === 'explicit') {
+    return createCodexModelRoutingDecision({
+      policy,
+      forwarded: policy === 'plan',
+      baseModel,
+      selectedModel: policy === 'plan' ? baseModel : undefined,
+      recommendation: 'same',
+      confidence: policy === 'plan' ? 1 : 0,
+      routingScore: 0,
+      reasons: policy === 'plan'
+        ? [`Planned model ${baseModel} is forwarded because model policy is plan.`]
+        : ['Model policy is explicit, but no explicit model override was provided.'],
+      hardCaps: { applied: [] }
+    });
+  }
+  return resolveAdaptiveCodexModelRouting(job, input, baseModel);
+}
+
 function resolveCodexModelFlag(
   job: FrontierSwarmJob,
   input: FrontierCodexSwarmRunOptions
 ): string | undefined {
-  const explicit = normalizeCodexModelFlag(input.model);
-  if (explicit || input.model === false) return explicit;
-  const policy = input.modelPolicy ?? (input.forwardPlanModel ? 'plan' : 'config-default');
-  if (policy === 'plan') return normalizeCodexModelFlag(job.compute.model ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL);
-  return undefined;
+  const decision = resolveCodexModelRouting(job, input);
+  return decision.forwarded ? decision.selectedModel : undefined;
 }
 
 function resolveCodexReasoningEffort(
@@ -4830,9 +5017,442 @@ function resolveCodexReasoningEffort(
     return explicit && explicit !== 'default' && explicit !== 'config-default' ? explicit : undefined;
   }
   const policy = input.modelPolicy ?? (input.forwardPlanModel || input.forwardPlanReasoningEffort ? 'plan' : 'config-default');
+  if (policy === 'adaptive') {
+    const decision = resolveCodexModelRouting(job, input);
+    if (!decision.forwarded) return undefined;
+    const selectedRank = codexAdaptiveModelRank(decision.selectedModel);
+    const baseRank = codexAdaptiveModelRank(decision.baseModel);
+    if (selectedRank !== undefined && baseRank !== undefined && selectedRank < baseRank) return 'medium';
+    return job.compute.reasoningEffort ?? FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT;
+  }
   if (policy !== 'plan') return undefined;
   const effort = job.compute.reasoningEffort ?? FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT;
   return effort ? String(effort).trim() : undefined;
+}
+
+function parseCodexModelRoutingFeedbackArtifact(text: string, file: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const records: unknown[] = [];
+    for (const [index, line] of trimmed.split(/\r?\n/).entries()) {
+      const entry = line.trim();
+      if (!entry) continue;
+      try {
+        records.push(JSON.parse(entry));
+      } catch (error) {
+        throw new Error(`invalid model routing feedback JSON in ${file}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return records;
+  }
+}
+
+function isCodexModelRoutingFeedbackSummary(value: unknown): value is FrontierCodexModelRoutingFeedbackSummary {
+  return isObject(value)
+    && value.kind === FRONTIER_SWARM_CODEX_MODEL_ROUTING_FEEDBACK_KIND
+    && value.version === FRONTIER_SWARM_CODEX_MODEL_ROUTING_FEEDBACK_VERSION
+    && (value.recommendation === 'lower' || value.recommendation === 'same' || value.recommendation === 'higher')
+    && Array.isArray(value.signals);
+}
+
+function collectCodexModelRoutingFeedbackSignals(
+  value: unknown,
+  sourceHint: string | undefined,
+  signals: FrontierCodexModelRoutingFeedbackSignal[],
+  depth = 0
+): void {
+  if (depth > 5 || value == null) return;
+  if (Array.isArray(value)) {
+    for (const entry of value) collectCodexModelRoutingFeedbackSignals(entry, sourceHint, signals, depth + 1);
+    return;
+  }
+  if (!isObject(value)) return;
+  if (isCodexModelRoutingFeedbackSummary(value)) {
+    signals.push(...value.signals);
+    return;
+  }
+  const source = normalizeModelRoutingSource(value, sourceHint);
+  const signal = normalizeCodexModelRoutingSignal(value, source);
+  if (signal) signals.push(signal);
+  for (const key of [
+    'tournament',
+    'tournaments',
+    'rsi',
+    'feedback',
+    'modelFeedback',
+    'modelRoutingFeedback',
+    'routingFeedback',
+    'signals',
+    'items',
+    'results',
+    'records',
+    'recommendations',
+    'artifacts',
+    'entries'
+  ]) {
+    if (value[key] !== undefined) collectCodexModelRoutingFeedbackSignals(value[key], source, signals, depth + 1);
+  }
+}
+
+function normalizeCodexModelRoutingSignal(
+  value: Record<string, unknown>,
+  source: string
+): FrontierCodexModelRoutingFeedbackSignal | undefined {
+  const explicit = normalizeModelRoutingRecommendation(readFirstString(
+    value.recommendation,
+    value.direction,
+    value.recommendedDirection,
+    value.modelRecommendation,
+    value.action,
+    value.tier,
+    value.recommendedTier
+  ));
+  const winnerModel = readFirstString(value.winnerModel, value.winningModel, value.winner, value.bestModel, value.best);
+  const loserModel = readFirstString(value.loserModel, value.losingModel, value.loser, value.baselineModel, value.baseline, value.previousModel);
+  const recommendedModel = readFirstString(value.recommendedModel, value.model, value.selectedModel, value.targetModel);
+  const baselineModel = readFirstString(value.baselineModel, value.baseline, value.currentModel, value.previousModel);
+  const tournamentRecommendation = inferTournamentModelRecommendation(winnerModel ?? recommendedModel, loserModel ?? baselineModel);
+  const rsiRecommendation = inferRsiModelRecommendation(value, source);
+  const recommendation = explicit ?? tournamentRecommendation ?? rsiRecommendation;
+  if (!recommendation) return undefined;
+  const confidence = readRoutingConfidence(value, source);
+  const score = readRoutingScore(value);
+  const model = recommendedModel ?? winnerModel;
+  const reason = readFirstString(value.reason, value.explanation, value.summary, value.message)
+    ?? defaultModelRoutingFeedbackReason(source, recommendation, confidence, model);
+  return {
+    source,
+    recommendation,
+    confidence,
+    reason,
+    ...(model ? { model } : {}),
+    ...(baselineModel ? { baselineModel } : {}),
+    ...(winnerModel ? { winnerModel } : {}),
+    ...(loserModel ? { loserModel } : {}),
+    ...(score !== undefined ? { score } : {})
+  };
+}
+
+function normalizeModelRoutingSource(value: Record<string, unknown>, sourceHint: string | undefined): string {
+  const explicit = readFirstString(value.source, value.kind, value.type, value.artifactKind);
+  const source = explicit ?? sourceHint ?? 'feedback';
+  const normalized = source.toLowerCase();
+  if (normalized.includes('tournament')) return 'tournament';
+  if (normalized === 'rsi' || normalized.includes('rsi')) return 'rsi';
+  return source;
+}
+
+function normalizeModelRoutingRecommendation(value: string | undefined): FrontierCodexModelRoutingRecommendation | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase().replaceAll('_', '-');
+  if (['lower', 'downgrade', 'down', 'cheaper', 'cheap', 'mini', 'smaller', 'save', 'cost-saving', 'cost-saving-model'].includes(normalized)) return 'lower';
+  if (['higher', 'upgrade', 'up', 'deeper', 'deep', 'larger', 'quality', 'quality-model', 'escalate'].includes(normalized)) return 'higher';
+  if (['same', 'keep', 'hold', 'neutral', 'no-change', 'unchanged', 'baseline'].includes(normalized)) return 'same';
+  return undefined;
+}
+
+function inferTournamentModelRecommendation(
+  winnerModel: string | undefined,
+  loserModel: string | undefined
+): FrontierCodexModelRoutingRecommendation | undefined {
+  const winnerRank = codexAdaptiveModelRank(winnerModel);
+  const loserRank = codexAdaptiveModelRank(loserModel);
+  if (winnerRank === undefined || loserRank === undefined) return undefined;
+  if (winnerRank < loserRank) return 'lower';
+  if (winnerRank > loserRank) return 'higher';
+  return 'same';
+}
+
+function inferRsiModelRecommendation(
+  value: Record<string, unknown>,
+  source: string
+): FrontierCodexModelRoutingRecommendation | undefined {
+  if (source !== 'rsi') return undefined;
+  const qualityRisk = readRoutingUnitNumber(value.qualityRisk, value.failureRisk, value.regressionRisk, value.errorRate);
+  if (qualityRisk !== undefined && qualityRisk >= 0.65) return 'higher';
+  const rsi = readRoutingUnitNumber(
+    value.rsi,
+    value.relativeSavingsIndex,
+    value.resourceSavingsIndex,
+    value.routingSavingsIndex,
+    value.costPressure,
+    value.savingsPressure,
+    value.score
+  );
+  if (rsi === undefined) return undefined;
+  if (rsi >= 0.65) return 'lower';
+  if (rsi <= 0.35) return 'higher';
+  return 'same';
+}
+
+function readRoutingConfidence(value: Record<string, unknown>, source: string): number {
+  const direct = readRoutingUnitNumber(value.confidence, value.probability, value.weight, value.winRate, value.win_rate);
+  if (direct !== undefined) return direct;
+  if (source === 'tournament') return 0.7;
+  if (source === 'rsi') return 0.6;
+  return 0.5;
+}
+
+function readRoutingScore(value: Record<string, unknown>): number | undefined {
+  const direct = readRoutingSignedNumber(value.routingScore, value.scoreDelta, value.delta, value.margin);
+  return direct === undefined ? undefined : roundRoutingNumber(direct);
+}
+
+function readRoutingUnitNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = parseRoutingNumber(value);
+    if (parsed === undefined) continue;
+    return Math.max(0, Math.min(1, parsed > 1 ? parsed / 100 : parsed));
+  }
+  return undefined;
+}
+
+function readRoutingSignedNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = parseRoutingNumber(value);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+function parseRoutingNumber(value: unknown): number | undefined {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() ? Number(value.trim()) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function defaultModelRoutingFeedbackReason(
+  source: string,
+  recommendation: FrontierCodexModelRoutingRecommendation,
+  confidence: number,
+  model: string | undefined
+): string {
+  const modelText = model ? ` toward ${model}` : '';
+  return `${source} feedback recommends ${recommendation} model routing${modelText} with ${Math.round(confidence * 100)}% confidence.`;
+}
+
+function resolveAdaptiveCodexModelRouting(
+  job: FrontierSwarmJob,
+  input: Pick<FrontierCodexSwarmRunOptions, 'modelRoutingFeedback' | 'adaptiveModelMin' | 'adaptiveModelMax'>,
+  baseModel: string
+): FrontierCodexModelRoutingDecision {
+  const feedback = input.modelRoutingFeedback === undefined
+    ? undefined
+    : normalizeCodexModelRoutingFeedback(input.modelRoutingFeedback);
+  const risk = scoreCodexAdaptiveJobRisk(job);
+  const minModel = normalizeAdaptiveModelCap(input.adaptiveModelMin);
+  const maxModel = normalizeAdaptiveModelCap(input.adaptiveModelMax);
+  const minRank = minModel ? codexAdaptiveModelRank(minModel) : 0;
+  const maxRank = maxModel ? codexAdaptiveModelRank(maxModel) : FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER.length - 1;
+  if (minRank !== undefined && maxRank !== undefined && minRank > maxRank) {
+    throw new Error(`adaptive model min ${minModel} cannot rank above max ${maxModel}`);
+  }
+  const feedbackScore = feedback?.summary.signalCount
+    ? modelRoutingDirectionValue(feedback.recommendation) * Math.max(0.15, feedback.confidence) * 0.6
+    : 0;
+  const routingScore = roundRoutingNumber(risk.score + feedbackScore);
+  const recommendation: FrontierCodexModelRoutingRecommendation = routingScore >= 0.25
+    ? 'higher'
+    : routingScore <= -0.2
+      ? 'lower'
+      : 'same';
+  const baseRank = codexAdaptiveModelRank(baseModel);
+  const targetRank = baseRank === undefined
+    ? undefined
+    : recommendation === 'higher'
+      ? findHigherAdaptiveModelRank(baseRank)
+      : recommendation === 'lower'
+        ? findLowerAdaptiveModelRank(baseRank)
+        : baseRank;
+  const capped = applyAdaptiveModelCaps(targetRank ?? baseRank, minRank, maxRank);
+  const selectedModel = capped.rank === undefined ? baseModel : FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER[capped.rank];
+  const reasons = uniqueStrings([
+    ...risk.reasons,
+    feedback?.summary.signalCount
+      ? `Feedback recommends ${feedback.recommendation} routing with ${Math.round(feedback.confidence * 100)}% confidence.`
+      : 'No model-routing feedback artifact was provided.',
+    recommendation === 'lower'
+      ? 'Adaptive routing found this job eligible for a lower-cost model.'
+      : recommendation === 'higher'
+        ? 'Adaptive routing found this job risky enough to use a deeper model.'
+        : 'Adaptive routing kept the planned model after scoring risk and feedback.',
+    ...capped.reasons,
+    ...priceComparisonReasons(baseModel, selectedModel)
+  ]);
+  return createCodexModelRoutingDecision({
+    policy: 'adaptive',
+    forwarded: true,
+    baseModel,
+    selectedModel,
+    recommendation,
+    confidence: Math.max(Math.abs(routingScore), feedback?.confidence ?? 0),
+    routingScore,
+    reasons,
+    hardCaps: {
+      ...(minModel ? { minModel } : {}),
+      ...(maxModel ? { maxModel } : {}),
+      applied: capped.applied
+    },
+    ...(feedback ? { feedback } : {})
+  });
+}
+
+function createCodexModelRoutingDecision(input: {
+  policy: FrontierCodexModelPolicy;
+  forwarded: boolean;
+  baseModel?: string;
+  selectedModel?: string;
+  recommendation: FrontierCodexModelRoutingRecommendation;
+  confidence: number;
+  routingScore: number;
+  reasons: readonly string[];
+  hardCaps: FrontierCodexModelRoutingDecision['hardCaps'];
+  feedback?: FrontierCodexModelRoutingFeedbackSummary;
+}): FrontierCodexModelRoutingDecision {
+  const pricing = getCodexModelPricing(input.selectedModel);
+  return {
+    policy: input.policy,
+    forwarded: input.forwarded,
+    ...(input.baseModel ? { baseModel: input.baseModel } : {}),
+    ...(input.selectedModel ? { selectedModel: input.selectedModel } : {}),
+    recommendation: input.recommendation,
+    confidence: roundRoutingNumber(Math.max(0, Math.min(1, input.confidence))),
+    routingScore: roundRoutingNumber(input.routingScore),
+    reasons: uniqueStrings([...input.reasons]),
+    hardCaps: input.hardCaps,
+    ...(pricing ? { pricing } : {}),
+    ...(input.feedback ? { feedback: input.feedback } : {})
+  };
+}
+
+function scoreCodexAdaptiveJobRisk(job: FrontierSwarmJob): { score: number; reasons: string[] } {
+  let score = 0;
+  const reasons: string[] = [];
+  const changedSurfaceCount = uniqueStrings([...job.task.targetRefs, ...job.allowedWrites, ...job.ownedRegions, ...job.changedRegions]).length;
+  const searchText = [
+    job.id,
+    job.title,
+    job.task.objective,
+    job.task.description,
+    job.task.workKind,
+    job.lane,
+    job.layer,
+    ...job.tags,
+    ...job.task.tags,
+    metadataSearchText(job.metadata),
+    metadataSearchText(job.task.metadata)
+  ].join(' ').toLowerCase();
+  if (/\b(high-risk|risk-high|dangerous|security|auth|release|publish|migration|codec|wire-format|corruption|destructive|cross-package|multi-surface|conflict|merge)\b/.test(searchText)) {
+    score += 0.5;
+    reasons.push('Risk terms in the task metadata favor a deeper model.');
+  }
+  if (job.review.alwaysReview || job.review.requiredReviewers > 0) {
+    score += 0.3;
+    reasons.push('Review policy requires extra scrutiny, so adaptive routing raises model depth.');
+  }
+  if (changedSurfaceCount >= 4) {
+    score += 0.2;
+    reasons.push('The job touches several declared surfaces, increasing routing risk.');
+  }
+  if (job.resourceRequirements?.browser?.required) {
+    score += 0.1;
+    reasons.push('Browser resources make the job less deterministic than a pure source edit.');
+  }
+  if (/\b(simple|typo|docs?|readme|smoke|small|single-file|low-risk|narrow)\b/.test(searchText) || changedSurfaceCount <= 1) {
+    score -= 0.45;
+    reasons.push('The job is narrow enough for a lower-cost model candidate.');
+  }
+  if (job.budget?.maxCostUsd !== undefined && job.budget.maxCostUsd <= 0.25) {
+    score -= 0.15;
+    reasons.push('The job has a tight cost budget, so adaptive routing favors lower unit pricing.');
+  }
+  return { score: roundRoutingNumber(score), reasons };
+}
+
+function metadataSearchText(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value).slice(0, 4096);
+  } catch {
+    return '';
+  }
+}
+
+function normalizeAdaptiveModelCap(model: string | undefined): string | undefined {
+  if (model === undefined) return undefined;
+  const normalized = normalizeCodexModelFlag(model);
+  if (!normalized) return undefined;
+  if (codexAdaptiveModelRank(normalized) === undefined) {
+    throw new Error(`adaptive model cap ${model} is not in the adaptive model ladder: ${FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER.join(', ')}`);
+  }
+  return normalized;
+}
+
+function applyAdaptiveModelCaps(
+  rank: number | undefined,
+  minRank: number | undefined,
+  maxRank: number | undefined
+): { rank: number | undefined; applied: string[]; reasons: string[] } {
+  if (rank === undefined) return { rank, applied: [], reasons: [] };
+  let capped = rank;
+  const applied: string[] = [];
+  const reasons: string[] = [];
+  if (minRank !== undefined && capped < minRank) {
+    capped = minRank;
+    applied.push('min');
+    reasons.push(`Hard minimum model cap kept routing at or above ${FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER[minRank]}.`);
+  }
+  if (maxRank !== undefined && capped > maxRank) {
+    capped = maxRank;
+    applied.push('max');
+    reasons.push(`Hard maximum model cap kept routing at or below ${FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER[maxRank]}.`);
+  }
+  return { rank: capped, applied, reasons };
+}
+
+function priceComparisonReasons(baseModel: string | undefined, selectedModel: string | undefined): string[] {
+  if (!baseModel || !selectedModel || baseModel === selectedModel) return [];
+  const basePricing = getCodexModelPricing(baseModel);
+  const selectedPricing = getCodexModelPricing(selectedModel);
+  if (!basePricing || !selectedPricing) return [];
+  const baseUnit = basePricing.inputUsdPerUnit + basePricing.outputUsdPerUnit;
+  const selectedUnit = selectedPricing.inputUsdPerUnit + selectedPricing.outputUsdPerUnit;
+  if (selectedUnit < baseUnit) return [`Selected ${selectedModel} because catalog unit pricing is lower than ${baseModel}.`];
+  if (selectedUnit > baseUnit) return [`Selected ${selectedModel} despite higher catalog unit pricing because risk scoring favored quality.`];
+  return [`Selected ${selectedModel}; catalog unit pricing matches ${baseModel}.`];
+}
+
+function findLowerAdaptiveModelRank(baseRank: number): number {
+  for (let index = baseRank - 1; index >= 0; index -= 1) {
+    if (getCodexModelPricing(FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER[index])) return index;
+  }
+  return Math.max(0, baseRank - 1);
+}
+
+function findHigherAdaptiveModelRank(baseRank: number): number {
+  return Math.min(FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER.length - 1, baseRank + 1);
+}
+
+function codexAdaptiveModelRank(model: string | null | undefined): number | undefined {
+  const normalized = normalizeCodexMetricsModel(model)?.toLowerCase();
+  if (!normalized) return undefined;
+  const index = FRONTIER_SWARM_CODEX_ADAPTIVE_MODEL_LADDER.findIndex((entry) => entry.toLowerCase() === normalized);
+  return index >= 0 ? index : undefined;
+}
+
+function modelRoutingDirectionValue(recommendation: FrontierCodexModelRoutingRecommendation): number {
+  if (recommendation === 'lower') return -1;
+  if (recommendation === 'higher') return 1;
+  return 0;
+}
+
+function roundRoutingNumber(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 export function getCodexModelPricing(model: string | null | undefined): FrontierCodexModelPricing | undefined {
@@ -4978,29 +5598,55 @@ export function estimateCodexRunCost(metrics: FrontierCodexRunMetricsInput | Fro
 
 export function createCodexResourceAllocation(
   job: FrontierSwarmJob,
-  input: { cwd?: string; outDir: string; workspacePath?: string; lease?: FrontierSwarmLease }
+  input: {
+    cwd?: string;
+    outDir: string;
+    workspacePath?: string;
+    lease?: FrontierSwarmLease;
+    model?: string | false;
+    modelPolicy?: FrontierCodexModelPolicy;
+    forwardPlanModel?: boolean;
+    modelRoutingFeedback?: FrontierCodexModelRoutingFeedbackInput;
+    adaptiveModelMin?: string;
+    adaptiveModelMax?: string;
+  }
 ): FrontierCodexResourceAllocation {
   const requirements = job.resourceRequirements;
   const capabilities = uniqueStrings([...(job.capabilities ?? []), ...(requirements?.capabilities ?? [])]);
   const resources = { ...(requirements?.resources ?? {}) };
+  const modelRouting = resolveCodexModelRouting(job, input);
+  const model = modelRouting.selectedModel;
+  const modelPricing = getCodexModelPricing(model);
   const env: Record<string, string> = {
     FRONTIER_SWARM_JOB_ID: job.id,
     FRONTIER_SWARM_TASK_ID: job.taskId,
     FRONTIER_SWARM_LANE: job.lane,
     FRONTIER_SWARM_CAPABILITIES: capabilities.join(',')
   };
-  const model = normalizeCodexMetricsModel(job.compute.model ?? FRONTIER_SWARM_CODEX_DEFAULT_MODEL);
-  const modelPricing = getCodexModelPricing(model);
+  if (model) env.FRONTIER_SWARM_CODEX_MODEL = model;
+  env.FRONTIER_SWARM_CODEX_MODEL_POLICY = modelRouting.policy;
+  env.FRONTIER_SWARM_CODEX_MODEL_ROUTING_SCORE = String(modelRouting.routingScore);
+  env.FRONTIER_SWARM_CODEX_MODEL_ROUTING_RECOMMENDATION = modelRouting.recommendation;
   const baseAllocation = {
     capabilities,
     resources,
     env,
     ...(model ? { model } : {}),
     ...(modelPricing ? { modelPricing } : {}),
-    ...(!modelPricing ? { modelPricingUnknownReason: model ? 'unknown-model-pricing' as const : 'missing-model' as const } : {})
+    ...(!modelPricing ? { modelPricingUnknownReason: model ? 'unknown-model-pricing' as const : 'missing-model' as const } : {}),
+    modelRouting
   };
   const browser = requirements?.browser;
-  if (!browser) return baseAllocation;
+  if (!browser) {
+    env.FRONTIER_SWARM_RESOURCE_ALLOCATION = JSON.stringify({
+      capabilities,
+      resources,
+      ...(model ? { model } : {}),
+      ...(modelPricing ? { modelPricing } : {}),
+      modelRouting
+    });
+    return baseAllocation;
+  }
   const portPool = uniqueWorkspacePaths(browser.portPool ?? []);
   const port = portPool.length ? portPool[resourceSlot(job, input.lease, portPool.length)] : undefined;
   const profileDir = resolveBrowserProfileDir(job, browser.profileDir, browser.profileDirPrefix, input.cwd ?? process.cwd());
@@ -5018,7 +5664,14 @@ export function createCodexResourceAllocation(
   }
   if (profileDir) env.FRONTIER_SWARM_BROWSER_PROFILE_DIR = profileDir;
   if (browser.headless !== undefined) env.FRONTIER_SWARM_BROWSER_HEADLESS = String(browser.headless);
-  env.FRONTIER_SWARM_RESOURCE_ALLOCATION = JSON.stringify({ capabilities, resources, browser: browserAllocation });
+  env.FRONTIER_SWARM_RESOURCE_ALLOCATION = JSON.stringify({
+    capabilities,
+    resources,
+    ...(model ? { model } : {}),
+    ...(modelPricing ? { modelPricing } : {}),
+    modelRouting,
+    browser: browserAllocation
+  });
   return {
     ...baseAllocation,
     browser: browserAllocation
@@ -12028,6 +12681,10 @@ function formatResourceAllocation(allocation: FrontierCodexResourceAllocation): 
     allocation.model ? `model=${allocation.model}` : undefined,
     allocation.modelPricing ? formatModelPricingAllocation(allocation.modelPricing) : undefined,
     allocation.modelPricingUnknownReason ? `modelPricingUnknownReason=${allocation.modelPricingUnknownReason}` : undefined,
+    allocation.modelRouting
+      ? `modelRouting policy=${allocation.modelRouting.policy} selectedModel=${allocation.modelRouting.selectedModel ?? 'none'} recommendation=${allocation.modelRouting.recommendation} confidence=${allocation.modelRouting.confidence} routingScore=${allocation.modelRouting.routingScore}`
+      : undefined,
+    ...(allocation.modelRouting?.reasons ?? []).map((reason) => `modelRoutingReason=${reason}`),
     Object.keys(allocation.env).length ? `env=${Object.keys(allocation.env).sort().join(',')}` : undefined
   ].filter((value): value is string => !!value);
   return entries.length ? entries : ['none'];

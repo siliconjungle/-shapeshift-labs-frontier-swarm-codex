@@ -4,7 +4,7 @@ Node Codex CLI runner adapter for Frontier swarm plans.
 
 `frontier-swarm-codex` executes `@shapeshift-labs/frontier-swarm` plans with the Codex CLI. It owns Node process spawning, prompt rendering, worktree/snapshot workspace setup, command shaping, JSONL output capture, last-message capture, optional verification commands, changed-path ownership checks, and swarm result/proof artifacts.
 
-The default swarm compute profile records `gpt-5.5` with `model_reasoning_effort="xhigh"` for planning. The Codex CLI invocation defaults to the local Codex config instead of forwarding planned model flags, because model availability and accepted flag values vary by Codex binary and account. Pass `--model ...`, `--model-policy plan`, or `modelPolicy: 'plan'` when a runner should force the planned profile. Forwarded model IDs are validated against the package catalog (`gpt-5.5`, `gpt-5.4-mini`, `o4-mini`, and `gpt-4.1-mini`); unsupported explicit or planned model IDs fail before a worker is spawned. The pure `frontier-swarm` package stays runtime-neutral.
+The default swarm compute profile records `gpt-5.5` with `model_reasoning_effort="xhigh"` for planning. The Codex CLI invocation defaults to the local Codex config instead of forwarding planned model flags, because model availability and accepted flag values vary by Codex binary and account. Pass `--model ...`, `--model-policy plan`, or `modelPolicy: 'plan'` when a runner should force the planned profile. Use `--model-policy adaptive` or `modelPolicy: 'adaptive'` to let the adapter choose a per-job runtime model from task risk, pricing, hard caps, and optional tournament/RSI feedback artifacts. Forwarded model IDs are validated against the package catalog (`gpt-5.5`, `gpt-5.4-mini`, `o4-mini`, and `gpt-4.1-mini`); unsupported explicit, planned, or adaptive cap model IDs fail before a worker is spawned. The pure `frontier-swarm` package stays runtime-neutral.
 
 By default, a swarm run is self-draining. After workers finish, coordinator-agent drain collects their merge bundles, builds scoped queues, and applies only admitted patches under the repo lock and configured gates. The scalable merge path is: workers produce bundles, coordinator agents lease semantic/path/repo queue scopes, same-scope work serializes locally, cross-scope work promotes upward, and repository mutation happens only through autonomous apply decisions. Dashboard queue counts are pending coordinator work, not landed code, until autonomous apply records an `applied` or `committed` decision. Human blockers are the narrow exception: `operatorSummary.status === "blocked"`, a true-blocker card, or explicit `humanQuestions`.
 
@@ -258,6 +258,15 @@ frontier-swarm-codex run \
   --tasks agent-runs/current/refill/next-task-set.json \
   --max-concurrency 8
 
+frontier-swarm-codex run \
+  --manifest inkwell/agent-ownership.json \
+  --tasks inkwell/parity-work-queue.json \
+  --model-policy adaptive \
+  --model-routing-feedback agent-runs/previous/tournament-results.jsonl \
+  --model-routing-feedback agent-runs/previous/rsi-feedback.json \
+  --adaptive-model-min gpt-5.4-mini \
+  --adaptive-model-max gpt-5.5
+
 frontier-swarm stop --run agent-runs/codex-swarm/run-1
 
 frontier-swarm collect \
@@ -310,7 +319,7 @@ if (refill.taskSet) {
 
 App-specific adapters should keep orchestration inside this package and use hooks for local policy. `prepareJobWorkspace` can link generated package artifacts or shared fixtures, `renderJobPrompt` can append product-specific migration rules, `changedPathFilter` can hide runner-owned symlinks from ownership checks, and `onJobStarted`/`onJobFinished`/`onSwarmFinished` can mirror lifecycle records into project-specific JSONL streams.
 
-Use `modelPolicy: 'config-default'` for portable swarms that should respect each machine's Codex config. Use `modelPolicy: 'plan'` only when the installed Codex CLI and account are known to accept the planned model IDs in the supported catalog: `gpt-5.5`, `gpt-5.4-mini`, `o4-mini`, and `gpt-4.1-mini`. Unsupported explicit or plan-forwarded models fail during argument construction instead of entering worker args. `approval: 'full-auto'` and `--approval-policy full-auto` are normalized to the current `--ask-for-approval never` spelling.
+Use `modelPolicy: 'config-default'` for portable swarms that should respect each machine's Codex config. Use `modelPolicy: 'plan'` only when the installed Codex CLI and account are known to accept the planned model IDs in the supported catalog: `gpt-5.5`, `gpt-5.4-mini`, `o4-mini`, and `gpt-4.1-mini`. Use `modelPolicy: 'adaptive'` when the runner should forward a model selected by the adapter. Adaptive routing normalizes tournament and RSI artifacts into `lower`, `same`, or `higher` recommendations with confidence, then combines that feedback with task risk, pricing, and `adaptiveModelMin`/`adaptiveModelMax` hard caps. Each job's `resource-allocation.json`, scheduled event, and prompt include the selected model, model pricing when known, routing score, feedback summary, and plain-English model-choice reasons. Unsupported explicit, plan-forwarded, or adaptive cap models fail during argument construction instead of entering worker args. `approval: 'full-auto'` and `--approval-policy full-auto` are normalized to the current `--ask-for-approval never` spelling.
 
 Pass `--semantic-import` or `semanticImport: true` to write a `semantic-imports.json` sidecar for changed source files. The sidecar uses the optional `@shapeshift-labs/frontier-lang` dependency to import supported native sources into Frontier Lang universal ASTs, summarize source maps/losses/semantic indexes, and attach semantic merge-candidate metadata to each worker merge bundle. Use `--semantic-import-include`, `--semantic-import-exclude`, `--semantic-import-max-files`, and `--semantic-import-max-bytes` to keep the import pass scoped.
 
