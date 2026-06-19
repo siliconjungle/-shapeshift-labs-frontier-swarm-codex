@@ -58,6 +58,33 @@ frontier-swarm-codex run \
 
 `--rerun-manifest` is a validated task-input alias for the generated rerun manifest. It preserves each task's `metadata.rerun`, source patch and bundle references, original queue item ids, source heads, target refs, and allowed writes so workers can rerun against the current checkout without manual queue surgery. It starts fresh leased workers and then follows the normal auto-drain path; it does not apply the stale patch refs, skip coordinator leases, or bypass focused/global gates. If the manifest is empty, no continuation wave is needed for reruns.
 
+## Refill a Continuous Pool
+
+For long-running autonomous pools, use `refill` to compute the next task set from current capacity instead of editing queue JSON by hand:
+
+```sh
+frontier-swarm-codex refill \
+  --desired-concurrency 8 \
+  --active-workers agent-runs/current/pids.json \
+  --queued agent-runs/current/queued-task-set.json \
+  --rerun-manifest agent-runs/previous-run/auto-drain/rerun-manifest.json \
+  --backlog path/to/work-queue.json \
+  --outDir agent-runs/current/refill
+```
+
+The command subtracts active workers and queued work from desired concurrency, reads any drained or rerun-required manifests, then selects rerun tasks before backlog `todo` tasks. It writes `continuous-refill.json` with `state: "next-task-set"`, `state: "drained"`, or `state: "capacity-full"`. When work is available it also writes `next-task-set.json`, which is directly consumable by the next run:
+
+```sh
+frontier-swarm-codex run \
+  --manifest path/to/agent-ownership.json \
+  --tasks agent-runs/current/refill/next-task-set.json \
+  --outDir agent-runs/refill-wave \
+  --workspace copy \
+  --semantic-import
+```
+
+Treat `drained` as an explicit terminal state for the pool inputs that were inspected: no rerun work and no unqueued backlog `todo` work were available. Treat `capacity-full` as a no-op because the requested concurrency is already occupied by active or queued work; rerun the same refill command after workers finish or queued work is launched.
+
 Use `--no-auto-drain` only when you want a raw diagnostic run, for example to inspect worker output without any coordinator apply attempt:
 
 ```sh

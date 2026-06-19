@@ -83,6 +83,7 @@ const {
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
   createCodexAutoDrainRerunManifest,
+  createCodexContinuousRefill,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
   FRONTIER_SWARM_CODEX_AUTONOMOUS_DECISION_COLLAPSE_POLICY,
@@ -1304,6 +1305,10 @@ const cliHelp = await execFileP(process.execPath, [
   'help'
 ], { cwd: tmp });
 assert.ok(cliHelp.stdout.includes('Default run auto-drain is autonomous coordinator drain work.'));
+assert.ok(cliHelp.stdout.includes('refill    Compute open pool capacity and emit the next task-set or drained state'));
+assert.ok(cliHelp.stdout.includes('refill: --desired-concurrency <n> --active-workers <n|file> --queued <file> --backlog <file> --rerun-manifest <file>'));
+assert.ok(cliHelp.stdout.includes('continuous-refill.json'));
+assert.ok(cliHelp.stdout.includes('next-task-set.json'));
 assert.ok(cliHelp.stdout.includes('frontier.swarm.coordinator-agent-drain-work contract'));
 assert.ok(cliHelp.stdout.includes('--auto-drain-commit (after required gates pass, run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)'));
 assert.ok(cliHelp.stdout.includes('--promote-patch-candidates[=true|false] --no-promote-patch-candidates'));
@@ -2456,6 +2461,95 @@ assert.strictEqual(autoDrainRerunManifest.summary.taskCount, 0);
 assert.strictEqual(autoDrainRerunManifest.summary.terminalState, 'drained');
 assert.deepStrictEqual(autoDrainRerunManifest.items, []);
 assert.deepStrictEqual(autoDrainRerunManifest.tasks, []);
+const drainedRefill = createCodexContinuousRefill({
+  desiredConcurrency: 3,
+  activeWorkers: { entries: [{ role: 'codex', jobId: 'active-job', taskId: 'active-task', status: 'running' }] },
+  queuedTasks: { items: [{ id: 'queued-task', status: 'todo', lane: 'apply' }] },
+  rerunManifests: [autoDrainRerunManifest],
+  backlog: { items: [] },
+  generatedAt: 123
+});
+assert.strictEqual(drainedRefill.state, 'drained');
+assert.strictEqual(drainedRefill.drained, true);
+assert.strictEqual(drainedRefill.desiredConcurrency, 3);
+assert.strictEqual(drainedRefill.activeWorkerCount, 1);
+assert.strictEqual(drainedRefill.queuedTaskCount, 1);
+assert.strictEqual(drainedRefill.openConcurrency, 1);
+assert.strictEqual(drainedRefill.selectedTaskCount, 0);
+assert.strictEqual(drainedRefill.summary.rerunManifestCount, 1);
+assert.deepStrictEqual(drainedRefill.rerunManifestTerminalStates, ['drained']);
+assert.strictEqual(Object.hasOwn(drainedRefill, 'taskSet'), false);
+const todoRefillBacklog = {
+  items: [{
+    id: 'refill-a',
+    status: 'todo',
+    lane: 'apply',
+    targetRefs: ['src/refill-a.ts'],
+    allowedWrites: ['src/refill-a.ts']
+  }, {
+    id: 'queued-task',
+    status: 'todo',
+    lane: 'apply',
+    targetRefs: ['src/queued.ts']
+  }, {
+    id: 'refill-b',
+    status: 'todo',
+    lane: 'apply',
+    targetRefs: ['src/refill-b.ts'],
+    allowedWrites: ['src/refill-b.ts']
+  }, {
+    id: 'done-task',
+    status: 'done',
+    lane: 'apply'
+  }]
+};
+const todoRefill = createCodexContinuousRefill({
+  desiredConcurrency: 4,
+  activeWorkerCount: 1,
+  queuedTaskCount: 1,
+  queuedTasks: { items: [{ id: 'queued-task', status: 'todo' }] },
+  rerunManifests: [autoDrainRerunManifest],
+  backlog: todoRefillBacklog,
+  generatedAt: 124
+});
+assert.strictEqual(todoRefill.state, 'next-task-set');
+assert.strictEqual(todoRefill.drained, false);
+assert.strictEqual(todoRefill.openConcurrency, 2);
+assert.deepStrictEqual(todoRefill.selectedTaskIds, ['refill-a', 'refill-b']);
+assert.deepStrictEqual(todoRefill.selectedTasks.map((task) => task.source), ['backlog', 'backlog']);
+assert.deepStrictEqual(todoRefill.excludedTaskIds, ['queued-task']);
+assert.strictEqual(todoRefill.taskSet.summary.taskCount, 2);
+assert.deepStrictEqual(todoRefill.taskSet.items.map((task) => task.id), ['refill-a', 'refill-b']);
+const refillBacklogPath = path.join(tmp, 'continuous-refill-backlog.json');
+const refillQueuedPath = path.join(tmp, 'continuous-refill-queued.json');
+const refillOutDir = path.join(tmp, 'continuous-refill-out');
+await fs.writeFile(refillBacklogPath, JSON.stringify(todoRefillBacklog, null, 2) + '\n');
+await fs.writeFile(refillQueuedPath, JSON.stringify({ items: [{ id: 'queued-task', status: 'todo' }] }, null, 2) + '\n');
+const cliRefill = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'refill',
+  '--desired-concurrency',
+  '4',
+  '--active-workers',
+  '1',
+  '--queued',
+  refillQueuedPath,
+  '--rerun-manifest',
+  autoDrainRerunManifestPath,
+  '--backlog',
+  refillBacklogPath,
+  '--outDir',
+  refillOutDir
+], { cwd: tmp });
+const cliRefillResult = JSON.parse(cliRefill.stdout);
+assert.strictEqual(cliRefillResult.state, 'next-task-set');
+assert.deepStrictEqual(cliRefillResult.selectedTaskIds, ['refill-a', 'refill-b']);
+assert.strictEqual(await exists(path.join(refillOutDir, 'continuous-refill.json')), true);
+assert.strictEqual(await exists(path.join(refillOutDir, 'next-task-set.json')), true);
+assert.deepStrictEqual(
+  (await readJson(path.join(refillOutDir, 'next-task-set.json'))).items.map((task) => task.id),
+  ['refill-a', 'refill-b']
+);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.collectionCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.admissionCount, 1);
 assert.strictEqual(autoDrainRun.autoDrainArtifacts.summary.mergeQueuePlanCount, 1);
@@ -6127,7 +6221,11 @@ assert.strictEqual(JSON.parse(await fs.readFile(path.join(tmp, 'swarm-plan.json'
 const cliSource = await fs.readFile(new URL('../dist/cli.js', import.meta.url), 'utf8');
 assert.ok(cliSource.includes("from './index.js'"));
 assert.ok(cliSource.includes('stopCodexSwarmRun'));
+assert.ok(cliSource.includes('createCodexContinuousRefill'));
 assert.ok(cliSource.includes('frontier-swarm <command> [options]'));
+assert.ok(cliSource.includes("command === 'refill'"));
+assert.ok(cliSource.includes('loadContinuousRefill(args)'));
+assert.ok(cliSource.includes('next-task-set.json'));
 assert.ok(cliSource.includes('--semantic-import-include <glob>'));
 assert.ok(cliSource.includes('--semantic-import-exclude <glob>'));
 assert.ok(cliSource.includes('--semantic-import-max-files <n>'));
@@ -6135,6 +6233,8 @@ assert.ok(cliSource.includes('autonomous-apply'));
 assert.ok(cliSource.includes('drain'));
 assert.ok(cliSource.includes('--rerun-manifest <file>'));
 assert.ok(cliSource.includes("options['rerun-manifest']"));
+assert.ok(cliSource.includes('--desired-concurrency <n>'));
+assert.ok(cliSource.includes('--task-set-out <file>'));
 assert.ok(cliSource.includes('assertRerunManifestInput(tasks, rerunManifestPath)'));
 assert.ok(cliSource.includes('--no-auto-drain'));
 assert.ok(cliSource.includes('--auto-drain-out-dir <path>'));

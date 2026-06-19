@@ -96,6 +96,10 @@ export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_KIND = 'frontier.swarm-co
 export const FRONTIER_SWARM_CODEX_AUTO_DRAIN_ARTIFACTS_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND = 'frontier.swarm-codex.rerun-manifest';
 export const FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_KIND = 'frontier.swarm-codex.continuous-refill';
+export const FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_VERSION = 1;
+export const FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_TASK_SET_KIND = 'frontier.swarm-codex.continuous-refill.task-set';
+export const FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_TASK_SET_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_KIND = 'frontier.swarm-codex.coordinator-agent-drain';
 export const FRONTIER_SWARM_CODEX_COORDINATOR_AGENT_DRAIN_VERSION = 1;
 export const FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND = 'frontier.swarm-codex.patch-score';
@@ -1751,6 +1755,88 @@ export interface FrontierCodexAutoDrainRerunManifest {
     sourceHeadCount: number;
     sourcePatchCount: number;
     targetRefCount: number;
+  };
+}
+
+export type FrontierCodexContinuousRefillState = 'next-task-set' | 'drained' | 'capacity-full';
+export type FrontierCodexContinuousRefillTaskSource = 'rerun-manifest' | 'backlog';
+
+export interface FrontierCodexContinuousRefillWorkerInput {
+  id?: string;
+  jobId?: string;
+  taskId?: string;
+  status?: string;
+  role?: string;
+  finishedAt?: number;
+}
+
+export interface FrontierCodexContinuousRefillInput {
+  desiredConcurrency: number;
+  activeWorkerCount?: number;
+  activeWorkers?: unknown;
+  queuedTaskCount?: number;
+  queuedTasks?: unknown;
+  rerunManifest?: unknown;
+  rerunManifests?: readonly unknown[];
+  backlog?: unknown;
+  maxTasks?: number;
+  excludeTaskIds?: readonly string[];
+  generatedAt?: number;
+}
+
+export interface FrontierCodexContinuousRefillTaskRecord {
+  taskId: string;
+  source: FrontierCodexContinuousRefillTaskSource;
+  index: number;
+}
+
+export interface FrontierCodexContinuousRefillTaskSet {
+  kind: typeof FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_TASK_SET_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_TASK_SET_VERSION;
+  id: string;
+  generatedAt: number;
+  source: 'continuous-refill';
+  items: FrontierSwarmTaskInput[];
+  tasks: FrontierSwarmTaskInput[];
+  taskIds: string[];
+  summary: {
+    taskCount: number;
+    rerunTaskCount: number;
+    backlogTaskCount: number;
+  };
+}
+
+export interface FrontierCodexContinuousRefillResult {
+  kind: typeof FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_KIND;
+  version: typeof FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_VERSION;
+  id: string;
+  generatedAt: number;
+  state: FrontierCodexContinuousRefillState;
+  drained: boolean;
+  desiredConcurrency: number;
+  activeWorkerCount: number;
+  queuedTaskCount: number;
+  openConcurrency: number;
+  availableTaskCount: number;
+  selectedTaskCount: number;
+  selectedTaskIds: string[];
+  selectedTasks: FrontierCodexContinuousRefillTaskRecord[];
+  excludedTaskIds: string[];
+  rerunManifestTerminalStates: FrontierCodexAutoDrainRerunManifestTerminalState[];
+  taskSet?: FrontierCodexContinuousRefillTaskSet;
+  reason: string;
+  summary: {
+    desiredConcurrency: number;
+    activeWorkerCount: number;
+    queuedTaskCount: number;
+    openConcurrency: number;
+    rerunManifestCount: number;
+    rerunTaskCount: number;
+    backlogTaskCount: number;
+    backlogTodoCount: number;
+    availableTaskCount: number;
+    selectedTaskCount: number;
+    drained: boolean;
   };
 }
 
@@ -8832,6 +8918,207 @@ export function createCodexAutoDrainRerunManifest(input: FrontierCodexAutoDrainR
     jobIds,
     summary
   };
+}
+
+interface ContinuousRefillCandidate {
+  task: FrontierSwarmTaskInput;
+  taskId: string;
+  source: FrontierCodexContinuousRefillTaskSource;
+  index: number;
+}
+
+export function createCodexContinuousRefill(input: FrontierCodexContinuousRefillInput): FrontierCodexContinuousRefillResult {
+  const generatedAt = input.generatedAt ?? Date.now();
+  const desiredConcurrency = normalizeContinuousRefillCount(input.desiredConcurrency, 'desiredConcurrency');
+  const activeWorkers = readContinuousRefillWorkers(input.activeWorkers);
+  const activeWorkerCount = Math.max(
+    normalizeContinuousRefillOptionalCount(input.activeWorkerCount) ?? 0,
+    activeWorkers.filter(continuousRefillWorkerIsActive).length
+  );
+  const queuedTasks = coerceContinuousRefillTasks(input.queuedTasks);
+  const queuedTaskCount = Math.max(
+    normalizeContinuousRefillOptionalCount(input.queuedTaskCount) ?? 0,
+    queuedTasks.length
+  );
+  const openConcurrency = Math.max(0, desiredConcurrency - activeWorkerCount - queuedTaskCount);
+  const rerunManifests = [input.rerunManifest, ...(input.rerunManifests ?? [])]
+    .filter((entry): entry is unknown => entry !== undefined);
+  const rerunManifestTerminalStates = rerunManifests.map(readContinuousRefillRerunTerminalState);
+  const rerunTasks = rerunManifests.flatMap((manifest) => coerceContinuousRefillTasks(manifest))
+    .filter(continuousRefillTaskIsTodo);
+  const backlogTasks = coerceContinuousRefillTasks(input.backlog);
+  const backlogTodoTasks = backlogTasks.filter(continuousRefillTaskIsTodo);
+  const excludedTaskIds = uniqueStrings([
+    ...(input.excludeTaskIds ?? []),
+    ...activeWorkers.flatMap(continuousRefillWorkerTaskAliases),
+    ...queuedTasks.map((task) => task.id).filter((id): id is string => typeof id === 'string' && id.length > 0)
+  ]).sort();
+  const excluded = new Set(excludedTaskIds);
+  const candidates: ContinuousRefillCandidate[] = [];
+  for (const task of rerunTasks) {
+    if (!task.id || excluded.has(task.id) || candidates.some((candidate) => candidate.taskId === task.id)) continue;
+    candidates.push({ task, taskId: task.id, source: 'rerun-manifest', index: candidates.length });
+  }
+  for (const task of backlogTodoTasks) {
+    if (!task.id || excluded.has(task.id) || candidates.some((candidate) => candidate.taskId === task.id)) continue;
+    candidates.push({ task, taskId: task.id, source: 'backlog', index: candidates.length });
+  }
+  const selectionLimit = Math.min(
+    openConcurrency,
+    normalizeContinuousRefillOptionalCount(input.maxTasks) ?? openConcurrency
+  );
+  const selected = selectionLimit > 0 ? candidates.slice(0, selectionLimit) : [];
+  const state: FrontierCodexContinuousRefillState = selected.length > 0
+    ? 'next-task-set'
+    : candidates.length === 0
+      ? 'drained'
+      : 'capacity-full';
+  const drained = state === 'drained';
+  const reason = state === 'next-task-set'
+    ? 'open-capacity-filled-from-rerun-or-backlog'
+    : state === 'capacity-full'
+      ? 'desired-concurrency-already-filled-by-active-or-queued-work'
+      : 'no-rerun-or-backlog-work';
+  const selectedTaskIds = selected.map((candidate) => candidate.taskId);
+  const taskSet = selected.length > 0
+    ? createContinuousRefillTaskSet({ generatedAt, selected })
+    : undefined;
+  const summary = {
+    desiredConcurrency,
+    activeWorkerCount,
+    queuedTaskCount,
+    openConcurrency,
+    rerunManifestCount: rerunManifests.length,
+    rerunTaskCount: rerunTasks.length,
+    backlogTaskCount: backlogTasks.length,
+    backlogTodoCount: backlogTodoTasks.length,
+    availableTaskCount: candidates.length,
+    selectedTaskCount: selected.length,
+    drained
+  };
+  return {
+    kind: FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_KIND,
+    version: FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_VERSION,
+    id: `frontier-swarm-codex-continuous-refill:${stableHash([generatedAt, summary, selectedTaskIds])}`,
+    generatedAt,
+    state,
+    drained,
+    desiredConcurrency,
+    activeWorkerCount,
+    queuedTaskCount,
+    openConcurrency,
+    availableTaskCount: candidates.length,
+    selectedTaskCount: selected.length,
+    selectedTaskIds,
+    selectedTasks: selected.map((candidate) => ({
+      taskId: candidate.taskId,
+      source: candidate.source,
+      index: candidate.index
+    })),
+    excludedTaskIds,
+    rerunManifestTerminalStates,
+    ...(taskSet ? { taskSet } : {}),
+    reason,
+    summary
+  };
+}
+
+function createContinuousRefillTaskSet(input: {
+  generatedAt: number;
+  selected: readonly ContinuousRefillCandidate[];
+}): FrontierCodexContinuousRefillTaskSet {
+  const items = input.selected.map((candidate) => candidate.task);
+  const taskIds = input.selected.map((candidate) => candidate.taskId);
+  const rerunTaskCount = input.selected.filter((candidate) => candidate.source === 'rerun-manifest').length;
+  const backlogTaskCount = input.selected.filter((candidate) => candidate.source === 'backlog').length;
+  return {
+    kind: FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_TASK_SET_KIND,
+    version: FRONTIER_SWARM_CODEX_CONTINUOUS_REFILL_TASK_SET_VERSION,
+    id: `frontier-swarm-codex-continuous-refill-task-set:${stableHash([input.generatedAt, taskIds])}`,
+    generatedAt: input.generatedAt,
+    source: 'continuous-refill',
+    items,
+    tasks: items,
+    taskIds,
+    summary: {
+      taskCount: items.length,
+      rerunTaskCount,
+      backlogTaskCount
+    }
+  };
+}
+
+function coerceContinuousRefillTasks(value: unknown): FrontierSwarmTaskInput[] {
+  if (!value) return [];
+  if (isObject(value) && isObject(value.taskSet)) return coerceCodexSwarmTasksInput(value.taskSet);
+  return coerceCodexSwarmTasksInput(value);
+}
+
+function readContinuousRefillRerunTerminalState(value: unknown): FrontierCodexAutoDrainRerunManifestTerminalState {
+  if (!isObject(value)) return 'missing';
+  const summary = isObject(value.summary) ? value.summary : {};
+  const terminalState = summary.terminalState;
+  if (terminalState === 'drained' || terminalState === 'rerun-required' || terminalState === 'missing') return terminalState;
+  const taskCount = typeof summary.taskCount === 'number'
+    ? summary.taskCount
+    : coerceContinuousRefillTasks(value).length;
+  return taskCount > 0 ? 'rerun-required' : 'drained';
+}
+
+function continuousRefillTaskIsTodo(task: FrontierSwarmTaskInput): boolean {
+  return task.status === undefined || task.status === 'todo';
+}
+
+function readContinuousRefillWorkers(value: unknown): FrontierCodexContinuousRefillWorkerInput[] {
+  if (!value) return [];
+  const raw = Array.isArray(value)
+    ? value
+    : isObject(value) && Array.isArray(value.activeWorkers)
+      ? value.activeWorkers
+      : isObject(value) && Array.isArray(value.workers)
+        ? value.workers
+        : isObject(value) && Array.isArray(value.entries)
+          ? value.entries
+          : isObject(value) && Array.isArray(value.items)
+            ? value.items
+            : [];
+  return raw.filter(isObject).map((worker) => ({
+    ...(typeof worker.id === 'string' ? { id: worker.id } : {}),
+    ...(typeof worker.jobId === 'string' ? { jobId: worker.jobId } : {}),
+    ...(typeof worker.taskId === 'string' ? { taskId: worker.taskId } : {}),
+    ...(typeof worker.status === 'string' ? { status: worker.status } : {}),
+    ...(typeof worker.role === 'string' ? { role: worker.role } : {}),
+    ...(typeof worker.finishedAt === 'number' ? { finishedAt: worker.finishedAt } : {})
+  }));
+}
+
+function continuousRefillWorkerIsActive(worker: FrontierCodexContinuousRefillWorkerInput): boolean {
+  if (worker.role === 'parent') return false;
+  if (typeof worker.finishedAt === 'number') return false;
+  const status = worker.status?.toLowerCase();
+  if (!status) return true;
+  return status === 'active'
+    || status === 'running'
+    || status === 'started'
+    || status === 'leased'
+    || status === 'in-progress'
+    || status === 'queued';
+}
+
+function continuousRefillWorkerTaskAliases(worker: FrontierCodexContinuousRefillWorkerInput): string[] {
+  return uniqueStrings([worker.taskId, worker.jobId].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0));
+}
+
+function normalizeContinuousRefillCount(value: unknown, field: string): number {
+  const count = normalizeContinuousRefillOptionalCount(value);
+  if (count === undefined) throw new Error(`${field} must be a non-negative number`);
+  return count;
+}
+
+function normalizeContinuousRefillOptionalCount(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === false) return undefined;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : undefined;
 }
 
 function mergeAutoDrainRerunCandidate(

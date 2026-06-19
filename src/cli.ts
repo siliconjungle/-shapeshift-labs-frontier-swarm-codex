@@ -7,6 +7,7 @@ import {
   coerceCodexSwarmManifestInput,
   coerceCodexSwarmTasksInput,
   collectCodexSwarmRun,
+  createCodexContinuousRefill,
   createCodexSwarmPlan,
   FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
   FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION,
@@ -42,6 +43,23 @@ try {
     await fs.mkdir(outDir, { recursive: true });
     await fs.writeFile(path.join(outDir, 'swarm-plan.json'), JSON.stringify(plan, null, 2) + '\n');
     console.log(JSON.stringify({ ok: plan.validation.valid, outDir, plan }, null, 2));
+  } else if (command === 'refill') {
+    const refill = await loadContinuousRefill(args);
+    const outDir = stringArg(args.outDir ?? args.out);
+    const taskSetOut = stringArg(args.taskSetOut ?? args['task-set-out']);
+    if (outDir) {
+      const resolvedOutDir = path.resolve(outDir);
+      await fs.mkdir(resolvedOutDir, { recursive: true });
+      await fs.writeFile(path.join(resolvedOutDir, 'continuous-refill.json'), JSON.stringify(refill, null, 2) + '\n');
+      if (refill.taskSet) {
+        await fs.writeFile(path.join(resolvedOutDir, 'next-task-set.json'), JSON.stringify(refill.taskSet, null, 2) + '\n');
+      }
+    }
+    if (taskSetOut && refill.taskSet) {
+      await fs.mkdir(path.dirname(path.resolve(taskSetOut)), { recursive: true });
+      await fs.writeFile(path.resolve(taskSetOut), JSON.stringify(refill.taskSet, null, 2) + '\n');
+    }
+    console.log(JSON.stringify(refill, null, 2));
   } else if (command === 'run') {
     const plan = args.plan ? JSON.parse(await fs.readFile(String(args.plan), 'utf8')) : await loadPlan(args);
     const outDir = path.resolve(String(args.outDir ?? args.out ?? `agent-runs/frontier-swarm-codex/${stamp()}`));
@@ -203,6 +221,7 @@ function printHelp() {
     '',
     'Commands:',
     '  plan      Build a swarm plan from --manifest and --tasks/--rerun-manifest',
+    '  refill    Compute open pool capacity and emit the next task-set or drained state',
     '  run       Run workers, then produce/drain coordinator-agent work by default',
     '  stop      Stop a run using pids.json',
     '  collect   Collect merge bundles into ready/needs-port/failed/stale buckets',
@@ -216,6 +235,8 @@ function printHelp() {
     'Useful options:',
     '  --manifest <file> --tasks <file>',
     '  --rerun-manifest <file> (use auto-drain/rerun-manifest.json as the next run task set)',
+    '  refill: --desired-concurrency <n> --active-workers <n|file> --queued <file> --backlog <file> --rerun-manifest <file>',
+    '  refill: --queued-count <n> --max-tasks <n> --task-set-out <file> --outDir <dir>',
     `  --model <${FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.join('|')}> (validated; omit for local Codex config)`,
     '  --model-policy config-default|plan|explicit',
     '  --approval never|on-request|on-failure|untrusted',
@@ -253,6 +274,12 @@ function printHelp() {
     'source metadata and starts fresh leased workers; it does not apply old',
     'patches or bypass autonomous apply gates.',
     '',
+    'For continuous pools, use refill between waves instead of editing queues by',
+    'hand. It subtracts active workers and queued work from desired concurrency,',
+    'prefers non-empty rerun manifests, then fills remaining open slots from',
+    'todo backlog items. With --outDir it writes continuous-refill.json and,',
+    'when work is available, next-task-set.json for a later --tasks run.',
+    '',
     'Terminal coordinator decisions such as applied, committed, checked,',
     'rejected, rerun, skipped, and conflict-blocked are queue outcomes, not',
     'human blockers. True blockers require an explicit human/authority question',
@@ -287,6 +314,40 @@ async function loadPlan(options: CliArgs) {
       compute: stringArg(options.compute)
     }
   });
+}
+
+async function loadContinuousRefill(options: CliArgs) {
+  const desiredConcurrency = numberArg(options.desiredConcurrency ?? options['desired-concurrency'] ?? options.maxConcurrency ?? options['max-concurrency'], undefined);
+  if (desiredConcurrency === undefined) throw new Error('refill requires --desired-concurrency <n>');
+  const activeWorkersArg = options.activeWorkers ?? options['active-workers'];
+  const activeWorkerCount = numberArg(options.activeWorkerCount ?? options['active-worker-count'] ?? activeWorkersArg, undefined);
+  const queuedArg = options.queued ?? options.queuedTasks ?? options['queued-tasks'];
+  const queuedTaskCount = numberArg(options.queuedCount ?? options['queued-count'], undefined);
+  return createCodexContinuousRefill({
+    desiredConcurrency,
+    activeWorkerCount,
+    activeWorkers: activeWorkerCount === undefined ? await readJsonArg(activeWorkersArg) : undefined,
+    queuedTaskCount,
+    queuedTasks: await readJsonArg(queuedArg),
+    rerunManifests: await readJsonArgs(options.rerunManifest ?? options['rerun-manifest']),
+    backlog: await readJsonArg(options.backlog ?? options.tasks),
+    maxTasks: numberArg(options.maxTasks ?? options['max-tasks'], undefined),
+    excludeTaskIds: listArg(options.excludeTask ?? options['exclude-task'] ?? options.excludeTaskId ?? options['exclude-task-id'])
+  });
+}
+
+async function readJsonArgs(value: CliValue | undefined): Promise<unknown[]> {
+  const files = listArg(value) ?? [];
+  return Promise.all(files.map((file) => readJsonFile(file)));
+}
+
+async function readJsonArg(value: CliValue | undefined): Promise<unknown | undefined> {
+  const file = stringArg(value);
+  return file ? readJsonFile(file) : undefined;
+}
+
+async function readJsonFile(file: string): Promise<unknown> {
+  return JSON.parse(await fs.readFile(file, 'utf8'));
 }
 
 function assertRerunManifestInput(value: unknown, manifestPath: string): void {

@@ -8,6 +8,8 @@ The default swarm compute profile records `gpt-5.5` with `model_reasoning_effort
 
 By default, a swarm run is self-draining. After workers finish, coordinator-agent drain collects their merge bundles, builds scoped queues, and applies only admitted patches under the repo lock and configured gates. The scalable merge path is: workers produce bundles, coordinator agents lease semantic/path/repo queue scopes, same-scope work serializes locally, cross-scope work promotes upward, and repository mutation happens only through autonomous apply decisions. Dashboard queue counts are pending coordinator work, not landed code, until autonomous apply records an `applied` or `committed` decision. Human blockers are the narrow exception: `operatorSummary.status === "blocked"`, a true-blocker card, or explicit `humanQuestions`.
 
+Continuous pools can ask the package for the next refill instead of editing queue JSON by hand. The refill contract reads desired concurrency, active workers, queued work, generated rerun manifests, and a backlog task set, then emits either `next-task-set` with runnable tasks or an explicit `drained` state. Rerun work is selected before backlog work, and active or already queued task ids are excluded from the next task set.
+
 ## Operator Docs
 
 - [Hierarchical merge queues](docs/hierarchical-merge-queues.md): local scoped apply, queue-local overflow, upward promotion, stale reruns, invalid evidence rejection, discovery recording, Loom semantic scopes, and rare true blocker states.
@@ -243,6 +245,19 @@ frontier-swarm-codex run \
   --focused-command '{"name":"scope=package:frontier-swarm test","command":"npm","args":["--prefix","packages/frontier-swarm","run","test"],"metadata":{"packageId":"frontier-swarm","packagePath":"packages/frontier-swarm","packageName":"@shapeshift-labs/frontier-swarm"}}' \
   --focused-command '{"name":"scope=package:frontier-swarm-codex test","command":"npm","args":["--prefix","packages/frontier-swarm-codex","run","test"],"metadata":{"packageId":"frontier-swarm-codex","packagePath":"packages/frontier-swarm-codex","packageName":"@shapeshift-labs/frontier-swarm-codex"}}'
 
+frontier-swarm-codex refill \
+  --desired-concurrency 8 \
+  --active-workers agent-runs/current/pids.json \
+  --queued agent-runs/current/queued-task-set.json \
+  --rerun-manifest agent-runs/previous/auto-drain/rerun-manifest.json \
+  --backlog work-queue.json \
+  --outDir agent-runs/current/refill
+
+frontier-swarm-codex run \
+  --manifest inkwell/agent-ownership.json \
+  --tasks agent-runs/current/refill/next-task-set.json \
+  --max-concurrency 8
+
 frontier-swarm stop --run agent-runs/codex-swarm/run-1
 
 frontier-swarm collect \
@@ -255,6 +270,7 @@ frontier-swarm collect \
 
 ```ts
 import {
+  createCodexContinuousRefill,
   createCodexSwarmPlan,
   runCodexSwarm
 } from '@shapeshift-labs/frontier-swarm-codex';
@@ -275,6 +291,21 @@ await runCodexSwarm(plan, {
     replace: true
   }
 });
+
+const refill = createCodexContinuousRefill({
+  desiredConcurrency: 8,
+  activeWorkers: pidManifest,
+  queuedTasks: queuedTaskSet,
+  rerunManifests: [previousRerunManifest],
+  backlog
+});
+
+if (refill.taskSet) {
+  await runCodexSwarm(createCodexSwarmPlan({ manifest, tasks: refill.taskSet }), {
+    outDir: 'agent-runs/codex-swarm/refill-run',
+    maxConcurrency: refill.selectedTaskCount
+  });
+}
 ```
 
 App-specific adapters should keep orchestration inside this package and use hooks for local policy. `prepareJobWorkspace` can link generated package artifacts or shared fixtures, `renderJobPrompt` can append product-specific migration rules, `changedPathFilter` can hide runner-owned symlinks from ownership checks, and `onJobStarted`/`onJobFinished`/`onSwarmFinished` can mirror lifecycle records into project-specific JSONL streams.
@@ -350,6 +381,7 @@ Autonomous commit messages must identify the source bundle and queue work so any
 ## Surface
 
 - `createCodexSwarmPlan`
+- `createCodexContinuousRefill`
 - `coerceCodexSwarmManifestInput`
 - `coerceCodexSwarmTasksInput`
 - `createCodexWorkspacePlan`
