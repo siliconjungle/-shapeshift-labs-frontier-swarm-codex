@@ -44,9 +44,9 @@ export function projectContinuationTerminalOutcomes(input: {
     };
   }
   const decisionsByAlias = latestDecisionsByAlias(model);
-  const answeredAliases = answeredHumanActionAliases(input.answeredHumanActions ?? []);
-  const entries = input.backlog.entries.map((entry) => projectBacklogEntry(entry, decisionsByAlias, input.generatedAt, answeredAliases));
-  const projectedTasks = input.tasks.map((task) => projectTaskInput(task, decisionsByAlias, input.generatedAt, answeredAliases));
+  const answeredActionsByAlias = answeredHumanActionsByAlias(input.answeredHumanActions ?? []);
+  const entries = input.backlog.entries.map((entry) => projectBacklogEntry(entry, decisionsByAlias, input.generatedAt, answeredActionsByAlias));
+  const projectedTasks = input.tasks.map((task) => projectTaskInput(task, decisionsByAlias, input.generatedAt, answeredActionsByAlias));
   const tasks = projectedTasks.filter((task) => !taskClosedByTerminalProjection(task));
   const summary = summarizeProjection(input.backlog.entries, entries, input.tasks, projectedTasks, model);
   return {
@@ -81,19 +81,20 @@ function projectBacklogEntry(
   entry: FrontierSwarmBacklogEntry,
   decisionsByAlias: ReadonlyMap<string, FrontierSwarmQueueOutcomeDecision>,
   generatedAt: number,
-  answeredAliases: ReadonlySet<string>
+  answeredActionsByAlias: ReadonlyMap<string, Record<string, unknown>>
 ): FrontierSwarmBacklogEntry {
   const aliases = entryAliases(entry);
   const decision = decisionForAliases(aliases, decisionsByAlias);
   if (!decision) return entry;
-  const projection = projectionForDecision(decision, aliases, answeredAliases);
+  const answeredAction = answeredHumanActionForAliases(aliases, answeredActionsByAlias);
+  const projection = projectionForDecision(decision, aliases, answeredActionsByAlias);
   return {
     ...entry,
     status: projection.status,
     tags: uniqueStrings([...entry.tags, ...projection.tags]),
     metadata: {
       ...(entry.metadata ?? {}),
-      terminalOutcome: terminalOutcomeMetadata(decision, generatedAt)
+      terminalOutcome: terminalOutcomeMetadata(decision, generatedAt, answeredAction)
     } as FrontierSwarmBacklogEntry['metadata']
   };
 }
@@ -102,19 +103,20 @@ function projectTaskInput(
   task: FrontierSwarmTaskInput,
   decisionsByAlias: ReadonlyMap<string, FrontierSwarmQueueOutcomeDecision>,
   generatedAt: number,
-  answeredAliases: ReadonlySet<string>
+  answeredActionsByAlias: ReadonlyMap<string, Record<string, unknown>>
 ): FrontierSwarmTaskInput {
   const aliases = taskAliases(task);
   const decision = decisionForAliases(aliases, decisionsByAlias);
   if (!decision) return task;
-  const projection = projectionForDecision(decision, aliases, answeredAliases);
+  const answeredAction = answeredHumanActionForAliases(aliases, answeredActionsByAlias);
+  const projection = projectionForDecision(decision, aliases, answeredActionsByAlias);
   return {
     ...task,
     status: projection.status,
     tags: uniqueStrings([...(task.tags ?? []), ...projection.tags]),
     metadata: {
       ...metadataObject(task.metadata),
-      terminalOutcome: terminalOutcomeMetadata(decision, generatedAt)
+      terminalOutcome: terminalOutcomeMetadata(decision, generatedAt, answeredAction)
     }
   };
 }
@@ -140,12 +142,12 @@ function decisionForAliases(
 function projectionForDecision(
   decision: FrontierSwarmQueueOutcomeDecision,
   aliases: readonly string[],
-  answeredAliases: ReadonlySet<string>
+  answeredActionsByAlias: ReadonlyMap<string, Record<string, unknown>>
 ): { status: string; tags: string[] } {
   if (decision.outcome === 'rerun') return { status: 'ready', tags: ['terminal:rerun'] };
   if (decision.outcome === 'needs-port' || decision.coordinatorReview) return { status: 'coordinator-review', tags: ['terminal:coordinator-review'] };
   if (decision.outcome === 'human-question' || decision.humanBlocked) {
-    return aliases.some((alias) => answeredAliases.has(alias))
+    return aliases.some((alias) => answeredActionsByAlias.has(alias))
       ? { status: 'ready', tags: ['terminal:human-question', 'human-answer:answered'] }
       : { status: 'blocked', tags: ['terminal:human-question'] };
   }
@@ -155,7 +157,7 @@ function projectionForDecision(
   return { status: decision.outcome === 'checked' ? 'verified' : 'completed', tags: [`terminal:${decision.outcome}`] };
 }
 
-function terminalOutcomeMetadata(decision: FrontierSwarmQueueOutcomeDecision, generatedAt: number): Record<string, unknown> {
+function terminalOutcomeMetadata(decision: FrontierSwarmQueueOutcomeDecision, generatedAt: number, answeredAction?: Record<string, unknown>): Record<string, unknown> {
   return {
     generatedAt,
     decisionId: decision.id,
@@ -163,7 +165,8 @@ function terminalOutcomeMetadata(decision: FrontierSwarmQueueOutcomeDecision, ge
     outcome: decision.outcome,
     terminal: decision.terminal,
     closesSubject: decision.closesSubject,
-    reasons: decision.reasons
+    reasons: decision.reasons,
+    ...(answeredAction ? { humanAnswer: humanAnswerMetadata(answeredAction) } : {})
   };
 }
 
@@ -189,8 +192,23 @@ function summarizeProjection(
   };
 }
 
-function answeredHumanActionAliases(actions: readonly Record<string, unknown>[]): Set<string> {
-  return new Set(actions.flatMap(humanActionSubjectAliases));
+function answeredHumanActionsByAlias(actions: readonly Record<string, unknown>[]): Map<string, Record<string, unknown>> {
+  const out = new Map<string, Record<string, unknown>>();
+  for (const action of actions) {
+    for (const alias of humanActionSubjectAliases(action)) out.set(alias, action);
+  }
+  return out;
+}
+
+function answeredHumanActionForAliases(
+  aliases: readonly string[],
+  answeredActionsByAlias: ReadonlyMap<string, Record<string, unknown>>
+): Record<string, unknown> | undefined {
+  for (const alias of aliases) {
+    const action = answeredActionsByAlias.get(alias);
+    if (action) return action;
+  }
+  return undefined;
 }
 
 function countChangedTo<T extends { status?: string; tags?: readonly string[] }>(
@@ -223,6 +241,26 @@ function taskAliases(task: FrontierSwarmTaskInput): string[] {
 
 function metadataObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {};
+}
+
+function humanAnswerMetadata(action: Record<string, unknown>): Record<string, unknown> {
+  const answer = metadataObject(action.humanAnswer);
+  return {
+    ...(stringValue(action.code) ? { code: stringValue(action.code) } : {}),
+    ...(stringValue(action.title) ? { title: stringValue(action.title) } : {}),
+    ...(stringValue(action.question) ? { question: stringValue(action.question) } : {}),
+    ...(stringValue(action.requestedAnswer) ? { requestedAnswer: stringValue(action.requestedAnswer) } : {}),
+    ...(stringValue(action.answer) ? { answer: stringValue(action.answer) } : {}),
+    ...(typeof action.answeredAt === 'number' ? { answeredAt: action.answeredAt } : {}),
+    ...(stringValue(answer.id) ? { answerId: stringValue(answer.id) } : {}),
+    ...(stringValue(action.jobId) ? { jobId: stringValue(action.jobId) } : {}),
+    ...(stringValue(action.taskId) ? { taskId: stringValue(action.taskId) } : {}),
+    ...(stringValue(action.lane) ? { lane: stringValue(action.lane) } : {})
+  };
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function isString(value: unknown): value is string {

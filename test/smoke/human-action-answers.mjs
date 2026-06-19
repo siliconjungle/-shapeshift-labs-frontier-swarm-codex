@@ -46,7 +46,12 @@ export async function testHumanActionAnswers({ tmp }) {
   assert.strictEqual(continuation.summary.terminalOutcomeProjection.answeredHumanBlockerTaskCount, 1);
   assert.strictEqual(continuation.nextBacklog.entries[0].status, 'ready');
   assert.ok(continuation.nextBacklog.entries[0].tags.includes('human-answer:answered'));
+  assert.strictEqual(continuation.nextBacklog.entries[0].metadata.terminalOutcome.humanAnswer.answer, 'yes, retry after ten minutes');
   assert.ok(continuation.summary.nextJobTaskIds.includes('runtime-action'));
+  const nextJob = continuation.nextPlan.jobs.find((job) => job.taskId === 'runtime-action');
+  assert.strictEqual(nextJob.task.metadata.terminalOutcome.humanAnswer.answer, 'yes, retry after ten minutes');
+  const nextTasks = JSON.parse(await fs.readFile(continuation.nextTasksPath, 'utf8'));
+  assert.strictEqual(nextTasks.items[0].metadata.terminalOutcome.humanAnswer.answer, 'yes, retry after ten minutes');
   assert.strictEqual(continuation.humanActions[0].status, 'answered');
   assert.strictEqual(continuation.humanActions[0].answer, 'yes, retry after ten minutes');
   assert.ok(await fileExists(continuation.humanActionStatePath));
