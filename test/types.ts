@@ -126,6 +126,13 @@ cliInput satisfies FrontierCodexSwarmCliInput;
 workspaceManifest.kind satisfies string;
 resultPromise satisfies Promise<FrontierCodexSwarmRunResult>;
 collectPromise satisfies Promise<FrontierCodexCollectResult>;
+collectPromise.then((collection) => {
+  collection.queueOutcomeModel?.summary.visibleReviewDebtCount satisfies number | undefined;
+  collection.terminalState?.summary.activeItemCount satisfies number | undefined;
+  collection.summary.collectorGeneratedPatchCount satisfies number | undefined;
+  collection.buckets['needs-human-port'][0]?.generatedByCollector satisfies boolean | undefined;
+  collection.buckets['needs-human-port'][0]?.patchPath satisfies string | undefined;
+});
 applyPromise satisfies Promise<FrontierCodexApplyResult>;
 scorePromise satisfies Promise<FrontierCodexPatchScoreResult>;
 handoffArtifactsPromise satisfies Promise<readonly { kind: string; path: string }[]>;

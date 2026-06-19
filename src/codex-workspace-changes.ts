@@ -515,7 +515,7 @@ async function gitDiffPatch(workspace: string, changedPaths: readonly string[]):
   return result.stdout;
 }
 
-async function noIndexWorkspacePatch(sourceRoot: string, workspace: string, changedPaths: readonly string[]): Promise<string> {
+export async function noIndexWorkspacePatch(sourceRoot: string, workspace: string, changedPaths: readonly string[]): Promise<string> {
   const chunks: string[] = [];
   for (const file of changedPaths) {
     const source = path.join(sourceRoot, file);

@@ -5,8 +5,10 @@ import type {
   FrontierSwarmMergeAdmission,
   FrontierSwarmMergeBundle,
   FrontierSwarmMergeIndex,
+  FrontierSwarmQueueOutcomeModel,
   FrontierSwarmStrategyTournamentHistory,
   FrontierSwarmStrategyTournament,
+  FrontierSwarmTerminalStateReconciliation,
   FrontierSwarmTournamentAdaptiveFeedback,
   FrontierSwarmQueueOverlay
 } from '@shapeshift-labs/frontier-swarm';
@@ -55,6 +57,8 @@ export interface FrontierCodexCollectedBundle {
   jobId: string;
   mergePath: string;
   outputDir: string;
+  generatedByCollector?: boolean;
+  patchPath?: string;
   bundle: FrontierSwarmMergeBundle;
 }
 
@@ -68,6 +72,8 @@ export interface FrontierCodexCollectResult {
   buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]>;
   mergeIndex: FrontierSwarmMergeIndex;
   queueOverlay: FrontierSwarmQueueOverlay;
+  queueOutcomeModel?: FrontierSwarmQueueOutcomeModel;
+  terminalState?: FrontierSwarmTerminalStateReconciliation;
   strategyTournament: FrontierSwarmStrategyTournament;
   strategyHistory: FrontierSwarmStrategyTournamentHistory;
   tournamentAdaptiveFeedback: FrontierSwarmTournamentAdaptiveFeedback;
@@ -90,6 +96,7 @@ export interface FrontierCodexCollectResult {
 
 export type FrontierCodexCollectSummary = Record<FrontierCodexCollectBucket, number> & {
   total: number;
+  collectorGeneratedPatchCount?: number;
   landed?: number;
   landedJobIds?: string[];
   applyLedger?: FrontierCodexApplyLedgerSummary;

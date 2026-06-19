@@ -1,16 +1,7 @@
 import assert from 'node:assert';
-import {
-  collectCodexSwarmRun,
-  createCodexCleanupPlan,
-  createBrowserPlan,
-  exists,
-  execFileP,
-  fs,
-  path,
-  queryCodexSwarmCollection,
-  runCodexSwarm
-} from './context.mjs';
+import { collectCodexSwarmRun, createCodexCleanupPlan, createBrowserPlan, exists, execFileP, fs, path, queryCodexSwarmCollection, runCodexSwarm } from './context.mjs';
 import { testNoIndexCollection } from './swarm-run-no-index.mjs';
+import { testWorkspaceOnlyCollection } from './workspace-only-collection.mjs';
 
 export async function testSwarmRunCollection({ plan, tmp }) {
   const result = await runCodexSwarm(plan, {
@@ -115,6 +106,7 @@ export async function testSwarmRunCollection({ plan, tmp }) {
 
   await testSemanticImportFallbackFromTaskRefs(plan, tmp);
   const collectionDir = await testCollectedRun(tmp);
+  await testWorkspaceOnlyCollection(tmp);
   await testNoIndexCollection(tmp, mergeBundle);
   await testBrowserRun(tmp);
   return { mergeBundle, collectionDir };
@@ -185,6 +177,13 @@ async function testCollectedRun(tmp) {
   assert.ok(await exists(path.join(collection.outDir, 'merge-admission.json')));
   assert.ok(await exists(path.join(collection.outDir, 'coordinator-query.json')));
   assert.ok(await exists(path.join(collection.outDir, 'compact-dashboard.json')));
+  assert.ok(await exists(path.join(collection.outDir, 'queue-outcome-model.json')));
+  assert.ok(await exists(path.join(collection.outDir, 'terminal-state.json')));
+  assert.strictEqual(collection.queueOutcomeModel.kind, 'frontier.swarm.queue-outcome-model');
+  assert.strictEqual(collection.queueOutcomeModel.summary.visibleReviewDebtCount, 1);
+  assert.strictEqual(collection.terminalState.kind, 'frontier.swarm.terminal-state-reconciliation');
+  assert.strictEqual(collection.terminalState.summary.activeItemCount, 1);
+  assert.strictEqual(collection.terminalState.summary.terminalCount, 0);
   assert.strictEqual(collection.compactDashboard.kind, 'frontier.swarm-codex.compact-dashboard');
   assert.strictEqual(collection.compactDashboard.tournament.matchCount, 1);
   assert.strictEqual(collection.compactDashboard.tournament.topStrategyId, 'runtime');
@@ -268,6 +267,7 @@ async function testCollectedRun(tmp) {
   await testSafeCleanup(tmp, collection.outDir);
   return collection.outDir;
 }
+
 async function testSafeCleanup(tmp, collectionDir) {
   const workspacePath = path.join(tmp, 'agent-worktrees', 'frontier-swarm-codex', 'cleanup-job');
   await fs.mkdir(workspacePath, { recursive: true });

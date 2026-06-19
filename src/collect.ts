@@ -16,7 +16,10 @@ import {
   type FrontierSwarmMergeBundle,
   type FrontierSwarmPatchStatus
 } from '@shapeshift-labs/frontier-swarm';
-import { FRONTIER_SWARM_CODEX_COLLECTION_KIND, FRONTIER_SWARM_CODEX_COLLECTION_VERSION } from './constants.js';
+import {
+  FRONTIER_SWARM_CODEX_COLLECTION_KIND,
+  FRONTIER_SWARM_CODEX_COLLECTION_VERSION
+} from './constants.js';
 import type {
   FrontierCodexArtifactStoreResult,
   FrontierCodexArtifactStoreStatus,
@@ -30,7 +33,14 @@ import type {
   FrontierCodexCollectResult,
   FrontierCodexLandedHealthSummary
 } from './index.js';
-import { findFilesByName, isObject, pathExists, pathHasIgnoredSegment, resolveBundlePatchPath, slug, uniqueStrings } from './common.js';
+import {
+  findFilesByName,
+  isObject,
+  pathExists,
+  pathHasIgnoredSegment,
+  slug,
+  uniqueStrings
+} from './common.js';
 import { createCodexCompactDashboard } from './dashboard.js';
 import {
   bundlePatchStaleness,
@@ -48,6 +58,15 @@ import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } 
 import { collectedQualitySignalsFromDashboard, enrichCollectedCoordinatorDashboard } from './collect-dashboard.js';
 import { contextBudgetFromBundle } from './context-budget.js';
 import { summarizeSemanticPatchBundleOverlaps } from './semantic-bundle-overlaps.js';
+import {
+  resolveOrSynthesizeCollectedPatch,
+  type CodexCollectMergeRecord
+} from './collect-workspace-recovery.js';
+import { collectWorkspaceOnlyMergeRecords } from './collect-workspace-only.js';
+import {
+  createCodexCollectionQueueOutcomeModel,
+  createCodexCollectionTerminalState
+} from './collect-terminal-state.js';
 
 const DEFAULT_ARTIFACT_STORE_TIMEOUT_MS = 30_000;
 const COMPACT_ARTIFACT_STORE_MAX_BYTES = 1024 * 1024;
@@ -89,18 +108,48 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       'needs-human-port',
       'rerun-work',
       'failed-evidence',
-      'stale-against-head'
+      'stale-against-head',
+      'generated-by-collector'
     ]));
-  const mergeRecordsByJob = new Map<string, { mergePath: string; bundle: FrontierSwarmMergeBundle }>();
+  const mergeRecordsByJob = new Map<string, CodexCollectMergeRecord>();
   for (const mergePath of mergePaths.sort()) {
     const bundle = normalizeCollectedMergeBundle(JSON.parse(await fs.readFile(mergePath, 'utf8')), mergePath);
     const existing = mergeRecordsByJob.get(bundle.jobId);
     const next = { mergePath, bundle };
     if (!existing || mergeRecordScore(next) > mergeRecordScore(existing)) mergeRecordsByJob.set(bundle.jobId, next);
   }
+  const workspaceOnlyRecords = await collectWorkspaceOnlyMergeRecords({
+    runDir,
+    cwd,
+    outDir,
+    ignoredCollectionSegments: [
+      'collected',
+      'patch-scores',
+      'ready-to-apply',
+      'needs-human-port',
+      'rerun-work',
+      'failed-evidence',
+      'stale-against-head',
+      'generated-by-collector'
+    ],
+    existingJobIds: new Set(mergeRecordsByJob.keys()),
+    generatedAt
+  });
+  for (const record of workspaceOnlyRecords) {
+    if (!mergeRecordsByJob.has(record.bundle.jobId)) mergeRecordsByJob.set(record.bundle.jobId, record);
+  }
   const mergeRecords = Array.from(mergeRecordsByJob.values()).sort((left, right) => left.bundle.jobId.localeCompare(right.bundle.jobId));
-  for (const { mergePath, bundle } of mergeRecords) {
-    const patchPath = resolveBundlePatchPath(bundle, mergePath);
+  let collectorGeneratedPatchCount = 0;
+  for (const { mergePath, bundle, generatedByCollector: recordGeneratedByCollector } of mergeRecords) {
+    const patchResolution = await resolveOrSynthesizeCollectedPatch({
+      runDir,
+      cwd,
+      outDir,
+      mergePath,
+      bundle,
+      generatedAt
+    });
+    const patchPath = patchResolution.patchPath;
     const patchExists = !!patchPath && await pathExists(patchPath);
     const patchHasContent = patchExists
       && !!patchPath
@@ -113,38 +162,40 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
           reasonClasses: collectFailureReasonClasses(['stale check disabled'], patchExists ? 'unknown' : 'missing'),
           fresh: false
         }
-      : await bundlePatchStaleness(bundle, mergePath, cwd);
-    const staleAgainstHead = normalizeCollectedStaleAgainstHead(bundle, staleness, input.checkStale !== false);
-    const disposition = normalizeCollectedDisposition(bundle, staleAgainstHead, patchHasContent);
+      : await bundlePatchStaleness(patchResolution.bundle, mergePath, cwd);
+    const staleAgainstHead = normalizeCollectedStaleAgainstHead(patchResolution.bundle, staleness, input.checkStale !== false);
+    const disposition = normalizeCollectedDisposition(patchResolution.bundle, staleAgainstHead, patchHasContent);
     const bucket = classifyCodexCollectBucket({
-      ...bundle,
+      ...patchResolution.bundle,
       staleAgainstHead,
       disposition,
       ...(patchExists && patchPath ? { patchPath } : {})
     }, staleAgainstHead, patchHasContent);
-    const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(bundle.jobId)}` : bundle.branchName;
-    const outputDir = path.join(outDir, bucket, slug(bundle.jobId));
+    const generatedByCollector = recordGeneratedByCollector || patchResolution.generatedByCollector;
+    if (generatedByCollector) collectorGeneratedPatchCount += 1;
+    const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(patchResolution.bundle.jobId)}` : patchResolution.bundle.branchName;
+    const outputDir = path.join(outDir, bucket, slug(patchResolution.bundle.jobId));
     const collectedEvidencePath = path.join(outputDir, 'evidence.json');
-    const semanticImport = semanticImportSummaryFromBundle(bundle);
+    const semanticImport = semanticImportSummaryFromBundle(patchResolution.bundle);
     const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
-    semanticImportQualities.set(bundle.jobId, semanticImportQuality);
-    const contextBudget = contextBudgetFromBundle(bundle);
-    if (contextBudget) contextBudgets.set(bundle.jobId, contextBudget);
-    const collectReasons = normalizeCollectedReasons(bundle.reasons, staleness.reasons, staleness.patchStatus, staleAgainstHead, bundle);
+    semanticImportQualities.set(patchResolution.bundle.jobId, semanticImportQuality);
+    const contextBudget = contextBudgetFromBundle(patchResolution.bundle);
+    if (contextBudget) contextBudgets.set(patchResolution.bundle.jobId, contextBudget);
+    const collectReasons = normalizeCollectedReasons(patchResolution.bundle.reasons, staleness.reasons, staleness.patchStatus, staleAgainstHead, patchResolution.bundle);
     const collectReasonClasses = uniqueStrings([
       ...staleness.reasonClasses,
       ...collectFailureReasonClasses(collectReasons, staleness.patchStatus)
     ]);
     const nextBundle: FrontierSwarmMergeBundle = {
-      ...bundle,
+      ...patchResolution.bundle,
       ...(branchName ? { branchName } : {}),
       staleAgainstHead,
       disposition,
-      autoMergeable: bucket === 'ready-to-apply' && bundle.autoMergeable,
+      autoMergeable: bucket === 'ready-to-apply' && patchResolution.bundle.autoMergeable,
       reasons: collectReasons,
       ...(semanticImport ? { semanticImport } : {}),
       metadata: {
-        ...(isObject(bundle.metadata) ? bundle.metadata : {}),
+        ...(isObject(patchResolution.bundle.metadata) ? patchResolution.bundle.metadata : {}),
         collect: {
           patchStatus: staleness.patchStatus,
           staleReasons: staleness.reasons,
@@ -152,7 +203,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
           semanticImportQuality
         }
       } as unknown as FrontierSwarmMergeBundle['metadata'],
-      evidencePaths: uniqueStrings([...bundle.evidencePaths, collectedEvidencePath])
+      evidencePaths: uniqueStrings([...patchResolution.bundle.evidencePaths, collectedEvidencePath])
     };
     collectedBundles.push(nextBundle);
     patchStatuses[nextBundle.jobId] = staleness.patchStatus;
@@ -170,7 +221,15 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       semanticImportExpected
     });
     evidenceEntries.push(...createCollectedEvidenceEntries(nextBundle, collectedEvidencePath, bucket, semanticImportExpected));
-    buckets[bucket].push({ bucket, jobId: bundle.jobId, mergePath, outputDir, bundle: nextBundle });
+    buckets[bucket].push({
+      bucket,
+      jobId: patchResolution.bundle.jobId,
+      mergePath,
+      outputDir,
+      ...(generatedByCollector ? { generatedByCollector: true } : {}),
+      ...(generatedByCollector && patchPath ? { patchPath } : {}),
+      bundle: nextBundle
+    });
   }
   const mergeIndex = createSwarmMergeIndex({
     runId: path.basename(runDir),
@@ -232,13 +291,25 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const landedHealth = applyLedgerSummary ? createLandedHealthSummary(applyLedgerSummary, buckets) : undefined;
   if (applyLedgerSummary) attachApplyLedgerSummary(dashboard, compactDashboard, applyLedgerSummary);
   attachSemanticPatchBundleOverlaps(dashboard, compactDashboard, semanticPatchBundleOverlaps);
+  const queueOutcomeModel = createCodexCollectionQueueOutcomeModel({
+    runId: path.basename(runDir),
+    buckets,
+    landedHealth,
+    generatedAt
+  });
+  const terminalState = createCodexCollectionTerminalState({
+    buckets,
+    queueOutcomeModel,
+    generatedAt
+  });
   const summary: FrontierCodexCollectResult['summary'] = {
     total: mergeRecords.length,
     'ready-to-apply': buckets['ready-to-apply'].length,
     'needs-human-port': buckets['needs-human-port'].length,
     'rerun-work': buckets['rerun-work'].length,
     'failed-evidence': buckets['failed-evidence'].length,
-    'stale-against-head': buckets['stale-against-head'].length
+    'stale-against-head': buckets['stale-against-head'].length,
+    collectorGeneratedPatchCount
   };
   if (applyLedgerSummary) {
     summary.landed = applyLedgerSummary.landed;
@@ -269,6 +340,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     admission,
     dashboard,
     compactDashboard,
+    queueOutcomeModel,
+    terminalState,
     semanticImport: compactDashboard.semanticImport,
     semanticEditAdmission: compactDashboard.semanticEditAdmission,
     semanticEditScriptAdmission: compactDashboard.semanticEditScriptAdmission,
@@ -290,6 +363,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   await fs.writeFile(path.join(outDir, 'merge-admission.json'), JSON.stringify(admission, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'coordinator-query.json'), JSON.stringify(dashboard, null, 2) + '\n');
   await fs.writeFile(path.join(outDir, 'compact-dashboard.json'), JSON.stringify(compactDashboard, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'queue-outcome-model.json'), JSON.stringify(queueOutcomeModel, null, 2) + '\n');
+  await fs.writeFile(path.join(outDir, 'terminal-state.json'), JSON.stringify(terminalState, null, 2) + '\n');
   const artifactStorePostProcessing = await createBoundedCodexArtifactStore({
     collection: result,
     collectionPath,
