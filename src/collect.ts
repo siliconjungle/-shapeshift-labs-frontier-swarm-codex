@@ -112,7 +112,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
         }
       : await bundlePatchStaleness(bundle, mergePath, cwd);
     const staleAgainstHead = normalizeCollectedStaleAgainstHead(bundle, staleness, input.checkStale !== false);
-    const disposition = normalizeCollectedDisposition(bundle, staleAgainstHead);
+    const disposition = normalizeCollectedDisposition(bundle, staleAgainstHead, patchExists);
     const bucket = classifyCodexCollectBucket({
       ...bundle,
       staleAgainstHead,

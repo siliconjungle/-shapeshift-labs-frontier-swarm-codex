@@ -342,9 +342,11 @@ export async function writeCodexPatchFile(input: {
     await fs.writeFile(input.paths.patchPath, '');
     return undefined;
   }
-  const diff = input.workspacePlan.mode === 'current' || input.workspacePlan.mode === 'git-worktree'
-    ? await gitDiffPatch(input.workspace, changedPaths)
-    : await noIndexWorkspacePatch(input.sourceRoot, input.workspace, changedPaths);
+  const diff = input.workspacePlan.mode === 'copy' || input.workspacePlan.mode === 'snapshot'
+    ? await noIndexWorkspacePatch(input.sourceRoot, input.workspace, changedPaths)
+    : input.workspacePlan.mode === 'git-worktree'
+      ? await noIndexWorkspacePatch(input.sourceRoot, input.workspace, changedPaths)
+      : await gitDiffPatch(input.workspace, changedPaths);
   await fs.writeFile(input.paths.patchPath, diff);
   return diff.trim().length ? input.paths.patchPath : undefined;
 }

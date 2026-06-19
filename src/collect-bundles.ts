@@ -421,6 +421,7 @@ export function classifyCodexCollectBucket(bundle: FrontierSwarmMergeBundle, sta
     return 'rerun-work';
   }
   if (bundle.ownershipViolations.length > 0 && bundle.changedPaths.length > 0 && bundle.patchPath) return 'rerun-work';
+  if (nonActionableFailedEvidence(bundle, { staleAgainstHead })) return 'needs-human-port';
   if (bundle.disposition === 'rejected' || bundle.disposition === 'blocked' || bundle.commandsFailed.length > 0 || bundle.status === 'failed') {
     if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-human-port';
     return 'failed-evidence';
@@ -445,10 +446,37 @@ export function normalizeCollectedStaleAgainstHead(
 
 export function normalizeCollectedDisposition(
   bundle: FrontierSwarmMergeBundle,
-  staleAgainstHead: boolean
+  staleAgainstHead: boolean,
+  patchExists = Boolean(bundle.patchPath)
 ): FrontierSwarmMergeBundle['disposition'] {
   if (staleAgainstHead) return 'stale-against-head';
+  if (nonActionableFailedEvidence(bundle, { staleAgainstHead, hasActionablePatch: patchExists })) return 'needs-port';
   if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-port';
   if (bundle.disposition === 'stale-against-head') return 'needs-port';
   return bundle.disposition;
+}
+
+export function nonActionableFailedEvidence(
+  bundle: FrontierSwarmMergeBundle,
+  input: { staleAgainstHead: boolean; hasActionablePatch?: boolean }
+): boolean {
+  if (input.staleAgainstHead || bundle.staleAgainstHead) return false;
+  if (input.hasActionablePatch ?? Boolean(bundle.patchPath)) return false;
+  if (bundle.changedPaths.length > 0 || bundle.ownershipViolations.length > 0 || bundle.commandsFailed.length > 0) return false;
+  if (!bundle.reasons.some(nonActionableFailedEvidenceReason)) return false;
+  return bundle.disposition === 'blocked'
+    || bundle.disposition === 'rejected'
+    || bundle.mergeReadiness === 'blocked'
+    || bundle.mergeReadiness === 'rejected'
+    || bundle.status === 'failed'
+    || bundle.status === 'blocked';
+}
+
+function nonActionableFailedEvidenceReason(reason: string): boolean {
+  const normalized = reason.toLowerCase();
+  return normalized.includes('no-source-changes')
+    || normalized.includes('no source changes')
+    || normalized.includes('non-actionable-worker-output')
+    || normalized.includes('failed-output-recorded')
+    || normalized.includes('blocked-output-recorded');
 }

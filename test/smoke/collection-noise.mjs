@@ -228,6 +228,11 @@ if (collectBundles) {
     /ignoredWorkspaceNoiseOnlyFailure\(bundle\)[\s\S]+return 'needs-human-port'/,
     'ignored workspace noise-only failures should not be collected as failed evidence'
   );
+  assert.match(
+    collectBundles,
+    /nonActionableFailedEvidence\(bundle,[\s\S]+return 'needs-human-port'/,
+    'failed worker output without a patch or source changes should not be collected as failed evidence'
+  );
 }
 
 if (await exists(path.join(root, 'dist/index.js'))) {
@@ -458,6 +463,14 @@ if (await exists(path.join(root, 'dist/index.js'))) {
     commandsFailed: [{ command: ['node', 'test.mjs'], status: 1, required: true }],
     patchText: patchText('base', 'failed')
   });
+  await writeMerge(applyRunDir, 'no-source-failed-job', {
+    status: 'failed',
+    mergeReadiness: 'rejected',
+    disposition: 'rejected',
+    changedPaths: [],
+    patchPath: undefined,
+    reasons: ['worker-exit-nonzero:1', 'no-source-changes']
+  });
 
   const applyCollection = await collectCodexSwarmRun({
     run: applyRunDir,
@@ -465,13 +478,14 @@ if (await exists(path.join(root, 'dist/index.js'))) {
     cwd: root,
     checkStale: false
   });
-  assert.strictEqual(applyCollection.summary.total, 4);
+  assert.strictEqual(applyCollection.summary.total, 5);
   assert.strictEqual(applyCollection.summary['ready-to-apply'], 2);
-  assert.strictEqual(applyCollection.summary['needs-human-port'], 1);
+  assert.strictEqual(applyCollection.summary['needs-human-port'], 2);
   assert.strictEqual(applyCollection.summary['rerun-work'], 1);
   assert.strictEqual(applyCollection.summary['failed-evidence'], 0);
   assert.strictEqual(applyCollection.summary['stale-against-head'], 0);
   assert.strictEqual(applyCollection.buckets['rerun-work'][0]?.jobId, 'failed-job');
+  assert.ok(applyCollection.buckets['needs-human-port'].some((entry) => entry.jobId === 'no-source-failed-job'));
 
   const applyRepo = await initPatchRepo(path.join(tmp, 'apply-repo'));
   const appliedLedger = await applyCodexSwarmCollection({
@@ -515,7 +529,7 @@ if (await exists(path.join(root, 'dist/index.js'))) {
     staleCount: applyCollection.summary['stale-against-head']
   }, {
     landedSuccessCount: 2,
-    needsHumanCount: 1,
+    needsHumanCount: 2,
     failedCount: 0,
     rerunCount: 1,
     staleCount: 0
@@ -554,7 +568,7 @@ if (await exists(path.join(root, 'dist/index.js'))) {
     checkStale: false
   });
   assert.strictEqual(landedCollection.summary['ready-to-apply'], 2);
-  assert.strictEqual(landedCollection.summary['needs-human-port'], 1);
+  assert.strictEqual(landedCollection.summary['needs-human-port'], 2);
   assert.strictEqual(landedCollection.summary['rerun-work'], 1);
   assert.strictEqual(landedCollection.summary['failed-evidence'], 0);
   assert.strictEqual(landedCollection.summary['stale-against-head'], 0);
@@ -569,23 +583,23 @@ if (await exists(path.join(root, 'dist/index.js'))) {
   );
   assert.strictEqual(landedCollection.summary.landedHealth.successfulOutputCount, 3);
   assert.strictEqual(landedCollection.summary.landedHealth.landedNeedsHumanReviewCount, 1);
-  assert.strictEqual(landedCollection.summary.landedHealth.remainingNeedsHumanReviewCount, 0);
+  assert.strictEqual(landedCollection.summary.landedHealth.remainingNeedsHumanReviewCount, 1);
   assert.strictEqual(landedCollection.summary.landedHealth.remainingFailedEvidenceCount, 0);
-  assert.strictEqual(landedCollection.summary.landedHealth.reviewPressureCount, 1);
+  assert.strictEqual(landedCollection.summary.landedHealth.reviewPressureCount, 2);
   assert.strictEqual(landedCollection.qualitySignals.landed.successfulOutputCount, 3);
   assert.strictEqual(landedCollection.qualitySignals.needsPort.landedJobCount, 1);
   assert.deepStrictEqual(landedCollection.qualitySignals.needsPort.landedJobIds, ['needs-human-job']);
-  assert.strictEqual(landedCollection.qualitySignals.needsPort.remainingJobCount, 0);
-  assert.deepStrictEqual(landedCollection.qualitySignals.needsPort.remainingJobIds, []);
+  assert.strictEqual(landedCollection.qualitySignals.needsPort.remainingJobCount, 1);
+  assert.deepStrictEqual(landedCollection.qualitySignals.needsPort.remainingJobIds, ['no-source-failed-job']);
   assert.deepStrictEqual(landedCollection.dashboard.summary.applyLedger, landedCollection.summary.applyLedger);
   assert.strictEqual(landedCollection.dashboard.summary.applyLedgerLandedCount, 3);
   assert.deepStrictEqual([...landedCollection.dashboard.summary.landedJobIds].sort(), ['commit-ready-job', 'needs-human-job', 'ready-job']);
   assert.deepStrictEqual(landedCollection.dashboard.summary.collectionQualitySignals, landedCollection.qualitySignals);
   assert.strictEqual(landedCollection.dashboard.summary.collectionLandedSuccessCount, 3);
   assert.strictEqual(landedCollection.dashboard.summary.collectionLandedNeedsHumanReviewCount, 1);
-  assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingNeedsHumanReviewCount, 0);
+  assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingNeedsHumanReviewCount, 1);
   assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingFailedEvidenceCount, 0);
-  assert.strictEqual(landedCollection.dashboard.summary.collectionReviewPressureCount, 1);
+  assert.strictEqual(landedCollection.dashboard.summary.collectionReviewPressureCount, 2);
   assert.deepStrictEqual(landedCollection.dashboard.metadata.applyLedger, landedCollection.summary.applyLedger);
   assert.deepStrictEqual(landedCollection.dashboard.metadata.landedHealth, landedCollection.summary.landedHealth);
   assert.deepStrictEqual(landedCollection.compactDashboard.applyLedger, landedCollection.summary.applyLedger);
@@ -594,8 +608,8 @@ if (await exists(path.join(root, 'dist/index.js'))) {
   assert.deepStrictEqual(landedCollection.compactDashboard.landedHealth, landedCollection.summary.landedHealth);
   assert.strictEqual(landedCollection.compactDashboard.successfulOutputCount, 3);
   assert.strictEqual(landedCollection.compactDashboard.landedNeedsHumanReviewCount, 1);
-  assert.strictEqual(landedCollection.compactDashboard.remainingNeedsHumanReviewCount, 0);
-  assert.strictEqual(landedCollection.compactDashboard.reviewPressureCount, 1);
+  assert.strictEqual(landedCollection.compactDashboard.remainingNeedsHumanReviewCount, 1);
+  assert.strictEqual(landedCollection.compactDashboard.reviewPressureCount, 2);
 }
 
 function escapeRegExp(value) {
