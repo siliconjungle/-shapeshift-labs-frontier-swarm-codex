@@ -456,23 +456,41 @@ function commandDescriptorArg(value: string): CliCommand {
   if (!isRecord(parsed) || typeof parsed.command !== 'string' || !parsed.command.trim()) {
     throw new Error('JSON command descriptors require a non-empty string command field');
   }
-  const args = commandDescriptorArgs(parsed.args);
+  const rawCommand = parsed.command.trim();
+  const explicitArgs = parsed.args !== undefined;
+  let args = commandDescriptorArgs(parsed.args);
+  let executable = rawCommand;
+  if (!explicitArgs && /\s/.test(rawCommand)) {
+    executable = 'sh';
+    args = ['-c', rawCommand];
+  }
   const name = typeof parsed.name === 'string' && parsed.name.trim()
     ? parsed.name.trim()
-    : [parsed.command, ...args].join(' ');
+    : rawCommand;
   const required = typeof parsed.required === 'boolean' ? parsed.required : true;
   const command: CliCommand = {
     name,
-    command: parsed.command.trim(),
+    command: executable,
     args,
     required
   };
   if (typeof parsed.cwd === 'string' && parsed.cwd.trim()) command.cwd = parsed.cwd.trim();
+  const metadata = commandDescriptorMetadata(parsed);
+  if (metadata) command.metadata = metadata;
+  return command;
+}
+
+function commandDescriptorMetadata(parsed: Record<string, unknown>): CliJsonObject | undefined {
+  let metadata: CliJsonObject = {};
   if (parsed.metadata !== undefined) {
     if (!isCliJsonObject(parsed.metadata)) throw new Error('JSON command descriptor metadata must be a JSON object');
-    command.metadata = { ...parsed.metadata };
+    metadata = { ...parsed.metadata };
   }
-  return command;
+  for (const key of ['package', 'packageId', 'packageName', 'packagePath', 'frontierPackage', 'frontierPackageId']) {
+    const value = parsed[key];
+    if (typeof value === 'string' && value.trim() && metadata[key] === undefined) metadata[key] = value.trim();
+  }
+  return Object.keys(metadata).length ? metadata : undefined;
 }
 
 function commandDescriptorArgs(value: unknown): string[] {

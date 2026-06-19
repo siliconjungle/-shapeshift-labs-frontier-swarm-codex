@@ -2252,6 +2252,29 @@ assert.strictEqual(cliAutonomousResult.ok, true);
 assert.strictEqual(cliAutonomousResult.summary.applied, 1);
 assert.strictEqual(await fs.readFile(path.join(cliAutonomousRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
 
+const cliAutonomousJsonCommandRepo = await createApplyFixtureRepo(tmp, 'cli-autonomous-json-command-repo');
+const cliAutonomousJsonCommand = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'autonomous-apply',
+  '--collection',
+  path.join(tmp, 'ready-collection'),
+  '--outDir',
+  path.join(tmp, 'cli-autonomous-json-command-out'),
+  '--focused-command',
+  JSON.stringify({
+    name: 'json-shell-sees-new',
+    command: "node -e \"const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);\"",
+    cwd: '.',
+    package: '@shapeshift-labs/frontier-swarm'
+  })
+], { cwd: cliAutonomousJsonCommandRepo });
+const cliAutonomousJsonCommandResult = JSON.parse(cliAutonomousJsonCommand.stdout);
+assert.strictEqual(cliAutonomousJsonCommandResult.ok, true);
+assert.strictEqual(cliAutonomousJsonCommandResult.summary.applied, 1);
+assert.deepStrictEqual(cliAutonomousJsonCommandResult.decisions[0].finalGateSummary.gates[0].command.slice(0, 2), ['sh', '-c']);
+assert.strictEqual(cliAutonomousJsonCommandResult.decisions[0].finalGateSummary.gates[0].name, 'json-shell-sees-new');
+assert.strictEqual(await fs.readFile(path.join(cliAutonomousJsonCommandRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
+
 const autoDrainRepo = await createApplyFixtureRepo(tmp, 'auto-drain-run-repo');
 const autoDrainOutDir = path.join(autoDrainRepo, 'agent-runs', 'auto-drain-run');
 await fs.mkdir(autoDrainOutDir, { recursive: true });
@@ -2655,6 +2678,68 @@ assert.ok(autoDrainRun.autoDrainArtifacts.mergeQueue.paths.includes(autoDrainArt
 assert.strictEqual(autoDrainArtifactIteration.mergeQueueApplyLocalCount, autoDrainRun.autoDrainArtifacts.mergeQueue.applyLocalCount);
 assert.strictEqual(autoDrainArtifactIteration.mergeQueuePromoteCount, autoDrainRun.autoDrainArtifacts.mergeQueue.promoteCount);
 assert.ok(await exists(autoDrainArtifactIteration.hierarchicalMergeQueuePath));
+
+const autoDrainPackageScopedRepo = await createApplyFixtureRepo(tmp, 'auto-drain-package-scoped-gates-repo');
+await fs.mkdir(path.join(autoDrainPackageScopedRepo, 'packages', 'frontier-swarm', 'src'), { recursive: true });
+await fs.writeFile(path.join(autoDrainPackageScopedRepo, 'packages', 'frontier-swarm', 'src', 'apply.ts'), 'old\n');
+await execFileP('git', ['add', '--', 'packages/frontier-swarm/src/apply.ts'], { cwd: autoDrainPackageScopedRepo });
+await execFileP('git', ['commit', '-m', 'Add package scoped apply fixture'], { cwd: autoDrainPackageScopedRepo });
+const autoDrainPackageScopedPlan = createCodexSwarmPlan({
+  manifest: {
+    id: 'auto-drain-package-scoped-gates',
+    lanes: [{ id: 'frontier-swarm', allowedGlobs: ['packages/frontier-swarm/**'] }]
+  },
+  tasks: {
+    items: [{
+      id: 'package-scoped-task',
+      lane: 'frontier-swarm',
+      ownedFiles: ['packages/frontier-swarm/src/apply.ts'],
+      changedRegions: ['packages/frontier-swarm/src/apply.ts#apply']
+    }]
+  }
+});
+const autoDrainPackageScopedRun = await runCodexSwarm(autoDrainPackageScopedPlan, {
+  outDir: path.join(autoDrainPackageScopedRepo, 'agent-runs', 'auto-drain-package-scoped-gates-run'),
+  cwd: autoDrainPackageScopedRepo,
+  workspace: {
+    mode: 'copy',
+    root: path.join(autoDrainPackageScopedRepo, 'agent-runs', 'auto-drain-package-scoped-gates-run', 'workspaces'),
+    includes: ['packages'],
+    replace: true,
+    linkNodeModules: false
+  },
+  dryRun: false,
+  runVerification: false,
+  autoDrain: {
+    maxIterations: 1,
+    focusedCommands: [{
+      name: 'frontier-swarm-package-sees-new',
+      command: process.execPath,
+      args: ['-e', "const fs=require('fs'); if(fs.readFileSync('src/apply.ts','utf8')!=='new\\n') process.exit(1);"],
+      cwd: 'packages/frontier-swarm'
+    }, {
+      name: 'frontier-swarm-codex-package-must-not-run',
+      command: process.execPath,
+      args: ['-e', 'process.exit(1)'],
+      cwd: 'packages/frontier-swarm-codex'
+    }]
+  },
+  executor: async (input) => {
+    await fs.writeFile(path.join(input.workspacePath, 'packages', 'frontier-swarm', 'src', 'apply.ts'), 'new\n');
+    await fs.writeFile(input.paths.lastMessagePath, 'package scoped auto drained\n');
+    return {
+      exitCode: 0,
+      changedPaths: ['packages/frontier-swarm/src/apply.ts'],
+      lastMessage: 'package scoped auto drained'
+    };
+  }
+});
+assert.strictEqual(autoDrainPackageScopedRun.ok, true);
+const autoDrainPackageScopedDecision = autoDrainPackageScopedRun.autoDrain.iterations[0].apply.decisions[0];
+assert.strictEqual(autoDrainPackageScopedDecision.status, 'applied');
+assert.deepStrictEqual(autoDrainPackageScopedDecision.finalGateSummary.names, ['frontier-swarm-package-sees-new']);
+assert.deepStrictEqual(autoDrainPackageScopedDecision.finalGateSummary.passedNames, ['frontier-swarm-package-sees-new']);
+assert.strictEqual(await fs.readFile(path.join(autoDrainPackageScopedRepo, 'packages', 'frontier-swarm', 'src', 'apply.ts'), 'utf8'), 'new\n');
 
 const autoDrainCommitRepo = await createApplyFixtureRepo(tmp, 'auto-drain-commit-run-repo');
 const autoDrainCommitOutDir = path.join(tmp, 'auto-drain-commit-run-out');

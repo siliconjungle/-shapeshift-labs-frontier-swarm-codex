@@ -10269,7 +10269,7 @@ function selectFocusedVerificationCommandsForBundle(
   if (!changedPackageIds.size) return [...commands];
   const selectedPackageIds = dependencyClosurePackageGateIds(changedPackageIds, packageGateOrder);
   return commands.filter((command) => {
-    const packageId = inferFrontierPackageGateIdFromMetadata(command.metadata, packageGateOrder);
+    const packageId = inferFrontierPackageGateId(command, packageGateOrder);
     return !packageId || selectedPackageIds.has(packageId);
   });
 }
