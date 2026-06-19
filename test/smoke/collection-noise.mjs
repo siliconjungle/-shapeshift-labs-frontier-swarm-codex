@@ -468,8 +468,10 @@ if (await exists(path.join(root, 'dist/index.js'))) {
   assert.strictEqual(applyCollection.summary.total, 4);
   assert.strictEqual(applyCollection.summary['ready-to-apply'], 2);
   assert.strictEqual(applyCollection.summary['needs-human-port'], 1);
-  assert.strictEqual(applyCollection.summary['failed-evidence'], 1);
+  assert.strictEqual(applyCollection.summary['rerun-work'], 1);
+  assert.strictEqual(applyCollection.summary['failed-evidence'], 0);
   assert.strictEqual(applyCollection.summary['stale-against-head'], 0);
+  assert.strictEqual(applyCollection.buckets['rerun-work'][0]?.jobId, 'failed-job');
 
   const applyRepo = await initPatchRepo(path.join(tmp, 'apply-repo'));
   const appliedLedger = await applyCodexSwarmCollection({
@@ -509,11 +511,13 @@ if (await exists(path.join(root, 'dist/index.js'))) {
     landedSuccessCount: appliedLedger.summary.applied + committedLedger.summary.committed,
     needsHumanCount: applyCollection.summary['needs-human-port'],
     failedCount: applyCollection.summary['failed-evidence'] + appliedLedger.summary.failed + committedLedger.summary.failed,
+    rerunCount: applyCollection.summary['rerun-work'],
     staleCount: applyCollection.summary['stale-against-head']
   }, {
     landedSuccessCount: 2,
     needsHumanCount: 1,
-    failedCount: 1,
+    failedCount: 0,
+    rerunCount: 1,
     staleCount: 0
   });
 
@@ -551,7 +555,8 @@ if (await exists(path.join(root, 'dist/index.js'))) {
   });
   assert.strictEqual(landedCollection.summary['ready-to-apply'], 2);
   assert.strictEqual(landedCollection.summary['needs-human-port'], 1);
-  assert.strictEqual(landedCollection.summary['failed-evidence'], 1);
+  assert.strictEqual(landedCollection.summary['rerun-work'], 1);
+  assert.strictEqual(landedCollection.summary['failed-evidence'], 0);
   assert.strictEqual(landedCollection.summary['stale-against-head'], 0);
   assert.strictEqual(landedCollection.summary.landed, 3);
   assert.deepStrictEqual([...landedCollection.summary.landedJobIds].sort(), ['commit-ready-job', 'needs-human-job', 'ready-job']);
@@ -565,7 +570,7 @@ if (await exists(path.join(root, 'dist/index.js'))) {
   assert.strictEqual(landedCollection.summary.landedHealth.successfulOutputCount, 3);
   assert.strictEqual(landedCollection.summary.landedHealth.landedNeedsHumanReviewCount, 1);
   assert.strictEqual(landedCollection.summary.landedHealth.remainingNeedsHumanReviewCount, 0);
-  assert.strictEqual(landedCollection.summary.landedHealth.remainingFailedEvidenceCount, 1);
+  assert.strictEqual(landedCollection.summary.landedHealth.remainingFailedEvidenceCount, 0);
   assert.strictEqual(landedCollection.summary.landedHealth.reviewPressureCount, 1);
   assert.strictEqual(landedCollection.qualitySignals.landed.successfulOutputCount, 3);
   assert.strictEqual(landedCollection.qualitySignals.needsPort.landedJobCount, 1);
@@ -579,7 +584,7 @@ if (await exists(path.join(root, 'dist/index.js'))) {
   assert.strictEqual(landedCollection.dashboard.summary.collectionLandedSuccessCount, 3);
   assert.strictEqual(landedCollection.dashboard.summary.collectionLandedNeedsHumanReviewCount, 1);
   assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingNeedsHumanReviewCount, 0);
-  assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingFailedEvidenceCount, 1);
+  assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingFailedEvidenceCount, 0);
   assert.strictEqual(landedCollection.dashboard.summary.collectionReviewPressureCount, 1);
   assert.deepStrictEqual(landedCollection.dashboard.metadata.applyLedger, landedCollection.summary.applyLedger);
   assert.deepStrictEqual(landedCollection.dashboard.metadata.landedHealth, landedCollection.summary.landedHealth);

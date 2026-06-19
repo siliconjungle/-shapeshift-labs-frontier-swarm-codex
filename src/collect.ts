@@ -113,7 +113,12 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       : await bundlePatchStaleness(bundle, mergePath, cwd);
     const staleAgainstHead = normalizeCollectedStaleAgainstHead(bundle, staleness, input.checkStale !== false);
     const disposition = normalizeCollectedDisposition(bundle, staleAgainstHead);
-    const bucket = classifyCodexCollectBucket({ ...bundle, staleAgainstHead, disposition }, staleAgainstHead);
+    const bucket = classifyCodexCollectBucket({
+      ...bundle,
+      staleAgainstHead,
+      disposition,
+      ...(patchExists && patchPath ? { patchPath } : {})
+    }, staleAgainstHead);
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(bundle.jobId)}` : bundle.branchName;
     const outputDir = path.join(outDir, bucket, slug(bundle.jobId));
     const collectedEvidencePath = path.join(outputDir, 'evidence.json');
