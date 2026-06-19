@@ -424,7 +424,7 @@ function dashboardBucketFromCoordinatorJob(job: Record<string, unknown>): Fronti
   if (disposition === 'ready-to-apply' || disposition === 'auto-mergeable') return 'ready-to-apply';
   if (disposition === 'rerun-work' || disposition === 'ownership-rescope') return 'rerun-work';
   if (disposition === 'stale-against-head' || disposition === 'stale' || booleanValue(job.staleAgainstHead)) return 'stale-against-head';
-  if (disposition === 'failed-evidence' || disposition === 'rejected' || status === 'failed') return 'failed-evidence';
+  if (dashboardRecordIndicatesFailedEvidence(job) || status === 'failed') return 'failed-evidence';
   return undefined;
 }
 
@@ -506,7 +506,7 @@ function createDashboardQualityMetrics(
   const quarantinedJobs = jobs.filter((job) => job.quarantinedChangedPathCount > 0);
   const quarantinedChangedPathCount = jobs.reduce((sum, job) => sum + job.quarantinedChangedPathCount, 0);
   const quarantinedPaths = sampleQualityStrings(quarantinedJobs.flatMap((job) => job.quarantinedChangedPaths));
-  const failedEvidenceJobs = jobs.filter((job) => job.bucket === 'failed-evidence');
+  const failedEvidenceJobs = jobs.filter(isDashboardFailedEvidenceJob);
   const failedStatusJobs = jobs.filter((job) => job.status === 'failed');
   const blockedJobs = jobs.filter(isDashboardBlockedJob);
   const rejectedJobs = jobs.filter((job) => job.disposition === 'rejected');
@@ -737,16 +737,17 @@ function createDashboardHealthMetrics(jobs: readonly FrontierCodexDashboardJob[]
 
 function isDashboardFailureJob(job: FrontierCodexDashboardJob): boolean {
   if (job.bucket === 'rerun-work') return false;
-  return job.bucket === 'failed-evidence'
-    || job.status === 'failed'
+  return isDashboardFailedEvidenceJob(job)
     || isDashboardBlockedJob(job)
-    || job.disposition === 'rejected';
+    || isDashboardContextBudgetFailedJob(job)
+    || job.sourceOwnershipViolationCount > 0
+    || job.quarantinedChangedPathCount > 0;
 }
 
 function dashboardJobHealth(job: FrontierCodexDashboardJob): FrontierCodexDashboardHealthStatus {
   if (job.status === 'running') return 'running';
   if (job.bucket === 'rerun-work') return 'warning';
-  if (job.status === 'failed' || job.bucket === 'failed-evidence' || job.disposition === 'rejected') return 'failed';
+  if (isDashboardFailedEvidenceJob(job)) return 'failed';
   if (isDashboardBlockedJob(job)) return 'blocked';
   if (isDashboardContextBudgetFailedJob(job)) return 'failed';
   if (job.sourceOwnershipViolationCount > 0 || job.quarantinedChangedPathCount > 0) return 'failed';
@@ -783,6 +784,45 @@ function isDashboardTerminalJob(job: FrontierCodexDashboardJob): boolean {
 function isDashboardBlockedJob(job: FrontierCodexDashboardJob): boolean {
   return job.status === 'blocked'
     || job.disposition === 'blocked';
+}
+
+function isDashboardFailedEvidenceJob(job: FrontierCodexDashboardJob): boolean {
+  if (job.status === 'failed') return true;
+  if (job.bucket === 'failed-evidence' || job.disposition === 'failed-evidence') return true;
+  if (job.disposition !== 'rejected') return false;
+  return dashboardFailureReasonTokens(job.reasons, job.collectReasonClasses).length > 0;
+}
+
+function dashboardRecordIndicatesFailedEvidence(job: Record<string, unknown>): boolean {
+  const disposition = stringValue(job.disposition);
+  const status = stringValue(job.status);
+  if (status === 'failed' || disposition === 'failed-evidence') return true;
+  if (disposition !== 'rejected') return false;
+  return dashboardFailureReasonTokens(
+    stringListValue(job.reasons),
+    stringListValue(job.collectReasonClasses)
+  ).length > 0;
+}
+
+function dashboardFailureReasonTokens(...groups: readonly string[][]): string[] {
+  const tokens = uniqueStrings(groups.flat()).map((token) => token.toLowerCase());
+  return tokens.filter((token) => token === 'failed'
+    || token === 'failed-evidence'
+    || token === 'failed-or-invalid-evidence'
+    || token === 'failed-verification'
+    || token === 'no-source-changes'
+    || token === 'worker-error'
+    || token === 'generated-failed-evidence'
+    || token === 'patch-missing'
+    || token === 'bundle-missing'
+    || token === 'malformed-patch'
+    || token === 'patch-apply-failed'
+    || token === 'source-blocker'
+    || token.startsWith('worker-exit-nonzero:')
+    || token.startsWith('worker-signal:')
+    || token.startsWith('ownership-violation:')
+    || token.startsWith('generated-failed-evidence:')
+    || token.startsWith('verification-failed:'));
 }
 
 function createDashboardTimeSeries(

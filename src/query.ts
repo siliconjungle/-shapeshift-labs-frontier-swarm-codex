@@ -611,7 +611,7 @@ function jobHealth(job: Record<string, unknown>): QueryHealthStatus {
   const contextBudget = jobContextBudget(job);
   if (status === 'running' || liveness === 'running') return 'running';
   if (status === 'rerun-work' || disposition === 'rerun-work' || disposition === 'ownership-rescope') return 'warning';
-  if (status === 'failed' || disposition === 'failed-evidence' || disposition === 'rejected') return 'failed';
+  if (jobIndicatesFailedEvidence(job)) return 'failed';
   if (status === 'blocked' || disposition === 'blocked' || job.mergeReadiness === 'blocked') return 'blocked';
   if (!testsPassed(job) || contextBudget.status === 'failed' || contextBudget.errors.length > 0 || readStringArray(job.ownershipViolations).length > 0) return 'failed';
   if (
@@ -738,6 +738,35 @@ function jobSemanticReadinessStatus(job: Record<string, unknown>): QuerySemantic
   if (admission.autoMergeCandidate === true || nonNegativeNumber(script.autoMergeCandidates) > 0 || nonNegativeNumber(script.portable) > 0 || nonNegativeNumber(script.autoApplyCandidates) > 0) return 'candidate';
   if (typeof admission.status === 'string' || readStringArray(quality.warnings).length > 0) return 'review-required';
   return 'unknown';
+}
+
+function jobIndicatesFailedEvidence(job: Record<string, unknown>): boolean {
+  const status = String(job.status ?? '').toLowerCase();
+  const disposition = String(job.disposition ?? '').toLowerCase();
+  if (status === 'failed' || disposition === 'failed-evidence') return true;
+  if (disposition !== 'rejected') return false;
+  return queryFailureReasonTokens(readStringArray(job.reasons), readStringArray(job.collectReasonClasses)).length > 0;
+}
+
+function queryFailureReasonTokens(...groups: readonly string[][]): string[] {
+  const tokens = uniqueStrings(groups.flat()).map((token) => token.toLowerCase());
+  return tokens.filter((token) => token === 'failed'
+    || token === 'failed-evidence'
+    || token === 'failed-or-invalid-evidence'
+    || token === 'failed-verification'
+    || token === 'no-source-changes'
+    || token === 'worker-error'
+    || token === 'generated-failed-evidence'
+    || token === 'patch-missing'
+    || token === 'bundle-missing'
+    || token === 'malformed-patch'
+    || token === 'patch-apply-failed'
+    || token === 'source-blocker'
+    || token.startsWith('worker-exit-nonzero:')
+    || token.startsWith('worker-signal:')
+    || token.startsWith('ownership-violation:')
+    || token.startsWith('generated-failed-evidence:')
+    || token.startsWith('verification-failed:'));
 }
 
 function evidenceSemanticReadinessStatus(entry: Record<string, unknown>): QuerySemanticReadinessStatus {

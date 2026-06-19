@@ -132,7 +132,7 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   }, null, 2) + '\n');
   await fs.writeFile(path.join(auditCollectionDir, 'collection.json'), JSON.stringify({
     ok: false,
-    summary: { total: 3, 'ready-to-apply': 0, 'needs-human-port': 1, 'failed-evidence': 1, 'stale-against-head': 1 },
+    summary: { total: 4, 'ready-to-apply': 0, 'needs-human-port': 2, 'failed-evidence': 1, 'stale-against-head': 1 },
     dashboard: {
       board: {
         entries: [
@@ -187,6 +187,30 @@ export async function testDashboardUi(context, collectionDir, continuation) {
           metadata: {
             semanticEditAdmissionStatus: 'needs-port',
             semanticEditAdmissionReasons: 'manual port required'
+          }
+        }
+      }, {
+        bucket: 'needs-human-port',
+        jobId: 'resolved-rejected-job',
+        outputDir: auditCollectionDir,
+        bundle: {
+          jobId: 'resolved-rejected-job',
+          taskId: 'resolved-rejected-task',
+          lane: 'runtime',
+          generatedAt: auditGeneratedAt + 180000,
+          startedAt: auditGeneratedAt + 170000,
+          finishedAt: auditGeneratedAt + 180000,
+          status: 'completed',
+          mergeReadiness: 'review-resolved',
+          disposition: 'rejected',
+          changedPaths: [],
+          ownershipViolations: [],
+          evidencePaths: [],
+          reasons: ['needs-human-port'],
+          metadata: {
+            collect: { reasonClasses: ['raw run evidence discovered'] },
+            semanticEditAdmissionStatus: 'needs-port',
+            semanticEditAdmissionReasons: 'needs-human-port'
           }
         }
       }],
@@ -267,9 +291,9 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   }, null, 2) + '\n');
   await fs.writeFile(path.join(auditCollectionDir, 'coordinator-query.json'), JSON.stringify({
     summary: {
-      jobCount: 3,
+      jobCount: 4,
       readyToApplyCount: 0,
-      needsHumanPortCount: 1,
+      needsHumanPortCount: 2,
       failedEvidenceCount: 1,
       staleAgainstHeadCount: 1,
       averageMergeScore: 0.5
@@ -297,6 +321,34 @@ export async function testDashboardUi(context, collectionDir, continuation) {
           warnings: [],
           semanticEditAdmission: { status: 'needs-port', autoMergeCandidate: false, cleanEligible: false, reasons: ['manual port required'] },
           semanticEditScript: { needsPort: 1 },
+          semanticEditProjection: {},
+          semanticEditReplay: {}
+        }
+      },
+      {
+        jobId: 'resolved-rejected-job',
+        taskId: 'resolved-rejected-task',
+        lane: 'runtime',
+        generatedAt: auditGeneratedAt + 180000,
+        status: 'completed',
+        liveness: 'finished',
+        mergeReadiness: 'review-resolved',
+        disposition: 'rejected',
+        mergeScore: 1,
+        changedPaths: [],
+        ownershipViolations: [],
+        sourceOwnershipViolations: [],
+        ignoredOwnershipViolations: [],
+        staleAgainstHead: false,
+        tests: { failed: 0, requiredFailed: 0 },
+        evidencePaths: [],
+        reasons: ['needs-human-port'],
+        collectReasonClasses: ['raw run evidence discovered'],
+        semanticImportQuality: {
+          expected: false,
+          warnings: [],
+          semanticEditAdmission: { status: 'needs-port', autoMergeCandidate: false, cleanEligible: false, reasons: ['needs-human-port'] },
+          semanticEditScript: {},
           semanticEditProjection: {},
           semanticEditReplay: {}
         }
@@ -406,13 +458,17 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.strictEqual(auditSnapshot.summary.sourceOwnershipViolationCount, 1);
   assert.strictEqual(auditSnapshot.summary.ignoredOwnershipViolationCount, 1);
   assert.strictEqual(auditSnapshot.summary.ignoredChangedPathCount, 2);
-  assert.strictEqual(auditSnapshot.summary.terminalCount, 3);
+  const resolvedRejectedJob = auditSnapshot.jobs.find((job) => job.id === 'resolved-rejected-job');
+  assert.ok(resolvedRejectedJob);
+  assert.notStrictEqual(resolvedRejectedJob.bucket, 'failed-evidence');
+  assert.strictEqual(resolvedRejectedJob.health, 'warning');
+  assert.strictEqual(auditSnapshot.summary.terminalCount, 4);
   assert.strictEqual(auditSnapshot.summary.failureCount, 1);
-  assert.strictEqual(auditSnapshot.summary.warningCount, 2);
+  assert.strictEqual(auditSnapshot.summary.warningCount, 3);
   assert.strictEqual(auditSnapshot.summary.contextWarningCount, 1);
   assert.strictEqual(auditSnapshot.summary.semanticCleanCount, 1);
-  assert.strictEqual(auditSnapshot.summary.durationMs, 42000);
-  assert.strictEqual(auditSnapshot.summary.averageDurationMs, 14000);
+  assert.strictEqual(auditSnapshot.summary.durationMs, 52000);
+  assert.strictEqual(auditSnapshot.summary.averageDurationMs, 13000);
   assert.strictEqual(auditSnapshot.summary.maxDurationMs, 20000);
   assert.strictEqual(auditSnapshot.summary.actualInputTokens, 28000);
   assert.strictEqual(auditSnapshot.humanActions.length, 1);
@@ -426,7 +482,7 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.strictEqual(auditSnapshot.quality.summary.quarantinedChangedPathCount, 2);
   assert.strictEqual(auditSnapshot.quality.summary.failureJobCount, 1);
   assert.strictEqual(auditSnapshot.quality.summary.failedEvidenceJobCount, 1);
-  assert.strictEqual(auditSnapshot.quality.summary.needsPortJobCount, 1);
+  assert.strictEqual(auditSnapshot.quality.summary.needsPortJobCount, 2);
   assert.strictEqual(auditSnapshot.quality.summary.staleJobCount, 1);
   assert.strictEqual(auditSnapshot.quality.summary.contextBudgetJobCount, 1);
   assert.strictEqual(auditSnapshot.quality.summary.contextBudgetWarningCount, 1);
@@ -437,17 +493,17 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.strictEqual(auditSnapshot.quality.summary.contextBudgetMaxUncachedInputTokens, 8000);
   assert.strictEqual(auditSnapshot.health.status, 'failed');
   assert.strictEqual(auditSnapshot.health.summary.failedJobCount, 1);
-  assert.strictEqual(auditSnapshot.health.summary.warningJobCount, 2);
+  assert.strictEqual(auditSnapshot.health.summary.warningJobCount, 3);
   assert.strictEqual(auditSnapshot.health.summary.readyToApplyJobCount, 0);
-  assert.strictEqual(auditSnapshot.health.summary.notReadyToApplyJobCount, 3);
+  assert.strictEqual(auditSnapshot.health.summary.notReadyToApplyJobCount, 4);
   assert.strictEqual(auditSnapshot.health.summary.contextWarningJobCount, 1);
   assert.strictEqual(auditSnapshot.health.summary.semanticCleanJobCount, 1);
   assert.strictEqual(auditSnapshot.health.summary.semanticUnknownJobCount, 0);
-  assert.strictEqual(auditSnapshot.health.summary.durationMs, 42000);
-  assert.strictEqual(auditSnapshot.health.summary.averageDurationMs, 14000);
+  assert.strictEqual(auditSnapshot.health.summary.durationMs, 52000);
+  assert.strictEqual(auditSnapshot.health.summary.averageDurationMs, 13000);
   assert.strictEqual(auditSnapshot.health.summary.maxDurationMs, 20000);
   assert.strictEqual(auditSnapshot.health.summary.actualInputTokens, 28000);
-  assert.ok(auditSnapshot.health.summary.failureRatio > 0.3);
+  assert.ok(auditSnapshot.health.summary.failureRatio > 0.2);
   assert.ok(auditSnapshot.health.points.some((point) => point.id === 'semantic:clean' && point.jobIds.includes('audit-job')));
   assert.strictEqual(auditSnapshot.quality.series.sourceOwnership.id, 'source-ownership');
   assert.strictEqual(auditSnapshot.quality.series.ignoredChangedPaths.id, 'ignored-changed-paths');
@@ -460,9 +516,9 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.ok(auditSnapshot.quality.series.contextBudget.points.some((point) => point.id === 'warning' && point.value === 1));
   assert.ok(auditSnapshot.quality.series.generatedChangedPaths.points.some((point) => point.id === 'paths' && point.value === 2));
   assert.strictEqual(auditSnapshot.timeSeries.bucketMs, 60000);
-  assert.strictEqual(auditSnapshot.timeSeries.summary.terminalJobCount, 3);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.terminalJobCount, 4);
   assert.strictEqual(auditSnapshot.timeSeries.summary.failureJobCount, 1);
-  assert.strictEqual(auditSnapshot.timeSeries.summary.warningJobCount, 2);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.warningJobCount, 3);
   assert.strictEqual(auditSnapshot.timeSeries.summary.semanticCleanJobCount, 1);
   assert.strictEqual(auditSnapshot.timeSeries.summary.contextLoadJobCount, 1);
   assert.strictEqual(auditSnapshot.timeSeries.summary.logVolumeJobCount, 1);
@@ -472,8 +528,8 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.strictEqual(auditSnapshot.timeSeries.summary.actualInputTokens, 28000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.cachedInputTokens, 20000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.uncachedInputTokens, 8000);
-  assert.strictEqual(auditSnapshot.timeSeries.summary.durationMs, 42000);
-  assert.strictEqual(auditSnapshot.timeSeries.summary.averageDurationMs, 14000);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.durationMs, 52000);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.averageDurationMs, 13000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.maxDurationMs, 20000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.eventBytes, 2000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.stderrBytes, 300);
@@ -482,7 +538,7 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.ok(auditSnapshot.timeSeries.points.some((point) => point.at === auditBucketAt && point.failureJobCount === 1 && point.durationMs === 12000 && point.semanticCleanJobCount === 1 && point.jobIds.includes('audit-job')));
   const auditQuery = await queryCodexSwarmCollection({ collection: auditCollectionDir, limit: 10 });
   assert.strictEqual(auditQuery.summary.queryable.runHealth.failedJobCount, 1);
-  assert.strictEqual(auditQuery.summary.queryable.runHealth.warningJobCount, 1);
+  assert.strictEqual(auditQuery.summary.queryable.runHealth.warningJobCount, 2);
   assert.strictEqual(auditQuery.summary.queryable.runHealth.blockedJobCount, 1);
   assert.strictEqual(auditQuery.summary.queryable.context.contextWarningJobCount, 1);
   assert.strictEqual(auditQuery.summary.queryable.context.tokenTotals.actualInputTokens, 28000);
