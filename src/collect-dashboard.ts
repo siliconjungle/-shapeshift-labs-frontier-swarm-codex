@@ -12,6 +12,7 @@ import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.j
 import { mergeSemanticEditScriptSummaries } from './semantic-edit-script.js';
 import { mergeSemanticEditProjectionSummaries } from './semantic-edit-projection.js';
 import { mergeSemanticEditReplaySummaries } from './semantic-edit-replay.js';
+import { humanActionsFromMergeBundles } from './human-actions.js';
 
 const SIGNAL_ITEM_LIMIT = 12;
 
@@ -50,8 +51,10 @@ export function enrichCollectedCoordinatorDashboard(
   });
   const collectionQualitySignals = createCollectedQualitySignals(mutable.jobs, contextBudgets, bundles);
   const collectionAutosplitRerunGuidance = compactAutosplitRerunGuidance(collectionQualitySignals);
+  const humanActions = humanActionsFromMergeBundles(bundles);
   mutable.summary = {
     ...dashboard.summary,
+    humanActionCount: humanActions.length,
     collectionFailureSignalCount: collectionQualitySignals.failure.jobCount,
     collectionSourceBlockerSignalCount: collectionQualitySignals.failure.sourceBlockerJobCount,
     collectionInfrastructureNoiseSignalCount: collectionQualitySignals.failure.infrastructureNoiseJobCount,
@@ -111,8 +114,9 @@ export function enrichCollectedCoordinatorDashboard(
   };
   mutable.metadata = {
     ...(mutable.metadata ?? {}),
+    ...(humanActions.length ? { humanActions } : {}),
     semanticImport: semanticImportMetadata(semanticQualities, semanticImportExpected)
-  };
+  } as FrontierSwarmCoordinatorDashboard['metadata'];
   return mutable;
 }
 

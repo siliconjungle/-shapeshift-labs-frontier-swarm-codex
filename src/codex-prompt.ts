@@ -178,6 +178,7 @@ export function renderCodexPrompt(
     '## Evidence',
     '',
     `Write evidence under ${input.paths.evidenceDir}.`,
+    `If you are genuinely blocked on a product choice, ambiguous requirement, or unsafe assumption, write ${path.join(input.paths.evidenceDir, 'human-question.json')}. Use JSON with code/title/question/detail/requestedAnswer/options. Only ask when you cannot safely proceed; do not use this for ordinary coordinator review, patch porting, test failures, or missing context you can inspect yourself.`,
     'Final response must include changed files, commands run, evidence paths, remaining gaps, and whether changed paths stayed inside allowed write globs.',
     '',
     'Raw task JSON:',

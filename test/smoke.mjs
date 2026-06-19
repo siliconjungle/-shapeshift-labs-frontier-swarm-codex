@@ -26,6 +26,7 @@ import { testTournamentCli } from './smoke/tournament-cli.mjs';
 import { testContextBudget } from './smoke/context-budget.mjs';
 import { testContinuation } from './smoke/continuation.mjs';
 import { testDashboardUi } from './smoke/dashboard-ui.mjs';
+import { testHumanActionArtifacts } from './smoke/human-actions.mjs';
 import './smoke/collection-noise.mjs';
 import './smoke/workspace-lockdown.mjs';
 
@@ -43,6 +44,7 @@ await testSemanticEditLockdown();
 const { mergeBundle, collectionDir } = await testSwarmRunCollection(context);
 const continuation = await testContinuation(context, collectionDir);
 await testDashboardUi(context, collectionDir, continuation);
+await testHumanActionArtifacts(context);
 await testArtifactArchiveCompaction(context, collectionDir);
 await testTournamentCli(context);
 await testSemanticImportQuality(context, mergeBundle);

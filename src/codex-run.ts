@@ -35,6 +35,7 @@ import { createCodexContextBudgetReport, finalizeCodexContextBudgetReport } from
 import { runCodexDependencyHealthPreflight } from './codex-run-health.js';
 import { runScheduledJobPool } from './codex-run-scheduler.js';
 import { createCodexWorkspacePlan, createSwarmWorkspaceProof, prepareCodexWorkspace } from './codex-workspace.js';
+import { readCodexHumanActionArtifacts } from './human-actions.js';
 import { applyWorkspacePreExecWriteFence, collectChangedPaths, emptyChangedPathCollection, filterWorkspaceChangedPaths, mergeWorkspaceChangedPathCollections, quarantineWorkspacePatchCandidatePaths, restoreWorkspaceChangedPaths, restoreWorkspacePreExecWriteFence, runVerification, shouldSnapshotWorkspaceChanges, snapshotWorkspaceFiles, writeCodexPatchFile } from './codex-workspace-changes.js';
 import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions, FrontierCodexSwarmRunResult } from './index.js';
 export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {
@@ -272,6 +273,7 @@ export async function runCodexJob(
   });
   const semanticImportSummary = semanticImport?.sidecar.summary;
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });
+  const humanActions = await readCodexHumanActionArtifacts({ evidenceDir: paths.evidenceDir, jobId: job.id, taskId: job.taskId, lane: job.lane });
   const tournamentStrategy = createCodexTournamentStrategyMetadata(
     { job, workspaceMode: workspacePlan.mode, customPrompt: !!options.renderJobPrompt, semanticImportSummary, logSummary }
   );
@@ -287,6 +289,7 @@ export async function runCodexJob(
     ...(semanticImport ? [semanticImport.path] : []),
     paths.patchIntentPath,
     paths.logSummaryPath,
+    ...humanActions.paths,
     ...handoffArtifacts.map((artifact) => artifact.path)
   ]);
   const result: FrontierSwarmJobResultInput = {
@@ -320,6 +323,7 @@ export async function runCodexJob(
       allowedWritePolicy: workspacePlan.allowedWritePolicy,
       observedChangedPaths: collected.observedChangedPaths,
       reportedChangedPaths: reportedChangedPaths.observedChangedPaths,
+      ...(humanActions.actions.length ? { humanActions: humanActions.actions, humanActionArtifactPaths: humanActions.paths } : {}),
       ...(strictOwnershipBlocked ? {
         strictOwnershipBlockReason,
         strictOwnershipBlockMessage,
@@ -348,6 +352,7 @@ export async function runCodexJob(
       paths.workspaceProofPath,
       paths.patchIntentPath,
       paths.logSummaryPath,
+      ...humanActions.paths,
       ...(semanticImport ? [semanticImport.path] : []),
       ...handoffArtifacts.map((artifact) => artifact.path)
     ]),
@@ -365,6 +370,7 @@ export async function runCodexJob(
       allowedWritePolicy: workspacePlan.allowedWritePolicy,
       observedChangedPaths: collected.observedChangedPaths,
       reportedChangedPaths: reportedChangedPaths.observedChangedPaths,
+      ...(humanActions.actions.length ? { humanActions: humanActions.actions, humanActionArtifactPaths: humanActions.paths } : {}),
       ...(strictOwnershipBlocked ? {
         strictOwnershipBlockReason,
         strictOwnershipBlockMessage,

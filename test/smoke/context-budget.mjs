@@ -20,6 +20,8 @@ function testPromptWriteContract(plan, tmp, paths) {
   assert.ok(prompt.includes('For out-of-scope or cross-stream needs, write an evidence handoff naming target lane, target files, and rationale; do not patch them.'));
   assert.ok(prompt.includes('Strict runs restore unauthorized source writes before verification and mark the job failed.'));
   assert.ok(prompt.includes('Cite real commands/evidence; never fake success.'));
+  assert.ok(prompt.includes('human-question.json'));
+  assert.ok(prompt.includes('Only ask when you cannot safely proceed'));
 }
 
 async function testAdaptiveFeedbackRoutingSignals(plan, tmp) {
