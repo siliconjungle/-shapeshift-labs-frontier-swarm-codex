@@ -22,6 +22,7 @@ const readySemanticImport = {
   lossesBySeverity: {},
   semanticIndex: { documents: 1, symbols: 2, occurrences: 2, relations: 1, facts: 0 },
   dependencies: { total: 1, calls: 1, uses: 0, references: 0, imports: 0, depends: 0, extends: 0, implements: 0, includes: 0, requires: 0, byPredicate: { calls: 1 }, predicates: ['calls'], ids: ['rel_action_calls_helper'], sourceSymbolIds: ['symbol:action'], targetSymbolIds: ['symbol:helper'] },
+  dependencyEdgeHints: ['re-export:./public.ts'],
   semanticSidecars: { total: 1, symbols: 1, ownershipRegions: 1, patchHints: 1, empty: 0 },
   universalAstLayers: {
     total: 2,
@@ -222,6 +223,8 @@ async function testScore(applyRepo, tmp) {
   assert.strictEqual(patchScore.entries[0].semanticEvidence.sourceMapMappings, 1);
   assert.strictEqual(patchScore.entries[0].semanticEvidence.dependencyRelations, 1);
   assert.deepStrictEqual(patchScore.entries[0].semanticEvidence.dependencyPredicates, ['calls']);
+  assert.deepStrictEqual(patchScore.entries[0].semanticEvidence.dependencyEdgeHints, ['re-export:./public.ts']);
+  assert.ok(patchScore.entries[0].semanticEvidence.reasons.includes('semantic dependency edge changes public exports'));
   assert.strictEqual(patchScore.entries[0].semanticEvidence.universalAstLayers, 2);
   assert.strictEqual(patchScore.entries[0].semanticEvidence.proofSpecObligations, 1);
   assert.strictEqual(patchScore.entries[0].semanticEvidence.proofSpecFailedObligations, 0);

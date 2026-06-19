@@ -449,6 +449,7 @@ export interface FrontierCodexPatchScoreSemanticEvidence {
   dependencyRelations: number;
   dependencyPredicates: string[];
   dependencyEdges: string[];
+  dependencyEdgeHints: string[];
   universalAstLayers: number;
   universalAstLayerNames: string[];
   proofSpecObligations: number;

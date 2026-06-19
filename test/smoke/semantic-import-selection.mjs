@@ -172,8 +172,12 @@ async function testCopiedWorkspacePackageSubdirSemanticImport(plan, tmp) {
   assert.strictEqual(semanticImports.records[0].language, 'typescript');
   assert.ok(Array.isArray(semanticImports.records[0].dependencyEdges));
   assert.ok(semanticImports.records[0].dependencyEdges.includes('import:./generated.ts'));
+  assert.ok(Array.isArray(semanticImports.records[0].dependencyEdgeHints));
+  assert.ok(semanticImports.records[0].dependencyEdgeHints.includes('import:./generated.ts'));
   assert.ok(Array.isArray(semanticImports.summary.dependencyEdges));
   assert.ok(semanticImports.summary.dependencyEdges.includes('import:./generated.ts'));
+  assert.ok(Array.isArray(semanticImports.summary.dependencyEdgeHints));
+  assert.ok(semanticImports.summary.dependencyEdgeHints.includes('import:./generated.ts'));
   await testCopiedWorkspaceEmptyChangedPathsFallback(copyPlan, tmp);
 }
 

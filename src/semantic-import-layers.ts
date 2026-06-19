@@ -154,8 +154,12 @@ export function summarizeSemanticLosses(value: any): unknown {
 }
 
 
-export function summarizeSemanticMergeCandidate(value: any): unknown {
+export function summarizeSemanticMergeCandidate(value: any, dependencyEdgeHints: readonly string[] = []): unknown {
   if (!value || typeof value !== 'object') return undefined;
+  const hints = uniqueStrings([
+    ...(Array.isArray(value.dependencyEdgeHints) ? value.dependencyEdgeHints.map(String) : []),
+    ...dependencyEdgeHints.map(String)
+  ]).slice(0, 100);
   return {
     kind: value.kind,
     readiness: value.readiness,
@@ -163,6 +167,7 @@ export function summarizeSemanticMergeCandidate(value: any): unknown {
     touchedSemanticNodes: Array.isArray(value.touchedSemanticNodes) ? value.touchedSemanticNodes.slice(0, 50) : [],
     nativeSpans: Array.isArray(value.nativeSpans) ? value.nativeSpans.slice(0, 50) : [],
     conflictKeys: Array.isArray(value.conflictKeys) ? value.conflictKeys.slice(0, 100) : [],
+    ...(hints.length > 0 ? { dependencyEdgeHints: hints } : {}),
     reasons: Array.isArray(value.reasons) ? value.reasons.slice(0, 50) : []
   };
 }

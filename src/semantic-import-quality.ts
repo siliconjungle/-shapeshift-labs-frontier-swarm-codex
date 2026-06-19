@@ -32,6 +32,9 @@ export function summarizeCodexSemanticImportQuality(
   const dependencyEdges = Array.isArray((summary as { dependencyEdges?: unknown } | undefined)?.dependencyEdges)
     ? uniqueStrings((summary as { dependencyEdges: string[] }).dependencyEdges)
     : [];
+  const dependencyEdgeHints = Array.isArray((summary as { dependencyEdgeHints?: unknown } | undefined)?.dependencyEdgeHints)
+    ? uniqueStrings((summary as { dependencyEdgeHints: string[] }).dependencyEdgeHints)
+    : [];
   const sourceMapMappings = nonNegativeNumber(summary?.sourceMapMappingCount);
   const universalAstLayerSummary = semanticImportUniversalAstLayerSummary(summary);
   const universalAstLayers = universalAstLayerSummary.total;
@@ -123,6 +126,7 @@ export function summarizeCodexSemanticImportQuality(
     dependencyRelations,
     dependencyPredicates,
     dependencyEdges,
+    dependencyEdgeHints,
     sourceMapMappings,
     universalAstLayers,
     universalAstLayerNames,

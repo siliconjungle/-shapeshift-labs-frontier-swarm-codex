@@ -216,6 +216,7 @@ export async function createCodexSemanticImportSidecar(input: {
           ? importResult.universalAst.sourceMaps
           : [];
       const dependencyEdges = summarizeSemanticDependencyEdges(sourceText);
+      const dependencyEdgeHints = dependencyEdges.length > 0 ? [...dependencyEdges] : undefined;
       const semanticIndex = summarizeSemanticIndex(importResult?.semanticIndex);
       const semanticFacts = mergeSemanticFactSummaries([
         summarizeLangSidecarSemanticFacts(semanticSidecar),
@@ -228,6 +229,7 @@ export async function createCodexSemanticImportSidecar(input: {
         status: 'imported',
         bytes: stat.size,
         ...(dependencyEdges.length > 0 ? { dependencyEdges } : {}),
+        ...(dependencyEdgeHints ? { dependencyEdgeHints } : {}),
         ...(baseSource ? { baseSource: summarizeSemanticImportBaseSource(baseSource) } : {}),
         ...(headSource ? { headSource: summarizeSemanticImportHeadSource(headSource) } : {}),
         importId: importResult?.id,
@@ -255,7 +257,7 @@ export async function createCodexSemanticImportSidecar(input: {
         nativeDiff: summarizeNativeSourceChangeSet(nativeDiff),
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),
-        mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate),
+        mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate, dependencyEdgeHints),
         semanticSlice: summarizeSemanticSlice(semanticSlice),
         semanticSliceAdmission: summarizeSemanticSliceAdmission(semanticSliceAdmission)
       });
