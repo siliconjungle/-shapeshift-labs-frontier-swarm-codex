@@ -501,6 +501,25 @@ if (await exists(path.join(root, 'dist/index.js'))) {
   assert.ok(applyCollection.buckets['needs-human-port'].some((entry) => entry.jobId === 'no-source-failed-job'));
   assert.ok(applyCollection.buckets['needs-human-port'].some((entry) => entry.jobId === 'generated-failed-evidence-job'));
 
+  const emptyPatchRunDir = path.join(tmp, 'empty-patch-run');
+  await writePatchMerge(emptyPatchRunDir, 'empty-patch-failed-job', {
+    status: 'failed',
+    disposition: 'blocked',
+    autoMergeable: false,
+    commandsFailed: [{ command: ['node', 'test.mjs'], status: 1, required: true }],
+    patchText: ''
+  });
+  const emptyPatchCollection = await collectCodexSwarmRun({
+    run: emptyPatchRunDir,
+    outDir: path.join(tmp, 'empty-patch-collected'),
+    cwd: root,
+    checkStale: false
+  });
+  assert.strictEqual(emptyPatchCollection.summary.total, 1);
+  assert.strictEqual(emptyPatchCollection.summary['rerun-work'], 0);
+  assert.strictEqual(emptyPatchCollection.summary['failed-evidence'], 1);
+  assert.strictEqual(emptyPatchCollection.buckets['failed-evidence'][0]?.jobId, 'empty-patch-failed-job');
+
   const applyRepo = await initPatchRepo(path.join(tmp, 'apply-repo'));
   const appliedLedger = await applyCodexSwarmCollection({
     collection: applyCollection.outDir,

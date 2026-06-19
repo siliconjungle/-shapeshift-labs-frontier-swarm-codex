@@ -415,13 +415,17 @@ function stringArray(value: unknown): string[] {
 }
 
 
-export function classifyCodexCollectBucket(bundle: FrontierSwarmMergeBundle, staleAgainstHead: boolean): FrontierCodexCollectBucket {
+export function classifyCodexCollectBucket(
+  bundle: FrontierSwarmMergeBundle,
+  staleAgainstHead: boolean,
+  hasActionablePatch = Boolean(bundle.patchPath)
+): FrontierCodexCollectBucket {
   if (staleAgainstHead) return 'stale-against-head';
-  if (bundle.changedPaths.length > 0 && bundle.patchPath && (bundle.disposition === 'rejected' || bundle.commandsFailed.length > 0 || bundle.status === 'failed')) {
+  if (bundle.changedPaths.length > 0 && hasActionablePatch && (bundle.disposition === 'rejected' || bundle.commandsFailed.length > 0 || bundle.status === 'failed')) {
     return 'rerun-work';
   }
-  if (bundle.ownershipViolations.length > 0 && bundle.changedPaths.length > 0 && bundle.patchPath) return 'rerun-work';
-  if (nonActionableFailedEvidence(bundle, { staleAgainstHead })) return 'needs-human-port';
+  if (bundle.ownershipViolations.length > 0 && bundle.changedPaths.length > 0 && hasActionablePatch) return 'rerun-work';
+  if (nonActionableFailedEvidence(bundle, { staleAgainstHead, hasActionablePatch })) return 'needs-human-port';
   if (bundle.disposition === 'rejected' || bundle.disposition === 'blocked' || bundle.commandsFailed.length > 0 || bundle.status === 'failed') {
     if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-human-port';
     return 'failed-evidence';
