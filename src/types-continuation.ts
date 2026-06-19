@@ -64,6 +64,17 @@ export interface FrontierCodexContinuationResult {
     feedbackCount: number;
     totalRoutingFeedbackCount: number;
     backlogEntryCount: number;
+    terminalOutcomeProjection: {
+      closedEntryCount: number;
+      closedTaskCount: number;
+      rerunEntryCount: number;
+      rerunTaskCount: number;
+      reviewEntryCount: number;
+      reviewTaskCount: number;
+      blockedEntryCount: number;
+      blockedTaskCount: number;
+      decisionCount: number;
+    };
     routingPreferenceCount: number;
     routingPreferences: {
       defaultMode: FrontierSwarmModelRoutingPolicy['defaultMode'];

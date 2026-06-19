@@ -31,7 +31,7 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.ok(snapshot.jobs.some((job) => job.id === 'runtime-runtime-action'));
   assert.ok(snapshot.lanes.some((lane) => lane.id === 'runtime'));
   assert.ok(snapshot.routing.policyId);
-  assert.strictEqual(snapshot.backlog.entryCount, 1);
+  assert.strictEqual(snapshot.backlog.entryCount, 2);
 
   const semanticCollectionDir = path.join(tmp, 'semantic-collection');
   await fs.mkdir(semanticCollectionDir, { recursive: true });

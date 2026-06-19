@@ -354,7 +354,7 @@ frontier-swarm continue \
   --routing-mode fill
 ```
 
-`continue` also accepts `--run <run-dir>` and collects it before continuing. By default it discovers child backlog files named `backlog-children.json`, `child-backlog.json`, or `children-backlog.json`; pass `--child-backlog-name <file>` for project-specific filenames. It writes `backlog.next.json`, `model-routing-policy.next.json`, `next-plan.json` when manifest/tasks are supplied, and `continuation.json` with child backlog counts, routing feedback counts, next job ids, lane counts, tournament/adaptive summaries, and output paths. Use `next-wave` as a readable alias for `continue`; leave `--write` off until the `.next` files have been reviewed.
+`continue` also accepts `--run <run-dir>` and collects it before continuing. By default it discovers child backlog files named `backlog-children.json`, `child-backlog.json`, or `children-backlog.json`; pass `--child-backlog-name <file>` for project-specific filenames. It writes `backlog.next.json`, `model-routing-policy.next.json`, `next-plan.json` when manifest/tasks are supplied, and `continuation.json` with child backlog counts, routing feedback counts, next job ids, lane counts, terminal-outcome projection counts, tournament/adaptive summaries, and output paths. Terminal outcomes from `queue-outcome-model.json` are projected onto the next backlog and explicit task input: checked/applied/no-change/rejected work is closed, reruns stay ready, coordinator-review work stays out of new implementation jobs, and human questions/conflicts remain blocked without rewriting historical worker evidence. Use `next-wave` as a readable alias for `continue`; leave `--write` off until the `.next` files have been reviewed.
 
 ## Minimal Repro Workspaces
 

@@ -137,6 +137,10 @@ applyPromise satisfies Promise<FrontierCodexApplyResult>;
 scorePromise satisfies Promise<FrontierCodexPatchScoreResult>;
 handoffArtifactsPromise satisfies Promise<readonly { kind: string; path: string }[]>;
 continuationPromise satisfies Promise<FrontierCodexContinuationResult>;
+continuationPromise.then((continuation) => {
+  continuation.summary.terminalOutcomeProjection.closedEntryCount satisfies number;
+  continuation.summary.terminalOutcomeProjection.reviewTaskCount satisfies number;
+});
 semanticEditAdmission.status satisfies string;
 semanticEditReplay?.acceptedClean satisfies number | undefined;
 scorePromise.then((score) => {

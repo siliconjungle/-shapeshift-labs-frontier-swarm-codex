@@ -30,14 +30,30 @@ export async function testContinuation(context, collectionDir) {
     outDir: path.join(tmp, 'continuation'),
     backlog: {
       id: 'runtime-base-backlog',
-      entries: []
+      entries: [{
+        id: 'runtime-action',
+        title: 'Runtime action',
+        taskId: 'runtime-action',
+        status: 'ready',
+        lane: 'runtime',
+        targetRefs: ['src/runtime/action.ts']
+      }]
     },
     routingPolicy: {
       id: 'runtime-routing-policy',
       defaultMode: 'fill'
     },
     manifest: manifestInput,
-    tasks: { items: [] },
+    tasks: {
+      items: [{
+        id: 'runtime-action',
+        title: 'Runtime action',
+        status: 'ready',
+        lane: 'runtime',
+        workKind: 'runtime action',
+        targetRefs: ['src/runtime/action.ts']
+      }]
+    },
     backlogPlan: {
       recursive: true,
       maxDepth: 1,
@@ -54,9 +70,12 @@ export async function testContinuation(context, collectionDir) {
   assert.strictEqual(continuation.summary.childBacklogEntryCount, 1);
   assert.strictEqual(continuation.summary.feedbackCount, 1);
   assert.strictEqual(continuation.summary.totalRoutingFeedbackCount, 1);
+  assert.strictEqual(continuation.summary.terminalOutcomeProjection.reviewEntryCount, 1);
+  assert.strictEqual(continuation.summary.terminalOutcomeProjection.reviewTaskCount, 1);
   assert.strictEqual(continuation.summary.routingPreferences.defaultMode, 'fill');
   assert.strictEqual(continuation.summary.routingPreferences.feedbackCount, 1);
   assert.ok(continuation.summary.nextJobTaskIds.includes('runtime-follow-up'));
+  assert.ok(!continuation.summary.nextJobTaskIds.includes('runtime-action'));
   assert.strictEqual(continuation.summary.nextJobLaneCounts.runtime, 1);
   assert.strictEqual(continuation.summary.collectionBucketCounts.total, 1);
   assert.strictEqual(typeof continuation.summary.tournamentCounts.matchCount, 'number');
@@ -69,6 +88,7 @@ export async function testContinuation(context, collectionDir) {
   assert.ok(continuation.childBacklogPaths.includes(childBacklogPath));
   assert.ok(continuation.summary.paths.childBacklogPaths.includes(childBacklogPath));
   assert.ok(continuation.nextBacklog.entries.some((entry) => entry.id === 'runtime-follow-up'));
+  assert.strictEqual(continuation.nextBacklog.entries.find((entry) => entry.id === 'runtime-action')?.status, 'coordinator-review');
   assert.strictEqual(continuation.nextRoutingPolicy.feedback.length, 1);
   assert.ok(continuation.nextRoutingPolicy.metadata.tournamentSummary);
   assert.strictEqual(continuation.nextRoutingPolicy.feedback[0].scope, 'package');
@@ -90,8 +110,53 @@ export async function testContinuation(context, collectionDir) {
   const persistedRoutingPolicy = await readJson(continuation.routingPolicyPath);
   const persistedNextPlan = await readJson(continuation.nextPlanPath);
   assert.ok(persistedBacklog.entries.some((entry) => entry.id === 'runtime-follow-up'));
+  assert.strictEqual(persistedBacklog.entries.find((entry) => entry.id === 'runtime-action')?.status, 'coordinator-review');
   assert.ok(persistedRoutingPolicy.feedback.some((entry) => entry.jobId === 'runtime-runtime-action'));
   assert.ok(persistedNextPlan.jobs.some((job) => job.taskId === 'runtime-follow-up'));
+  assert.ok(!persistedNextPlan.jobs.some((job) => job.taskId === 'runtime-action'));
+
+  const closedCollectionDir = path.join(tmp, 'closed-collection');
+  await fs.mkdir(closedCollectionDir, { recursive: true });
+  const closedCollection = await readJson(path.join(collectionDir, 'collection.json'));
+  closedCollection.outDir = closedCollection.runDir = closedCollectionDir;
+  for (const decision of closedCollection.queueOutcomeModel.decisions) {
+    Object.assign(decision, { decision: 'checked', category: 'terminal', outcome: 'checked', terminal: true, closesSubject: true, coordinatorReview: false, reviewDebt: false });
+  }
+  closedCollection.queueOutcomeModel.visibleReviewDebt = [];
+  closedCollection.queueOutcomeModel.summary.visibleReviewDebtCount = 0;
+  await fs.writeFile(path.join(closedCollectionDir, 'collection.json'), JSON.stringify(closedCollection, null, 2) + '\n');
+  const closedContinuation = await continueCodexSwarmLoop({
+    collection: closedCollectionDir,
+    outDir: path.join(tmp, 'closed-continuation'),
+    backlog: {
+      id: 'closed-runtime-backlog',
+      entries: [{
+        id: 'runtime-action',
+        title: 'Runtime action',
+        taskId: 'runtime-action',
+        status: 'ready',
+        lane: 'runtime',
+        targetRefs: ['src/runtime/action.ts']
+      }]
+    },
+    routingPolicy: { id: 'closed-routing-policy', defaultMode: 'fill' },
+    manifest: manifestInput,
+    tasks: {
+      items: [{
+        id: 'runtime-action',
+        title: 'Runtime action',
+        status: 'ready',
+        lane: 'runtime',
+        targetRefs: ['src/runtime/action.ts']
+      }]
+    },
+    repository: 'frontier-swarm-codex-smoke',
+    package: '@shapeshift-labs/frontier-swarm-codex'
+  });
+  assert.strictEqual(closedContinuation.summary.terminalOutcomeProjection.closedEntryCount, 1);
+  assert.strictEqual(closedContinuation.summary.terminalOutcomeProjection.closedTaskCount, 1);
+  assert.strictEqual(closedContinuation.nextBacklog.entries[0].status, 'verified');
+  assert.deepStrictEqual(closedContinuation.summary.nextJobTaskIds, []);
 
   const cliFixture = {
     backlog: path.join(tmp, 'cli-backlog.json'),
