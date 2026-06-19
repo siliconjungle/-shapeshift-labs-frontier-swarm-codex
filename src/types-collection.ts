@@ -35,6 +35,7 @@ import type { FrontierCodexSemanticEditReplaySummary } from './types-semantic-ed
 export type FrontierCodexCollectBucket =
   | 'ready-to-apply'
   | 'needs-human-port'
+  | 'rerun-work'
   | 'failed-evidence'
   | 'stale-against-head';
 

@@ -57,6 +57,7 @@ const COLLECTION_NOISE_SAMPLE_LIMIT = 12;
 const COLLECT_BUCKETS: readonly FrontierCodexCollectBucket[] = [
   'ready-to-apply',
   'needs-human-port',
+  'rerun-work',
   'failed-evidence',
   'stale-against-head'
 ];
@@ -69,6 +70,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]> = {
     'ready-to-apply': [],
     'needs-human-port': [],
+    'rerun-work': [],
     'failed-evidence': [],
     'stale-against-head': []
   };
@@ -85,6 +87,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       'patch-scores',
       'ready-to-apply',
       'needs-human-port',
+      'rerun-work',
       'failed-evidence',
       'stale-against-head'
     ]));
@@ -225,6 +228,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     total: mergeRecords.length,
     'ready-to-apply': buckets['ready-to-apply'].length,
     'needs-human-port': buckets['needs-human-port'].length,
+    'rerun-work': buckets['rerun-work'].length,
     'failed-evidence': buckets['failed-evidence'].length,
     'stale-against-head': buckets['stale-against-head'].length
   };
@@ -243,7 +247,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     version: FRONTIER_SWARM_CODEX_COLLECTION_VERSION,
     ok: landedHealth
       ? landedHealth.remainingFailedEvidenceCount === 0 && landedHealth.remainingStaleCount === 0
-      : summary['failed-evidence'] === 0 && summary['stale-against-head'] === 0,
+      : summary['failed-evidence'] === 0 && summary['stale-against-head'] === 0 && summary['rerun-work'] === 0,
     runDir,
     outDir,
     generatedAt,
@@ -777,6 +781,7 @@ function createLandedHealthSummary(
   const remainingBucketJobIds = mapBucketJobIds(bucketJobIds, (jobId) => !landedJobSet.has(jobId));
   const reviewPressureJobIds = uniqueStrings([
     ...remainingBucketJobIds['needs-human-port'],
+    ...remainingBucketJobIds['rerun-work'],
     ...remainingBucketJobIds['failed-evidence'],
     ...remainingBucketJobIds['stale-against-head']
   ]);
@@ -815,6 +820,7 @@ function collectBucketJobIds(
   return {
     'ready-to-apply': buckets['ready-to-apply'].map((entry) => entry.jobId),
     'needs-human-port': buckets['needs-human-port'].map((entry) => entry.jobId),
+    'rerun-work': buckets['rerun-work'].map((entry) => entry.jobId),
     'failed-evidence': buckets['failed-evidence'].map((entry) => entry.jobId),
     'stale-against-head': buckets['stale-against-head'].map((entry) => entry.jobId)
   };
@@ -827,6 +833,7 @@ function mapBucketJobIds(
   const out = {
     'ready-to-apply': [],
     'needs-human-port': [],
+    'rerun-work': [],
     'failed-evidence': [],
     'stale-against-head': []
   } as Record<FrontierCodexCollectBucket, string[]>;
@@ -842,6 +849,7 @@ function countBucketJobIds(
   return {
     'ready-to-apply': jobIds['ready-to-apply'].length,
     'needs-human-port': jobIds['needs-human-port'].length,
+    'rerun-work': jobIds['rerun-work'].length,
     'failed-evidence': jobIds['failed-evidence'].length,
     'stale-against-head': jobIds['stale-against-head'].length
   };

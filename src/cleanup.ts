@@ -144,6 +144,7 @@ async function readFailedJobIds(collectionDir: string | undefined): Promise<Set<
   const collection = await readJsonIfExists<{ buckets?: Record<string, Array<{ jobId?: string }>> }>(path.join(collectionDir, 'collection.json'));
   const failed = [
     ...(collection?.buckets?.['failed-evidence'] ?? []),
+    ...(collection?.buckets?.['rerun-work'] ?? []),
     ...(collection?.buckets?.['stale-against-head'] ?? [])
   ].map((entry) => entry.jobId).filter((entry): entry is string => typeof entry === 'string');
   return new Set(failed);

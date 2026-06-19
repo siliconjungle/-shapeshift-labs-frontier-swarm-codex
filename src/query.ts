@@ -610,6 +610,7 @@ function jobHealth(job: Record<string, unknown>): QueryHealthStatus {
   const disposition = String(job.disposition ?? '').toLowerCase();
   const contextBudget = jobContextBudget(job);
   if (status === 'running' || liveness === 'running') return 'running';
+  if (status === 'rerun-work' || disposition === 'rerun-work' || disposition === 'ownership-rescope') return 'warning';
   if (status === 'failed' || disposition === 'failed-evidence' || disposition === 'rejected') return 'failed';
   if (status === 'blocked' || disposition === 'blocked' || job.mergeReadiness === 'blocked') return 'blocked';
   if (!testsPassed(job) || contextBudget.status === 'failed' || contextBudget.errors.length > 0 || readStringArray(job.ownershipViolations).length > 0) return 'failed';
@@ -630,7 +631,7 @@ function evidenceHealth(entry: Record<string, unknown>): QueryHealthStatus {
   const budget = evidenceContextBudget(entry);
   if (status === 'failed-evidence' || budget.status === 'failed' || budget.errors.length > 0) return 'failed';
   if (status === 'blocked') return 'blocked';
-  if (status === 'needs-human-port' || status === 'stale-against-head' || budget.status === 'warning' || budget.warnings.length > 0) return 'warning';
+  if (status === 'needs-human-port' || status === 'rerun-work' || status === 'stale-against-head' || budget.status === 'warning' || budget.warnings.length > 0) return 'warning';
   if (status) return 'healthy';
   return 'unknown';
 }

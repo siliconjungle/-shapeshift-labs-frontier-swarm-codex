@@ -172,6 +172,7 @@ function dashboardSnapshotFromCoordinatorDashboard(
       total: numberValue(summaryRecord.jobCount, jobs.length),
       'ready-to-apply': numberValue(summaryRecord.readyToApplyCount),
       'needs-human-port': numberValue(summaryRecord.needsHumanPortCount),
+      'rerun-work': numberValue(summaryRecord.rerunWorkCount),
       'failed-evidence': numberValue(summaryRecord.failedEvidenceCount),
       'stale-against-head': numberValue(summaryRecord.staleAgainstHeadCount)
     }
@@ -421,6 +422,7 @@ function dashboardBucketFromCoordinatorJob(job: Record<string, unknown>): Fronti
   const status = stringValue(job.status);
   if (disposition === 'needs-port' || disposition === 'needs-human-port') return 'needs-human-port';
   if (disposition === 'ready-to-apply' || disposition === 'auto-mergeable') return 'ready-to-apply';
+  if (disposition === 'rerun-work' || disposition === 'ownership-rescope') return 'rerun-work';
   if (disposition === 'stale-against-head' || disposition === 'stale' || booleanValue(job.staleAgainstHead)) return 'stale-against-head';
   if (disposition === 'failed-evidence' || disposition === 'rejected' || status === 'failed') return 'failed-evidence';
   return undefined;
@@ -734,6 +736,7 @@ function createDashboardHealthMetrics(jobs: readonly FrontierCodexDashboardJob[]
 }
 
 function isDashboardFailureJob(job: FrontierCodexDashboardJob): boolean {
+  if (job.bucket === 'rerun-work') return false;
   return job.bucket === 'failed-evidence'
     || job.status === 'failed'
     || isDashboardBlockedJob(job)
@@ -742,6 +745,7 @@ function isDashboardFailureJob(job: FrontierCodexDashboardJob): boolean {
 
 function dashboardJobHealth(job: FrontierCodexDashboardJob): FrontierCodexDashboardHealthStatus {
   if (job.status === 'running') return 'running';
+  if (job.bucket === 'rerun-work') return 'warning';
   if (job.status === 'failed' || job.bucket === 'failed-evidence' || job.disposition === 'rejected') return 'failed';
   if (isDashboardBlockedJob(job)) return 'blocked';
   if (isDashboardContextBudgetFailedJob(job)) return 'failed';

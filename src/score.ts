@@ -119,7 +119,7 @@ async function readCollectionMergePaths(collectionDir: string, bucket: FrontierC
 
 
 function collectBuckets(): FrontierCodexCollectBucket[] {
-  return ['ready-to-apply', 'needs-human-port', 'failed-evidence', 'stale-against-head'];
+  return ['ready-to-apply', 'needs-human-port', 'rerun-work', 'failed-evidence', 'stale-against-head'];
 }
 
 

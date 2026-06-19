@@ -125,7 +125,15 @@ export function createCollectedEvidenceEntries(
   bucket: FrontierCodexCollectBucket,
   semanticImportExpected = false
 ): FrontierSwarmEvidenceIndexEntryInput[] {
-  const confidence = bucket === 'ready-to-apply' ? 0.95 : bucket === 'needs-human-port' ? 0.7 : bucket === 'failed-evidence' ? 0.25 : 0.2;
+  const confidence = bucket === 'ready-to-apply'
+    ? 0.95
+    : bucket === 'needs-human-port'
+      ? 0.7
+      : bucket === 'rerun-work'
+        ? 0.45
+        : bucket === 'failed-evidence'
+          ? 0.25
+          : 0.2;
   const semanticImport = semanticImportSummaryFromBundle(bundle);
   const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
   const universalAstLayers = semanticImportUniversalAstLayerSummary(semanticImport);

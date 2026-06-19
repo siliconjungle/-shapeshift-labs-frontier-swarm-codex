@@ -417,6 +417,7 @@ function stringArray(value: unknown): string[] {
 
 export function classifyCodexCollectBucket(bundle: FrontierSwarmMergeBundle, staleAgainstHead: boolean): FrontierCodexCollectBucket {
   if (staleAgainstHead) return 'stale-against-head';
+  if (bundle.ownershipViolations.length > 0 && bundle.changedPaths.length > 0 && bundle.patchPath) return 'rerun-work';
   if (bundle.disposition === 'rejected' || bundle.disposition === 'blocked' || bundle.commandsFailed.length > 0 || bundle.status === 'failed') {
     if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-human-port';
     return 'failed-evidence';
