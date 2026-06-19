@@ -1,0 +1,6 @@
+# Loom scan ignores
+node_modules/**
+dist/**
+coverage/**
+.git/**
+.loom/**

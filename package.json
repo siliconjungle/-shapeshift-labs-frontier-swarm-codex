@@ -1,6 +1,6 @@
 {
   "name": "@shapeshift-labs/frontier-swarm-codex",
-  "version": "0.5.6",
+  "version": "0.5.117",
   "description": "Node Codex CLI runner adapter for Frontier swarm plans with resource allocation.",
   "type": "module",
   "license": "MIT",
@@ -34,7 +34,6 @@
   },
   "files": [
     "dist",
-    "docs",
     "README.md",
     "LICENSE",
     "benchmarks/package-bench.mjs"
@@ -44,15 +43,15 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "npm run test:local-deps && npm run build && npm run typecheck && node test/smoke.mjs && node test/fuzz.mjs --cases 300",
-    "test:local-deps": "node test/smoke.mjs --local-deps-only",
-    "prepack": "npm run readme:packages:check && npm run test",
+    "test": "npm run build && npm run typecheck && node test/smoke.mjs && node test/fuzz.mjs --cases 300",
+    "prepack": "npm run lint && npm run readme:packages:check && npm run test",
     "typecheck": "node build.mjs --typecheck",
     "fuzz": "npm run build && node test/fuzz.mjs",
     "bench": "npm run build && node --expose-gc benchmarks/package-bench.mjs --out benchmarks/results/frontier-swarm-codex-package-bench-latest.json",
     "pack:dry": "npm pack --dry-run",
     "readme:packages": "node benchmarks/package-readme-sections.mjs",
-    "readme:packages:check": "node benchmarks/package-readme-sections.mjs --check"
+    "readme:packages:check": "node benchmarks/package-readme-sections.mjs --check",
+    "lint": "node scripts/strict-source-policy.mjs"
   },
   "keywords": [
     "frontier",
@@ -64,10 +63,10 @@
     "evidence"
   ],
   "dependencies": {
-    "@shapeshift-labs/frontier-swarm": "0.5.2"
+    "@shapeshift-labs/frontier-swarm": "0.5.20"
   },
   "optionalDependencies": {
-    "@shapeshift-labs/frontier-lang": "0.4.8"
+    "@shapeshift-labs/frontier-lang": "0.4.89"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

@@ -1,0 +1,52 @@
+{
+  "kind": "loom.config",
+  "version": 1,
+  "name": "frontier-swarm-codex",
+  "root": ".",
+  "source": {
+    "include": [
+      "src/**/*.ts",
+      "test/**/*.mjs",
+      "README.md"
+    ],
+    "exclude": [
+      "node_modules/**",
+      "dist/**",
+      "coverage/**",
+      ".git/**",
+      ".loom/**"
+    ],
+    "languages": [
+      "javascript",
+      "typescript",
+      "python",
+      "rust",
+      "c",
+      "csharp",
+      "go",
+      "java",
+      "kotlin",
+      "swift"
+    ],
+    "maxFileBytes": 512000
+  },
+  "generated": {
+    "dir": ".loom",
+    "graph": ".loom/graph",
+    "objects": ".loom/objects",
+    "refs": ".loom/refs",
+    "logs": ".loom/logs",
+    "info": ".loom/info",
+    "hooks": ".loom/hooks",
+    "runs": ".loom/runs",
+    "queues": ".loom/queues",
+    "evidence": ".loom/evidence",
+    "projections": ".loom/projections",
+    "locks": ".loom/locks"
+  },
+  "frontier": {
+    "semanticImport": true,
+    "semanticImportMaxFiles": 400,
+    "semanticImportMaxBytes": 2000000
+  }
+}

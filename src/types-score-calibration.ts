@@ -1,0 +1,42 @@
+export interface FrontierCodexPatchScoreCalibration {
+  source: 'apply-ledger' | 'none';
+  applyLedgerPath?: string;
+  landedJobIds: string[];
+  predictedAcceptedJobIds: string[];
+  truePositiveAcceptedJobIds: string[];
+  falsePositiveAcceptedJobIds: string[];
+  predictedCleanJobIds: string[];
+  truePositiveCleanJobIds: string[];
+  falsePositiveCleanJobIds: string[];
+  falseNegativeCleanJobIds: string[];
+  predictedNeedsPortJobIds: string[];
+  truePositiveNeedsPortJobIds: string[];
+  falsePositiveNeedsPortJobIds: string[];
+  landedNeedsPortJobIds: string[];
+  semanticAutoMergeCandidateJobIds: string[];
+  landedSemanticAutoMergeCandidateJobIds: string[];
+  falsePositiveSemanticAutoMergeCandidateJobIds: string[];
+  acceptedPrecision: number;
+  acceptedRecall: number;
+  needsPortPrecision: number;
+  semanticAutoMergeCandidatePrecision: number;
+  precision: number;
+  recall: number;
+  summary: {
+    landed: number;
+    predictedAccepted: number;
+    truePositiveAccepted: number;
+    falsePositiveAccepted: number;
+    predictedClean: number;
+    truePositiveClean: number;
+    falsePositiveClean: number;
+    falseNegativeClean: number;
+    predictedNeedsPort: number;
+    truePositiveNeedsPort: number;
+    falsePositiveNeedsPort: number;
+    landedNeedsPort: number;
+    semanticAutoMergeCandidates: number;
+    landedSemanticAutoMergeCandidates: number;
+    falsePositiveSemanticAutoMergeCandidates: number;
+  };
+}

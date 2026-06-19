@@ -1,39 +1,31 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { applyCodexSwarmCollection, checkCodexDependencyHealth, collectCodexSwarmRun, continueCodexSwarmLoop, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, writeCodexDependencyHealthReport } from './index.js';
+import { printHelp } from './cli-help.js';
+import { handleCodexTournamentCommand } from './tournament-query.js';
+import { handleCodexQueryCommand } from './query.js';
+import { handleCodexCleanupCommand } from './cleanup.js';
+import { collectResultForCli } from './cli-output.js';
 import {
-  applyCodexSwarmCollection,
-  autonomousApplyCodexSwarmRun,
-  coerceCodexSwarmManifestInput,
-  coerceCodexSwarmTasksInput,
-  collectCodexSwarmRun,
-  createCodexContinuousRefill,
-  createCodexSwarmPlan,
-  FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND,
-  FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION,
-  FRONTIER_SWARM_CODEX_SUPPORTED_MODELS,
-  runCodexSwarm,
-  scoreCodexSwarmPatches,
-  stopCodexSwarmRun,
-  type FrontierCodexModelPolicy
-} from './index.js';
-
-type CliValue = string | boolean | string[];
-type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
-type CliJsonValue = null | boolean | number | string | CliJsonValue[] | { [key: string]: CliJsonValue };
-type CliJsonObject = { [key: string]: CliJsonValue };
-type CliCommand = {
-  name: string;
-  command: string;
-  args: string[];
-  required: boolean;
-  cwd?: string;
-  metadata?: CliJsonObject;
-};
-
+  boolArg,
+  bucketArg,
+  commandListArg,
+  continuationInputFromRunArgs,
+  listArg,
+  loadPlan,
+  numberArg,
+  optionalBoolArg,
+  parseArgs,
+  routingContextArg,
+  routingModeArg,
+  runOptionsArg,
+  shouldContinueAfterRun,
+  stamp,
+  stringArg
+} from './cli-args.js';
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'plan';
-
 try {
   if (command === 'help' || args.help === true || args.h === true) {
     printHelp();
@@ -43,85 +35,39 @@ try {
     await fs.mkdir(outDir, { recursive: true });
     await fs.writeFile(path.join(outDir, 'swarm-plan.json'), JSON.stringify(plan, null, 2) + '\n');
     console.log(JSON.stringify({ ok: plan.validation.valid, outDir, plan }, null, 2));
-  } else if (command === 'refill') {
-    const refill = await loadContinuousRefill(args);
-    const outDir = stringArg(args.outDir ?? args.out);
-    const taskSetOut = stringArg(args.taskSetOut ?? args['task-set-out']);
-    if (outDir) {
-      const resolvedOutDir = path.resolve(outDir);
-      await fs.mkdir(resolvedOutDir, { recursive: true });
-      await fs.writeFile(path.join(resolvedOutDir, 'continuous-refill.json'), JSON.stringify(refill, null, 2) + '\n');
-      if (refill.taskSet) {
-        await fs.writeFile(path.join(resolvedOutDir, 'next-task-set.json'), JSON.stringify(refill.taskSet, null, 2) + '\n');
-      }
-    }
-    if (taskSetOut && refill.taskSet) {
-      await fs.mkdir(path.dirname(path.resolve(taskSetOut)), { recursive: true });
-      await fs.writeFile(path.resolve(taskSetOut), JSON.stringify(refill.taskSet, null, 2) + '\n');
-    }
-    console.log(JSON.stringify(refill, null, 2));
   } else if (command === 'run') {
     const plan = args.plan ? JSON.parse(await fs.readFile(String(args.plan), 'utf8')) : await loadPlan(args);
     const outDir = path.resolve(String(args.outDir ?? args.out ?? `agent-runs/frontier-swarm-codex/${stamp()}`));
-    const disableAutoDrainPatchCandidatePromotion = boolArg(
-      args.noAutoDrainPromotePatchCandidates ?? args['no-auto-drain-promote-patch-candidates'],
-      false
-    );
-    const result = await runCodexSwarm(plan, {
-      outDir,
-      codexPath: stringArg(args.codex),
-      maxConcurrency: numberArg(args.maxConcurrency ?? args['max-concurrency'], 1),
-      sandbox: stringArg(args.sandbox),
-      approval: stringArg(args.approval ?? args['ask-for-approval'] ?? args['approval-policy']),
-      model: stringArg(args.model),
-      modelPolicy: modelPolicyArg(args.modelPolicy ?? args['model-policy']),
-      modelRoutingFeedbackPaths: listArg(args.modelRoutingFeedback ?? args['model-routing-feedback'] ?? args.routingFeedback ?? args['routing-feedback']),
-      adaptiveModelMin: stringArg(args.adaptiveModelMin ?? args['adaptive-model-min'] ?? args.minAdaptiveModel ?? args['min-adaptive-model']),
-      adaptiveModelMax: stringArg(args.adaptiveModelMax ?? args['adaptive-model-max'] ?? args.maxAdaptiveModel ?? args['max-adaptive-model']),
-      forwardPlanModel: boolArg(args.forwardPlanModel ?? args['forward-plan-model'], false),
-      forwardPlanReasoningEffort: boolArg(args.forwardPlanReasoningEffort ?? args['forward-plan-reasoning-effort'], false),
-      reasoningEffort: stringArg(args.reasoningEffort ?? args['reasoning-effort']),
-      profile: stringArg(args.profile),
-      dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
-      runVerification: boolArg(args.verify, false),
-      semanticImport: semanticImportArg(args),
-      autoDrain: boolArg(args.noAutoDrain ?? args['no-auto-drain'], false) ? false : {
-        outDir: stringArg(args.autoDrainOutDir ?? args['auto-drain-out-dir']),
-        dryRun: boolArg(args.autoDrainDryRun ?? args['auto-drain-dry-run'], false),
-        allowDirty: boolArg(args.autoDrainAllowDirty ?? args['auto-drain-allow-dirty'], false),
-        commit: boolArg(args.autoDrainCommit ?? args['auto-drain-commit'], false),
-        branchPrefix: stringArg(args.autoDrainBranchPrefix ?? args['auto-drain-branch-prefix'] ?? args.branchPrefix ?? args['branch-prefix']),
-        limit: numberArg(args.autoDrainLimit ?? args['auto-drain-limit'], undefined),
-        maxIterations: numberArg(args.autoDrainMaxIterations ?? args['auto-drain-max-iterations'], undefined),
-        maxReady: numberArg(args.autoDrainMaxReady ?? args['auto-drain-max-ready'], undefined),
-        maxChangedPaths: numberArg(args.autoDrainMaxChangedPaths ?? args['auto-drain-max-changed-paths'], undefined),
-        maxChangedRegions: numberArg(args.autoDrainMaxChangedRegions ?? args['auto-drain-max-changed-regions'], undefined),
-        maxHighRisk: numberArg(args.autoDrainMaxHighRisk ?? args['auto-drain-max-high-risk'], undefined),
-        allowRisks: listArg(args.autoDrainAllowRisk ?? args['auto-drain-allow-risk']),
-        promotePatchCandidates: disableAutoDrainPatchCandidatePromotion ? false : optionalBoolArg(args.autoDrainPromotePatchCandidates ?? args['auto-drain-promote-patch-candidates']),
-        checkStale: boolArg(args.autoDrainCheckStale ?? args['auto-drain-check-stale'], true),
-        focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
-        globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
-        globalGlobs: listArg(args.globalGlob ?? args['global-glob']),
-        decisionLogPath: stringArg(args.autoDrainDecisionLog ?? args['auto-drain-decision-log'] ?? args.decisionLog ?? args['decision-log']),
-        humanAnswerLogPath: stringArg(args.autoDrainHumanAnswerLog ?? args['auto-drain-human-answer-log'] ?? args.humanAnswerLog ?? args['human-answer-log']),
-        lockPath: stringArg(args.autoDrainLockPath ?? args['auto-drain-lock-path'] ?? args.lockPath ?? args['lock-path']),
-        lockTimeoutMs: numberArg(args.autoDrainLockTimeoutMs ?? args['auto-drain-lock-timeout-ms'] ?? args.lockTimeoutMs ?? args['lock-timeout-ms'], undefined),
-        lockStaleMs: numberArg(args.autoDrainLockStaleMs ?? args['auto-drain-lock-stale-ms'] ?? args.lockStaleMs ?? args['lock-stale-ms'], undefined)
-      },
-      workspace: {
-        mode: readWorkspaceMode(args.workspace),
-        root: stringArg(args.worktreeRoot ?? args['worktree-root']),
-        create: boolArg(args.createWorktrees ?? args['create-worktrees'], false),
-        replace: boolArg(args.replaceWorkspace ?? args['replace-workspace'], false),
-        includes: listArg(args.include),
-        excludes: listArg(args.exclude),
-        artifactIncludes: listArg(args.artifact ?? args['artifact-include']),
-        linkPaths: listArg(args.link ?? args['link-path']),
-        linkNodeModules: boolArg(args.linkNodeModules ?? args['link-node-modules'], true),
-        skipGitRepoCheck: boolArg(args.skipGitRepoCheck ?? args['skip-git-repo-check'], readWorkspaceMode(args.workspace) !== 'git-worktree')
-      }
+    const result = await runCodexSwarm(plan, runOptionsArg(args, outDir));
+    const continuation = shouldContinueAfterRun(args)
+      ? await continueCodexSwarmLoop(continuationInputFromRunArgs(args, outDir))
+      : undefined;
+    console.log(JSON.stringify(continuation ? { ...result, continuation } : result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'resume') {
+    const run = String(args.run ?? '');
+    if (!run) throw new Error('resume requires --run <prior-run-dir|swarm-results.json>');
+    const outDir = path.resolve(String(args.outDir ?? args.out ?? `agent-runs/frontier-swarm-codex/${stamp()}-resume`));
+    const result = await resumeCodexSwarmRun({
+      ...runOptionsArg(args, outDir),
+      run,
+      includeCompleted: boolArg(args.includeCompleted ?? args['include-completed'], false),
+      includeFailed: optionalBoolArg(args.includeFailed ?? args['include-failed']),
+      includeBlocked: optionalBoolArg(args.includeBlocked ?? args['include-blocked']),
+      outFile: stringArg(args.resumeOverlay ?? args['resume-overlay'])
     });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'doctor') {
+    const outFile = stringArg(args.out ?? args.outFile ?? args['out-file']);
+    const result = await checkCodexDependencyHealth({
+      root: stringArg(args.root),
+      packageRoot: stringArg(args.packageRoot ?? args['package-root']),
+      semanticImport: boolArg(args.semanticImport ?? args['semantic-import'], false),
+      outFile,
+      failOnWarnings: boolArg(args.failOnWarnings ?? args['fail-on-warnings'], false)
+    });
+    if (outFile) await writeCodexDependencyHealthReport(result, path.resolve(outFile));
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
   } else if (command === 'verify') {
@@ -141,16 +87,58 @@ try {
   } else if (command === 'collect') {
     const run = String(args.run ?? '');
     if (!run) throw new Error('collect requires --run <run-dir|swarm-results.json>');
-    const disablePatchCandidatePromotion = boolArg(args.noPromotePatchCandidates ?? args['no-promote-patch-candidates'], false);
     const result = await collectCodexSwarmRun({
       run,
       outDir: stringArg(args.outDir ?? args.out),
+      cwd: stringArg(args.cwd),
       checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
+      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
+      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix'])
+    });
+    console.log(JSON.stringify(collectResultForCli(result, boolArg(args.full, false)), null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'continue' || command === 'next-wave') {
+    const run = stringArg(args.run);
+    const collection = stringArg(args.collection);
+    if (!run && !collection) throw new Error(`${command} requires --run <run-dir|swarm-results.json> or --collection <collection-dir|collection.json>`);
+    const result = await continueCodexSwarmLoop({
+      run,
+      collection,
+      outDir: stringArg(args.outDir ?? args.out),
+      collectionOutDir: stringArg(args.collectionOutDir ?? args['collection-out-dir']),
+      checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
+      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
       branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
-      promotePatchCandidates: disablePatchCandidatePromotion ? false : optionalBoolArg(args.promotePatchCandidates ?? args['promote-patch-candidates']),
-      promotionFocusedCommands: commandListArg(args.promotionFocusedCommand ?? args['promotion-focused-command'] ?? args.focusedCommand ?? args['focused-command']),
-      promotionGlobalCommands: commandListArg(args.promotionGlobalCommand ?? args['promotion-global-command'] ?? args.globalCommand ?? args['global-command']),
-      promotionGlobalGlobs: listArg(args.promotionGlobalGlob ?? args['promotion-global-glob'] ?? args.globalGlob ?? args['global-glob'])
+      backlogPath: stringArg(args.backlog),
+      routingPolicyPath: stringArg(args.routingPolicy ?? args['routing-policy']),
+      manifestPath: stringArg(args.manifest),
+      tasksPath: stringArg(args.tasks),
+      routingMode: routingModeArg(args.routingMode ?? args['routing-mode']),
+      childBacklogNames: listArg(args.childBacklogName ?? args['child-backlog-name'] ?? args.childBacklog ?? args['child-backlog']),
+      repository: stringArg(args.repository ?? args.repo),
+      package: stringArg(args.package ?? args.pkg),
+      cwd: stringArg(args.cwd),
+      write: boolArg(args.write, false),
+      backlogPlan: {
+        backlogPath: stringArg(args.backlog),
+        recursive: boolArg(args.recursiveBacklog ?? args['recursive-backlog'], true),
+        maxDepth: numberArg(args.maxBacklogDepth ?? args['max-backlog-depth'], undefined),
+        decomposeLane: stringArg(args.decomposeLane ?? args['decompose-lane']),
+        decomposeCompute: stringArg(args.decomposeCompute ?? args['decompose-compute']),
+        decomposeWorkKind: stringArg(args.decomposeWorkKind ?? args['decompose-work-kind']),
+        childArtifactPath: stringArg(args.childArtifactPath ?? args['child-artifact-path'])
+      },
+      plan: {
+        limit: numberArg(args.limit, undefined),
+        lanes: listArg(args.lane),
+        layers: listArg(args.layer),
+        selectors: listArg(args.selector),
+        statuses: listArg(args.status),
+        includeCompleted: boolArg(args.includeCompleted ?? args['include-completed'], false),
+        compute: stringArg(args.compute),
+        routingMode: routingModeArg(args.routingMode ?? args['routing-mode']),
+        routingContext: routingContextArg(args)
+      }
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
@@ -158,6 +146,7 @@ try {
     const result = await applyCodexSwarmCollection({
       collection: stringArg(args.collection),
       run: stringArg(args.run),
+      cwd: stringArg(args.cwd),
       outDir: stringArg(args.outDir ?? args.out),
       bucket: bucketArg(args.bucket),
       jobIds: listArg(args.job ?? args.jobId ?? args['job-id']),
@@ -169,39 +158,16 @@ try {
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
-  } else if (command === 'autonomous-apply' || command === 'drain') {
-    const disablePatchCandidatePromotion = boolArg(args.noPromotePatchCandidates ?? args['no-promote-patch-candidates'], false);
-    const result = await autonomousApplyCodexSwarmRun({
-      collection: stringArg(args.collection),
-      run: stringArg(args.run),
-      outDir: stringArg(args.outDir ?? args.out),
-      jobIds: listArg(args.job ?? args.jobId ?? args['job-id']),
-      dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
-      allowDirty: boolArg(args.allowDirty ?? args['allow-dirty'], false),
-      commit: boolArg(args.commit, false),
-      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
-      limit: numberArg(args.limit, undefined),
-      checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
-      promotePatchCandidates: disablePatchCandidatePromotion ? false : optionalBoolArg(args.promotePatchCandidates ?? args['promote-patch-candidates']),
-      focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
-      globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
-      globalGlobs: listArg(args.globalGlob ?? args['global-glob']),
-      decisionLogPath: stringArg(args.decisionLog ?? args['decision-log']),
-      lockPath: stringArg(args.lockPath ?? args['lock-path']),
-      lockTimeoutMs: numberArg(args.lockTimeoutMs ?? args['lock-timeout-ms'], undefined),
-      lockStaleMs: numberArg(args.lockStaleMs ?? args['lock-stale-ms'], undefined)
-    });
-    console.log(JSON.stringify(result, null, 2));
-    if (!result.ok) process.exitCode = 1;
   } else if (command === 'score') {
     const result = await scoreCodexSwarmPatches({
       collection: stringArg(args.collection),
       run: stringArg(args.run),
       outDir: stringArg(args.outDir ?? args.out),
+      cwd: stringArg(args.cwd),
       bucket: bucketArg(args.bucket),
       jobIds: listArg(args.job ?? args.jobId ?? args['job-id']),
-      workspaceIncludes: listArg(args.include),
-      workspaceExcludes: listArg(args.exclude),
+      workspaceIncludes: listArg(args.workspaceInclude ?? args['workspace-include'] ?? args.include),
+      workspaceExcludes: listArg(args.workspaceExclude ?? args['workspace-exclude'] ?? args.exclude),
       focusedCommands: commandListArg(args.focusedCommand ?? args['focused-command']),
       globalCommands: commandListArg(args.globalCommand ?? args['global-command']),
       globalGlobs: listArg(args.globalGlob ?? args['global-glob']),
@@ -210,324 +176,29 @@ try {
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
+  } else if (command === 'tournament') {
+    await handleCodexTournamentCommand(args);
+  } else if (command === 'query') {
+    await handleCodexQueryCommand(args);
+  } else if (command === 'cleanup') {
+    await handleCodexCleanupCommand(args);
+  } else if (command === 'repair-links') {
+    const result = await repairCodexWorkspacePackageLinks({
+      root: stringArg(args.root),
+      packageRoots: listArg(args.packageRoot ?? args['package-root']),
+      scope: stringArg(args.scope),
+      packages: listArg(args.package ?? args.pkg),
+      excludePackages: listArg(args.excludePackage ?? args['exclude-package']),
+      write: boolArg(args.write, false),
+      replace: boolArg(args.replace, false),
+      outFile: stringArg(args.out ?? args.outFile ?? args['out-file'])
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (result.summary.conflicts > 0 || result.summary.missingLocalPackage > 0) process.exitCode = 1;
   } else {
     throw new Error(`unknown command: ${command}`);
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
-}
-
-function printHelp() {
-  console.log([
-    'frontier-swarm <command> [options]',
-    '',
-    'Commands:',
-    '  plan      Build a swarm plan from --manifest and --tasks/--rerun-manifest',
-    '  refill    Compute open pool capacity and emit the next task-set or drained state',
-    '  run       Run workers, then produce/drain coordinator-agent work by default',
-    '  stop      Stop a run using pids.json',
-    '  collect   Collect merge bundles into ready/needs-port/failed/stale buckets',
-    '  score     Score collected patches in throwaway workspaces',
-    '  apply     Dry-run or apply collected patch bundles',
-    '  autonomous-apply',
-    '            Drain admitted coordinator-agent work under repo locks and gates',
-    '  drain     Alias for autonomous-apply',
-    '  verify    Verify a swarm-results.json proof',
-    '',
-    'Useful options:',
-    '  --manifest <file> --tasks <file>',
-    '  --rerun-manifest <file> (use auto-drain/rerun-manifest.json as the next run task set)',
-    '  refill: --desired-concurrency <n> --active-workers <n|file> --queued <file> --backlog <file> --rerun-manifest <file>',
-    '  refill: --queued-count <n> --max-tasks <n> --task-set-out <file> --outDir <dir>',
-    `  --model <${FRONTIER_SWARM_CODEX_SUPPORTED_MODELS.join('|')}> (validated; omit for local Codex config)`,
-    '  --model-policy config-default|plan|explicit|adaptive',
-    '  --model-routing-feedback <file> (JSON or JSONL tournament/RSI feedback; repeatable or comma-separated)',
-    '  --adaptive-model-min <model> --adaptive-model-max <model> (hard caps for adaptive routing)',
-    '  --approval never|on-request|on-failure|untrusted',
-    '  --workspace current|copy|snapshot|git-worktree',
-    '  --include <path> --exclude <path> --link <path>',
-    '  --semantic-import --semantic-import-include <glob> --semantic-import-exclude <glob>',
-    '  --semantic-import-max-files <n> --semantic-import-max-bytes <n>',
-    '  --no-auto-drain (raw worker diagnostics only; skips coordinator drain-work)',
-    '  --auto-drain-out-dir <path> --auto-drain-allow-dirty --auto-drain-check-stale',
-    '  --auto-drain-branch-prefix <prefix>',
-    '  --auto-drain-dry-run',
-    '  --auto-drain-commit (after required gates pass, run auto-drain creates audited coordinator commits tied to queue item ids and the decision ledger)',
-    '  --auto-drain-limit <n> --auto-drain-max-iterations <n>',
-    '  --auto-drain-max-ready <n> --auto-drain-max-changed-paths <n>',
-    '  --auto-drain-max-changed-regions <n> --auto-drain-max-high-risk <n>',
-    '  --auto-drain-allow-risk <risk>',
-    '  --auto-drain-promote-patch-candidates[=true|false]',
-    '  --no-auto-drain-promote-patch-candidates',
-    '  --promote-patch-candidates[=true|false] --no-promote-patch-candidates (collect/drain: promote safe patch candidates only when coordinator gates are configured)',
-    '  --promotion-focused-command <cmd> --promotion-global-command <cmd> --promotion-global-glob <glob> (collect promotion gates; aliases: --focused-command/--global-command/--global-glob)',
-    '  --auto-drain-decision-log <path> --auto-drain-human-answer-log <path> --auto-drain-lock-path <path>',
-    '  --auto-drain-lock-timeout-ms <n> --auto-drain-lock-stale-ms <n>',
-    '  --focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)',
-    '  --focused-command <json> accepts command descriptors with metadata.packageId/packagePath/packageName for package-scoped gates',
-    '',
-    'Default run auto-drain is autonomous coordinator drain work. It collects',
-    'worker merge bundles into hierarchical queues and writes the generic',
-    'frontier.swarm.coordinator-agent-drain-work contract plus the Codex',
-    'selected/deferred drain artifact. The coordinator then acquires queue',
-    'leases and repo locks, applies only admitted ready work, and records',
-    'terminal coordinator decisions.',
-    '',
-    'When auto-drain writes a non-empty auto-drain/rerun-manifest.json, feed',
-    'it into the next worker wave with --rerun-manifest. That preserves rerun',
-    'source metadata and starts fresh leased workers; it does not apply old',
-    'patches or bypass autonomous apply gates.',
-    '',
-    'For continuous pools, use refill between waves instead of editing queues by',
-    'hand. It subtracts active workers and queued work from desired concurrency,',
-    'prefers non-empty rerun manifests, then fills remaining open slots from',
-    'todo backlog items. With --outDir it writes continuous-refill.json and,',
-    'when work is available, next-task-set.json for a later --tasks run.',
-    '',
-    'Terminal coordinator decisions such as applied, committed, checked,',
-    'rejected, rerun, skipped, and conflict-blocked are queue outcomes, not',
-    'human blockers. True blockers require an explicit human/authority question',
-    'with an owner. Use --no-auto-drain only for raw worker diagnostics.',
-    '',
-    'Workers write last-message.md, codex-events.jsonl, resource-allocation.json,',
-    'merge.json, changes.patch, and discovered debug/replay/watchpoint/trace artifacts.'
-  ].join('\n'));
-}
-
-async function loadPlan(options: CliArgs) {
-  const manifestPath = String(options.manifest ?? '');
-  const tasksPath = stringArg(options.tasks);
-  const rerunManifestPath = stringArg(options.rerunManifest ?? options['rerun-manifest']);
-  if (!manifestPath) throw new Error('missing --manifest <file>');
-  if (tasksPath && rerunManifestPath) throw new Error('use either --tasks <file> or --rerun-manifest <file>, not both');
-  const taskInputPath = tasksPath ?? rerunManifestPath;
-  if (!taskInputPath) throw new Error('missing --tasks <file> or --rerun-manifest <file>');
-  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
-  const tasks = JSON.parse(await fs.readFile(taskInputPath, 'utf8'));
-  if (rerunManifestPath) assertRerunManifestInput(tasks, rerunManifestPath);
-  return createCodexSwarmPlan({
-    manifest: coerceCodexSwarmManifestInput(manifest),
-    tasks: coerceCodexSwarmTasksInput(tasks),
-    plan: {
-      limit: numberArg(options.limit, undefined),
-      lanes: listArg(options.lane),
-      layers: listArg(options.layer),
-      selectors: listArg(options.selector),
-      statuses: listArg(options.status),
-      includeCompleted: boolArg(options.includeCompleted ?? options['include-completed'], false),
-      compute: stringArg(options.compute)
-    }
-  });
-}
-
-async function loadContinuousRefill(options: CliArgs) {
-  const desiredConcurrency = numberArg(options.desiredConcurrency ?? options['desired-concurrency'] ?? options.maxConcurrency ?? options['max-concurrency'], undefined);
-  if (desiredConcurrency === undefined) throw new Error('refill requires --desired-concurrency <n>');
-  const activeWorkersArg = options.activeWorkers ?? options['active-workers'];
-  const activeWorkerCount = numberArg(options.activeWorkerCount ?? options['active-worker-count'] ?? activeWorkersArg, undefined);
-  const queuedArg = options.queued ?? options.queuedTasks ?? options['queued-tasks'];
-  const queuedTaskCount = numberArg(options.queuedCount ?? options['queued-count'], undefined);
-  return createCodexContinuousRefill({
-    desiredConcurrency,
-    activeWorkerCount,
-    activeWorkers: activeWorkerCount === undefined ? await readJsonArg(activeWorkersArg) : undefined,
-    queuedTaskCount,
-    queuedTasks: await readJsonArg(queuedArg),
-    rerunManifests: await readJsonArgs(options.rerunManifest ?? options['rerun-manifest']),
-    backlog: await readJsonArg(options.backlog ?? options.tasks),
-    maxTasks: numberArg(options.maxTasks ?? options['max-tasks'], undefined),
-    excludeTaskIds: listArg(options.excludeTask ?? options['exclude-task'] ?? options.excludeTaskId ?? options['exclude-task-id'])
-  });
-}
-
-async function readJsonArgs(value: CliValue | undefined): Promise<unknown[]> {
-  const files = listArg(value) ?? [];
-  return Promise.all(files.map((file) => readJsonFile(file)));
-}
-
-async function readJsonArg(value: CliValue | undefined): Promise<unknown | undefined> {
-  const file = stringArg(value);
-  return file ? readJsonFile(file) : undefined;
-}
-
-async function readJsonFile(file: string): Promise<unknown> {
-  return JSON.parse(await fs.readFile(file, 'utf8'));
-}
-
-function assertRerunManifestInput(value: unknown, manifestPath: string): void {
-  if (!isRecord(value)
-    || value.kind !== FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND
-    || value.version !== FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION
-    || !Array.isArray(value.items)) {
-    throw new Error(`--rerun-manifest ${manifestPath} must be a ${FRONTIER_SWARM_CODEX_RERUN_MANIFEST_KIND} v${FRONTIER_SWARM_CODEX_RERUN_MANIFEST_VERSION} file with items[]`);
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseArgs(argv: string[]): CliArgs {
-  const out: CliArgs = { _: [] };
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index];
-    if (!token.startsWith('--')) {
-      out._.push(token);
-      continue;
-    }
-    const body = token.slice(2);
-    const equals = body.indexOf('=');
-    const key = equals >= 0 ? body.slice(0, equals) : body;
-    const value: string | boolean = equals >= 0 ? body.slice(equals + 1) : argv[index + 1] && !argv[index + 1].startsWith('--') ? argv[++index] as string : true;
-    if (out[key] === undefined) out[key] = value;
-    else if (Array.isArray(out[key])) (out[key] as string[]).push(String(value));
-    else out[key] = [String(out[key]), String(value)];
-  }
-  return out;
-}
-
-function listArg(value: CliValue | undefined): string[] | undefined {
-  if (value === undefined) return undefined;
-  const raw = Array.isArray(value) ? value : String(value).split(',');
-  return raw.map((item) => String(item).trim()).filter(Boolean);
-}
-
-function numberArg(value: CliValue | undefined, fallback: number | undefined): number | undefined {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function stringArg(value: CliValue | undefined): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function modelPolicyArg(value: CliValue | undefined): FrontierCodexModelPolicy | undefined {
-  const policy = stringArg(value);
-  if (policy === undefined) return undefined;
-  if (policy === 'config-default' || policy === 'plan' || policy === 'explicit' || policy === 'adaptive') return policy;
-  throw new Error(`unsupported --model-policy ${policy}; expected config-default, plan, explicit, or adaptive`);
-}
-
-function readWorkspaceMode(value: CliValue | undefined) {
-  const mode = stringArg(value);
-  if (mode === 'snapshot' || mode === 'copy' || mode === 'git-worktree') return mode;
-  return 'current';
-}
-
-function bucketArg(value: CliValue | undefined) {
-  const bucket = stringArg(value);
-  if (bucket === undefined) return undefined;
-  if (bucket === 'all' || bucket === 'ready-to-apply' || bucket === 'needs-human-port' || bucket === 'failed-evidence' || bucket === 'stale-against-head') return bucket;
-  throw new Error(`unsupported --bucket ${bucket}`);
-}
-
-function semanticImportArg(args: CliArgs): boolean | { enabled: true; maxFiles?: number; maxBytes?: number; include?: string[]; exclude?: string[] } {
-  const enabled = boolArg(args.semanticImport ?? args['semantic-import'], false);
-  if (!enabled) return false;
-  return {
-    enabled: true,
-    maxFiles: numberArg(args.semanticImportMaxFiles ?? args['semantic-import-max-files'], undefined),
-    maxBytes: numberArg(args.semanticImportMaxBytes ?? args['semantic-import-max-bytes'], undefined),
-    include: listArg(args.semanticImportInclude ?? args['semantic-import-include']),
-    exclude: listArg(args.semanticImportExclude ?? args['semantic-import-exclude'])
-  };
-}
-
-function commandListArg(value: CliValue | undefined): CliCommand[] | undefined {
-  if (value === undefined) return undefined;
-  const raw = Array.isArray(value) ? value : [String(value)];
-  return raw.map(commandArg).filter((command): command is CliCommand => command !== undefined);
-}
-
-function commandArg(value: string): CliCommand | undefined {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  if (looksLikeCommandDescriptor(trimmed)) return commandDescriptorArg(trimmed);
-  return { name: trimmed, command: 'sh', args: ['-c', trimmed], required: true };
-}
-
-function looksLikeCommandDescriptor(value: string): boolean {
-  return value.startsWith('{') && value.endsWith('}') && /"command"\s*:/.test(value);
-}
-
-function commandDescriptorArg(value: string): CliCommand {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch (error) {
-    throw new Error(`invalid JSON command descriptor: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!isRecord(parsed) || typeof parsed.command !== 'string' || !parsed.command.trim()) {
-    throw new Error('JSON command descriptors require a non-empty string command field');
-  }
-  const rawCommand = parsed.command.trim();
-  const explicitArgs = parsed.args !== undefined;
-  let args = commandDescriptorArgs(parsed.args);
-  let executable = rawCommand;
-  if (!explicitArgs && /\s/.test(rawCommand)) {
-    executable = 'sh';
-    args = ['-c', rawCommand];
-  }
-  const name = typeof parsed.name === 'string' && parsed.name.trim()
-    ? parsed.name.trim()
-    : rawCommand;
-  const required = typeof parsed.required === 'boolean' ? parsed.required : true;
-  const command: CliCommand = {
-    name,
-    command: executable,
-    args,
-    required
-  };
-  if (typeof parsed.cwd === 'string' && parsed.cwd.trim()) command.cwd = parsed.cwd.trim();
-  const metadata = commandDescriptorMetadata(parsed);
-  if (metadata) command.metadata = metadata;
-  return command;
-}
-
-function commandDescriptorMetadata(parsed: Record<string, unknown>): CliJsonObject | undefined {
-  let metadata: CliJsonObject = {};
-  if (parsed.metadata !== undefined) {
-    if (!isCliJsonObject(parsed.metadata)) throw new Error('JSON command descriptor metadata must be a JSON object');
-    metadata = { ...parsed.metadata };
-  }
-  for (const key of ['package', 'packageId', 'packageName', 'packagePath', 'frontierPackage', 'frontierPackageId']) {
-    const value = parsed[key];
-    if (typeof value === 'string' && value.trim() && metadata[key] === undefined) metadata[key] = value.trim();
-  }
-  return Object.keys(metadata).length ? metadata : undefined;
-}
-
-function commandDescriptorArgs(value: unknown): string[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
-    throw new Error('JSON command descriptor args must be an array of strings');
-  }
-  return value.map((entry) => entry);
-}
-
-function isCliJsonObject(value: unknown): value is CliJsonObject {
-  if (!isRecord(value)) return false;
-  return Object.values(value).every(isCliJsonValue);
-}
-
-function isCliJsonValue(value: unknown): value is CliJsonValue {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') return true;
-  if (Array.isArray(value)) return value.every(isCliJsonValue);
-  return isCliJsonObject(value);
-}
-
-function boolArg(value: CliValue | undefined, fallback: boolean): boolean {
-  if (value === undefined) return fallback;
-  if (value === true) return true;
-  return /^(1|true|yes|on)$/i.test(String(value));
-}
-
-function optionalBoolArg(value: CliValue | undefined): boolean | undefined {
-  if (value === undefined) return undefined;
-  return boolArg(value, true);
-}
-
-function stamp() {
-  return new Date().toISOString().replace(/[:.]/g, '-');
 }
