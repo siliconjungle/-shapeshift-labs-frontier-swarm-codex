@@ -7,6 +7,7 @@ import {
   type FrontierSwarmPlan
 } from '@shapeshift-labs/frontier-swarm';
 import { isObject, uniqueStrings } from './common.js';
+import { estimateCodexModelCost, type FrontierCodexModelCostEstimate } from './model-pricing.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
 
 export function createContinuationFeedback(input: {
@@ -46,6 +47,7 @@ export function createContinuationFeedback(input: {
       ?? readNestedString(bundle.metadata, ['job', 'compute', 'modelTier'])
       ?? readNestedString(bundle.metadata, ['tournamentStrategy', 'modelTier'])
       ?? modelTierFromComputeId(computeId);
+    const costEstimate = createRoutingCostEstimate(bundle, model);
     const workKind = task?.workKind ?? firstNestedString(bundle.metadata, [
       ['routingKey', 'workKind'],
       ['routing', 'workKind'],
@@ -90,9 +92,9 @@ export function createContinuationFeedback(input: {
       mergeReadiness: bundle.mergeReadiness,
       mergeDisposition: bundle.disposition,
       riskLevel: bundle.riskLevel,
-      evidenceQuality: evidenceQualityFromBundle(bundle, entry.bucket),
+      evidenceQuality: evidenceQualityFromBundle(bundle, entry.bucket, costEstimate),
       selected: bundle.autoMergeable,
-      tags: ['continuation-feedback'],
+      tags: uniqueStrings(['continuation-feedback', ...routingCostTags(costEstimate)]),
       generatedAt: bundle.generatedAt,
       metadata: {
         bundleId: bundle.id,
@@ -116,11 +118,33 @@ export function createContinuationFeedback(input: {
           ...(computeKind ? { computeKind } : {}),
           ...(modelTier ? { modelTier } : {})
         },
+        costEstimate: routingCostMetadata(costEstimate),
         ...(tournamentSummary ? { tournamentSummary } : {}),
         adaptiveRecommendations: laneRelevantAdaptiveRecommendations(collection.tournamentAdaptiveFeedback?.recommendations, lane)
       }
     });
   });
+}
+
+export function createContinuationRoutingCostSummary(feedback: readonly FrontierSwarmModelRoutingFeedback[]) {
+  const estimates = feedback.map((entry) => isObject(entry.metadata) && isObject(entry.metadata.costEstimate) ? entry.metadata.costEstimate : {});
+  const costSignalEstimates = estimates.filter((entry) => numberValue(entry.billableInputTokens) > 0 || numberValue(entry.outputTokens) > 0);
+  return {
+    feedbackCount: feedback.length,
+    costSignalCount: costSignalEstimates.length,
+    pricedFeedbackCount: costSignalEstimates.filter((entry) => entry.priceKnown === true).length,
+    unknownPriceFeedbackCount: costSignalEstimates.filter((entry) => entry.priceKnown !== true).length,
+    inputOnlyFeedbackCount: costSignalEstimates.filter((entry) => entry.inputOnly === true).length,
+    estimatedInputFeedbackCount: costSignalEstimates.filter((entry) => entry.estimatedInput === true).length,
+    estimatedCostUsd: roundUsd(costSignalEstimates.reduce((sum, entry) => sum + numberValue(entry.estimatedCostUsd), 0)),
+    estimatedInputCostUsd: roundUsd(costSignalEstimates.reduce((sum, entry) => sum + numberValue(entry.estimatedInputCostUsd), 0)),
+    estimatedOutputCostUsd: roundUsd(costSignalEstimates.reduce((sum, entry) => sum + numberValue(entry.estimatedOutputCostUsd), 0)),
+    estimatedCostMicroUsd: costSignalEstimates.reduce((sum, entry) => sum + numberValue(entry.estimatedCostMicroUsd), 0),
+    billableInputTokens: costSignalEstimates.reduce((sum, entry) => sum + numberValue(entry.billableInputTokens), 0),
+    cachedInputTokens: costSignalEstimates.reduce((sum, entry) => sum + numberValue(entry.cachedInputTokens), 0),
+    uncachedInputTokens: costSignalEstimates.reduce((sum, entry) => sum + numberValue(entry.uncachedInputTokens), 0),
+    outputTokens: costSignalEstimates.reduce((sum, entry) => sum + numberValue(entry.outputTokens), 0)
+  };
 }
 
 export function createContinuationTournamentSummary(collection: FrontierCodexCollectResult | undefined) {
@@ -202,7 +226,8 @@ function modelTierFromComputeId(computeId: string | undefined): string | undefin
 
 function evidenceQualityFromBundle(
   bundle: FrontierSwarmMergeBundle,
-  collectionBucket?: string
+  collectionBucket: string | undefined,
+  costEstimate: FrontierCodexModelCostEstimate
 ): FrontierSwarmModelRoutingFeedback['evidenceQuality'] {
   const passed = bundle.commandsFailed.length === 0;
   const verified = bundle.autoMergeable && passed && bundle.evidencePaths.length > 0;
@@ -227,7 +252,67 @@ function evidenceQualityFromBundle(
       ...(collectionBucket ? { collectionBucket } : {}),
       evidencePathCount: bundle.evidencePaths.length,
       commandsPassed: bundle.commandsPassed.length,
-      commandsFailed: bundle.commandsFailed.length
+      commandsFailed: bundle.commandsFailed.length,
+      costEstimate: routingCostMetadata(costEstimate)
     }
   };
+}
+
+function createRoutingCostEstimate(bundle: FrontierSwarmMergeBundle, model: string | undefined): FrontierCodexModelCostEstimate {
+  const metadata = isObject(bundle.metadata) ? bundle.metadata : {};
+  const contextBudget = isObject(metadata.contextBudget) ? metadata.contextBudget : {};
+  const measured = isObject(contextBudget.measured) ? contextBudget.measured : {};
+  const usage = isObject(contextBudget.usage) ? contextBudget.usage : {};
+  return estimateCodexModelCost({
+    model: model ?? readNestedString(metadata, ['model']),
+    estimatedInputTokens: readNumber(measured.estimatedInputTokens),
+    actualInputTokens: readNumber(usage.inputTokens) ?? readNumber(measured.actualInputTokens),
+    cachedInputTokens: readNumber(usage.cachedInputTokens),
+    uncachedInputTokens: readNumber(usage.uncachedInputTokens),
+    outputTokens: readNumber(usage.outputTokens)
+  });
+}
+
+function routingCostMetadata(cost: FrontierCodexModelCostEstimate) {
+  return {
+    priceKnown: cost.priceKnown,
+    ...(cost.pricingModel ? { pricingModel: cost.pricingModel } : {}),
+    ...(cost.pricingMatchedModel ? { pricingMatchedModel: cost.pricingMatchedModel } : {}),
+    ...(cost.pricingSource ? { pricingSource: cost.pricingSource } : {}),
+    ...(cost.pricingUpdatedAt ? { pricingUpdatedAt: cost.pricingUpdatedAt } : {}),
+    estimatedCostUsd: cost.estimatedCostUsd,
+    estimatedInputCostUsd: cost.estimatedInputCostUsd,
+    estimatedCachedInputCostUsd: cost.estimatedCachedInputCostUsd,
+    estimatedUncachedInputCostUsd: cost.estimatedUncachedInputCostUsd,
+    estimatedOutputCostUsd: cost.estimatedOutputCostUsd,
+    estimatedCostMicroUsd: cost.estimatedCostMicroUsd,
+    billableInputTokens: cost.billableInputTokens,
+    cachedInputTokens: cost.cachedInputTokens,
+    uncachedInputTokens: cost.uncachedInputTokens,
+    outputTokens: cost.outputTokens,
+    inputOnly: cost.costEstimateInputOnly,
+    estimatedInput: cost.costEstimateEstimatedInput,
+    missingOutputTokens: cost.costEstimateMissingOutputTokens,
+    ...(cost.unknownPricingReason ? { unknownPricingReason: cost.unknownPricingReason } : {})
+  };
+}
+
+function routingCostTags(cost: FrontierCodexModelCostEstimate): string[] {
+  return [
+    cost.priceKnown ? 'cost-known' : 'cost-unknown',
+    ...(cost.costEstimateInputOnly ? ['cost-input-only'] : []),
+    ...(cost.costEstimateEstimatedInput ? ['cost-estimated-input'] : [])
+  ];
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function roundUsd(value: number): number {
+  return Math.round(value * 1_000_000_000) / 1_000_000_000;
 }

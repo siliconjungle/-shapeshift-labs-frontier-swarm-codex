@@ -148,6 +148,8 @@ continuationPromise satisfies Promise<FrontierCodexContinuationResult>;
 continuationPromise.then((continuation) => {
   continuation.summary.terminalOutcomeProjection.closedEntryCount satisfies number;
   continuation.summary.terminalOutcomeProjection.reviewTaskCount satisfies number;
+  continuation.summary.routingCost.estimatedCostUsd satisfies number;
+  continuation.summary.routingCost.pricedFeedbackCount satisfies number;
 });
 semanticEditAdmission.status satisfies string;
 semanticEditReplay?.acceptedClean satisfies number | undefined;

@@ -24,6 +24,7 @@ import {
 } from './continuation-child-backlogs.js';
 import {
   createContinuationFeedback,
+  createContinuationRoutingCostSummary,
   createContinuationTournamentSummary
 } from './continuation-feedback.js';
 import { projectContinuationTerminalOutcomes } from './continuation-terminal-outcomes.js';
@@ -57,6 +58,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     repository: input.repository ?? path.basename(cwd),
     packageName: input.package
   });
+  const routingCostSummary = createContinuationRoutingCostSummary(feedback);
   const tournamentSummary = createContinuationTournamentSummary(collection);
   const baseRoutingPolicy = await readContinuationRoutingPolicy(input, cwd);
   const baseRoutingFeedback = Array.isArray((baseRoutingPolicy as { feedback?: unknown[] } | undefined)?.feedback)
@@ -79,6 +81,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
       ...(collection?.runDir ? { collectionRunDir: collection.runDir } : {}),
       ...(collection?.generatedAt ? { collectionGeneratedAt: collection.generatedAt } : {}),
       ...(collection?.summary ? { collectionSummary: collection.summary } : {}),
+      routingCostSummary,
       ...(tournamentSummary ? { tournamentSummary } : {})
     }
   });
@@ -152,6 +155,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
         preferCount: nextRoutingPolicy.summary.preferCount,
         avoidCount: nextRoutingPolicy.summary.avoidCount
       },
+      routingCost: routingCostSummary,
       nextJobCount: nextJobs.length,
       nextJobIds: nextJobs.map((job) => job.id),
       nextJobTaskIds: nextJobs.map((job) => job.taskId),

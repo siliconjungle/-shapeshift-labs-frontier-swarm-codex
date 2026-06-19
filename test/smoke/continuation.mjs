@@ -24,7 +24,6 @@ export async function testContinuation(context, collectionDir) {
       targetRefs: ['src/runtime/follow-up.ts']
     }]
   }, null, 2) + '\n');
-
   const continuation = await continueCodexSwarmLoop({
     collection: collectionDir,
     outDir: path.join(tmp, 'continuation'),

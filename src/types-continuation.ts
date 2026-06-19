@@ -84,6 +84,22 @@ export interface FrontierCodexContinuationResult {
       preferCount: number;
       avoidCount: number;
     };
+    routingCost: {
+      feedbackCount: number;
+      costSignalCount: number;
+      pricedFeedbackCount: number;
+      unknownPriceFeedbackCount: number;
+      inputOnlyFeedbackCount: number;
+      estimatedInputFeedbackCount: number;
+      estimatedCostUsd: number;
+      estimatedInputCostUsd: number;
+      estimatedOutputCostUsd: number;
+      estimatedCostMicroUsd: number;
+      billableInputTokens: number;
+      cachedInputTokens: number;
+      uncachedInputTokens: number;
+      outputTokens: number;
+    };
     nextJobCount: number;
     nextJobIds: string[];
     nextJobTaskIds: string[];
