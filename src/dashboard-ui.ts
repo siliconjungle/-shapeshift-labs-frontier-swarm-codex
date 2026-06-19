@@ -7,6 +7,7 @@ import {
   FRONTIER_SWARM_CODEX_STEERING_INTENT_VERSION
 } from './constants.js';
 import { isObject, stableHash, uniqueStrings } from './common.js';
+import { estimateCodexModelCost } from './model-pricing.js';
 import type { FrontierCodexCollectBucket, FrontierCodexCollectResult } from './types-collection.js';
 import type { FrontierCodexContinuationResult } from './types-continuation.js';
 import type {
@@ -350,6 +351,17 @@ function dashboardJobFromCoordinatorJob(value: unknown): FrontierCodexDashboardJ
   const semanticReadinessReasons = stringListValue(job.semanticReadinessReasons ?? semanticAdmission.reasons);
   const actualInputTokens = numberValue(usageBudget.inputTokens, numberValue(measuredBudget.actualInputTokens));
   const cachedInputTokens = numberValue(usageBudget.cachedInputTokens);
+  const uncachedInputTokens = numberValue(usageBudget.uncachedInputTokens, Math.max(0, actualInputTokens - cachedInputTokens));
+  const outputTokens = numberValue(usageBudget.outputTokens);
+  const model = stringValue(job.model);
+  const costEstimate = estimateCodexModelCost({
+    model,
+    estimatedInputTokens: numberValue(measuredBudget.estimatedInputTokens, numberValue(job.estimatedInputTokens)),
+    actualInputTokens,
+    cachedInputTokens,
+    uncachedInputTokens,
+    outputTokens: optionalNumberValue(usageBudget.outputTokens)
+  });
   const row = {
     id: String(job.jobId ?? job.id ?? ''),
     taskId: stringValue(job.taskId),
@@ -362,7 +374,7 @@ function dashboardJobFromCoordinatorJob(value: unknown): FrontierCodexDashboardJ
     generatedAt: timestampValue(job.generatedAt),
     health: 'unknown' as FrontierCodexDashboardHealthStatus,
     computeId: stringValue(job.computeId),
-    model: stringValue(job.model),
+    model,
     modelTier: stringValue(job.modelTier),
     workKind: stringValue(job.workKind),
     bucket: dashboardBucketFromCoordinatorJob(job),
@@ -394,7 +406,9 @@ function dashboardJobFromCoordinatorJob(value: unknown): FrontierCodexDashboardJ
     estimatedInputTokens: numberValue(measuredBudget.estimatedInputTokens, numberValue(job.estimatedInputTokens)),
     actualInputTokens,
     cachedInputTokens,
-    uncachedInputTokens: numberValue(usageBudget.uncachedInputTokens, Math.max(0, actualInputTokens - cachedInputTokens)),
+    uncachedInputTokens,
+    outputTokens,
+    ...dashboardCostFields(costEstimate),
     semanticAdmissionStatus,
     semanticAutoMergeCandidate,
     semanticCleanEligible,
@@ -443,6 +457,7 @@ function createDashboardSummary(
   const semanticCandidateJobs = jobs.filter((job) => job.semanticReadiness === 'candidate');
   const semanticBlockedJobs = jobs.filter((job) => job.semanticReadiness === 'blocked');
   const durationJobs = jobs.filter((job) => job.durationMs > 0);
+  const costSignalJobs = jobs.filter(hasDashboardCostSignal);
   const applyLedger = collection?.summary.applyLedger;
   const landed = applyLedger?.landed ?? collection?.summary.landed;
   const landedJobIds = applyLedger?.landedJobIds ?? collection?.summary.landedJobIds;
@@ -472,6 +487,16 @@ function createDashboardSummary(
     actualInputTokens: jobs.reduce((sum, job) => sum + job.actualInputTokens, 0),
     cachedInputTokens: jobs.reduce((sum, job) => sum + job.cachedInputTokens, 0),
     uncachedInputTokens: jobs.reduce((sum, job) => sum + job.uncachedInputTokens, 0),
+    outputTokens: jobs.reduce((sum, job) => sum + job.outputTokens, 0),
+    billableInputTokens: jobs.reduce((sum, job) => sum + job.billableInputTokens, 0),
+    priceKnownJobCount: costSignalJobs.filter((job) => job.priceKnown).length,
+    unknownPriceJobCount: costSignalJobs.filter((job) => !job.priceKnown).length,
+    inputOnlyCostJobCount: costSignalJobs.filter((job) => job.costEstimateInputOnly).length,
+    estimatedInputCostJobCount: costSignalJobs.filter((job) => job.costEstimateEstimatedInput).length,
+    estimatedCostUsd: roundDashboardUsd(jobs.reduce((sum, job) => sum + job.estimatedCostUsd, 0)),
+    estimatedInputCostUsd: roundDashboardUsd(jobs.reduce((sum, job) => sum + job.estimatedInputCostUsd, 0)),
+    estimatedOutputCostUsd: roundDashboardUsd(jobs.reduce((sum, job) => sum + job.estimatedOutputCostUsd, 0)),
+    estimatedCostMicroUsd: jobs.reduce((sum, job) => sum + job.estimatedCostMicroUsd, 0),
     ...(collection ? { bucketCounts: collection.summary } : {}),
     ...(landed !== undefined ? { landed } : {}),
     ...(landedJobIds ? { landedJobIds } : {}),
@@ -865,6 +890,19 @@ function createDashboardTimeSeries(
     point.actualInputTokens += job.actualInputTokens;
     point.cachedInputTokens += job.cachedInputTokens;
     point.uncachedInputTokens += job.uncachedInputTokens;
+    point.outputTokens += job.outputTokens;
+    point.billableInputTokens += job.billableInputTokens;
+    const hasCostSignal = hasDashboardCostSignal(job);
+    if (hasCostSignal) {
+      if (job.priceKnown) point.priceKnownJobCount += 1;
+      else point.unknownPriceJobCount += 1;
+    }
+    if (hasCostSignal && job.costEstimateInputOnly) point.inputOnlyCostJobCount += 1;
+    if (hasCostSignal && job.costEstimateEstimatedInput) point.estimatedInputCostJobCount += 1;
+    point.estimatedCostUsd = roundDashboardUsd(point.estimatedCostUsd + job.estimatedCostUsd);
+    point.estimatedInputCostUsd = roundDashboardUsd(point.estimatedInputCostUsd + job.estimatedInputCostUsd);
+    point.estimatedOutputCostUsd = roundDashboardUsd(point.estimatedOutputCostUsd + job.estimatedOutputCostUsd);
+    point.estimatedCostMicroUsd += job.estimatedCostMicroUsd;
     point.durationMs += job.durationMs;
     point.averageDurationMs = point.terminalJobCount > 0 ? Math.round(point.durationMs / point.terminalJobCount) : 0;
     point.eventBytes += job.eventBytes;
@@ -904,6 +942,16 @@ function createDashboardTimeSeries(
       actualInputTokens: sortedPoints.reduce((sum, point) => sum + point.actualInputTokens, 0),
       cachedInputTokens: sortedPoints.reduce((sum, point) => sum + point.cachedInputTokens, 0),
       uncachedInputTokens: sortedPoints.reduce((sum, point) => sum + point.uncachedInputTokens, 0),
+      outputTokens: sortedPoints.reduce((sum, point) => sum + point.outputTokens, 0),
+      billableInputTokens: sortedPoints.reduce((sum, point) => sum + point.billableInputTokens, 0),
+      priceKnownJobCount: sortedPoints.reduce((sum, point) => sum + point.priceKnownJobCount, 0),
+      unknownPriceJobCount: sortedPoints.reduce((sum, point) => sum + point.unknownPriceJobCount, 0),
+      inputOnlyCostJobCount: sortedPoints.reduce((sum, point) => sum + point.inputOnlyCostJobCount, 0),
+      estimatedInputCostJobCount: sortedPoints.reduce((sum, point) => sum + point.estimatedInputCostJobCount, 0),
+      estimatedCostUsd: roundDashboardUsd(sortedPoints.reduce((sum, point) => sum + point.estimatedCostUsd, 0)),
+      estimatedInputCostUsd: roundDashboardUsd(sortedPoints.reduce((sum, point) => sum + point.estimatedInputCostUsd, 0)),
+      estimatedOutputCostUsd: roundDashboardUsd(sortedPoints.reduce((sum, point) => sum + point.estimatedOutputCostUsd, 0)),
+      estimatedCostMicroUsd: sortedPoints.reduce((sum, point) => sum + point.estimatedCostMicroUsd, 0),
       durationMs: sortedPoints.reduce((sum, point) => sum + point.durationMs, 0),
       averageDurationMs: averageJobMetric(durationJobs, (job) => job.durationMs),
       maxDurationMs: maxJobMetric(durationJobs, (job) => job.durationMs),
@@ -954,6 +1002,16 @@ function pointForTimeSeriesBucket(
     actualInputTokens: 0,
     cachedInputTokens: 0,
     uncachedInputTokens: 0,
+    outputTokens: 0,
+    billableInputTokens: 0,
+    priceKnownJobCount: 0,
+    unknownPriceJobCount: 0,
+    inputOnlyCostJobCount: 0,
+    estimatedInputCostJobCount: 0,
+    estimatedCostUsd: 0,
+    estimatedInputCostUsd: 0,
+    estimatedOutputCostUsd: 0,
+    estimatedCostMicroUsd: 0,
     durationMs: 0,
     averageDurationMs: 0,
     eventBytes: 0,
@@ -973,7 +1031,15 @@ function hasDashboardContextLoad(job: FrontierCodexDashboardJob): boolean {
     || job.estimatedInputTokens > 0
     || job.actualInputTokens > 0
     || job.cachedInputTokens > 0
-    || job.uncachedInputTokens > 0;
+    || job.uncachedInputTokens > 0
+    || job.outputTokens > 0;
+}
+
+function hasDashboardCostSignal(job: FrontierCodexDashboardJob): boolean {
+  return job.estimatedInputTokens > 0
+    || job.actualInputTokens > 0
+    || job.billableInputTokens > 0
+    || job.outputTokens > 0;
 }
 
 function hasDashboardLogVolume(job: FrontierCodexDashboardJob): boolean {
@@ -1151,6 +1217,20 @@ async function dashboardJobFromParts(
     || booleanValue(semanticAdmission.cleanEligible)
     || booleanValue(semanticCompactEdit.cleanEligible);
   const semanticReadinessReasons = stringListValue(metadata.semanticEditAdmissionReasons);
+  const model = stringValue(compute.model ?? metadata.model ?? bundle.model ?? collectMetadata.model);
+  const actualInputTokens = numberValue(usageBudget.inputTokens, numberValue(measuredBudget.actualInputTokens));
+  const cachedInputTokens = numberValue(usageBudget.cachedInputTokens);
+  const uncachedInputTokens = numberValue(usageBudget.uncachedInputTokens, Math.max(0, actualInputTokens - cachedInputTokens));
+  const outputTokens = numberValue(usageBudget.outputTokens);
+  const estimatedInputTokens = numberValue(measuredBudget.estimatedInputTokens);
+  const costEstimate = estimateCodexModelCost({
+    model,
+    estimatedInputTokens,
+    actualInputTokens,
+    cachedInputTokens,
+    uncachedInputTokens,
+    outputTokens: optionalNumberValue(usageBudget.outputTokens)
+  });
   const semanticReadiness = dashboardSemanticReadiness({
     semanticAdmissionStatus,
     semanticAutoMergeCandidate,
@@ -1170,7 +1250,7 @@ async function dashboardJobFromParts(
     generatedAt: timestampValue(bundle.generatedAt),
     health: 'unknown' as FrontierCodexDashboardHealthStatus,
     computeId: stringValue(compute.id),
-    model: stringValue(compute.model),
+    model,
     modelTier: stringValue(isObject(compute.metadata) ? compute.metadata.modelTier : undefined),
     workKind: stringValue(task.workKind),
     bucket: collected?.bucket,
@@ -1199,10 +1279,12 @@ async function dashboardJobFromParts(
     contextBudgetErrors,
     evidencePathCount: Array.isArray(bundle.evidencePaths) ? bundle.evidencePaths.length : 0,
     promptBytes: numberValue(measuredBudget.promptBytes),
-    estimatedInputTokens: numberValue(measuredBudget.estimatedInputTokens),
-    actualInputTokens: numberValue(usageBudget.inputTokens, numberValue(measuredBudget.actualInputTokens)),
-    cachedInputTokens: numberValue(usageBudget.cachedInputTokens),
-    uncachedInputTokens: numberValue(usageBudget.uncachedInputTokens, Math.max(0, numberValue(usageBudget.inputTokens, numberValue(measuredBudget.actualInputTokens)) - numberValue(usageBudget.cachedInputTokens))),
+    estimatedInputTokens,
+    actualInputTokens,
+    cachedInputTokens,
+    uncachedInputTokens,
+    outputTokens,
+    ...dashboardCostFields(costEstimate),
     semanticAdmissionStatus,
     semanticAutoMergeCandidate,
     semanticCleanEligible,
@@ -1633,6 +1715,52 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function optionalNumberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function dashboardCostFields(cost: ReturnType<typeof estimateCodexModelCost>): Pick<FrontierCodexDashboardJob,
+  | 'billableInputTokens'
+  | 'priceKnown'
+  | 'pricingModel'
+  | 'pricingMatchedModel'
+  | 'pricingSource'
+  | 'pricingUpdatedAt'
+  | 'estimatedCostUsd'
+  | 'estimatedInputCostUsd'
+  | 'estimatedCachedInputCostUsd'
+  | 'estimatedUncachedInputCostUsd'
+  | 'estimatedOutputCostUsd'
+  | 'estimatedCostMicroUsd'
+  | 'costEstimateInputOnly'
+  | 'costEstimateEstimatedInput'
+  | 'costEstimateMissingOutputTokens'
+  | 'unknownPricingReason'
+> {
+  return {
+    billableInputTokens: cost.billableInputTokens,
+    priceKnown: cost.priceKnown,
+    ...(cost.pricingModel ? { pricingModel: cost.pricingModel } : {}),
+    ...(cost.pricingMatchedModel ? { pricingMatchedModel: cost.pricingMatchedModel } : {}),
+    ...(cost.pricingSource ? { pricingSource: cost.pricingSource } : {}),
+    ...(cost.pricingUpdatedAt ? { pricingUpdatedAt: cost.pricingUpdatedAt } : {}),
+    estimatedCostUsd: cost.estimatedCostUsd,
+    estimatedInputCostUsd: cost.estimatedInputCostUsd,
+    estimatedCachedInputCostUsd: cost.estimatedCachedInputCostUsd,
+    estimatedUncachedInputCostUsd: cost.estimatedUncachedInputCostUsd,
+    estimatedOutputCostUsd: cost.estimatedOutputCostUsd,
+    estimatedCostMicroUsd: cost.estimatedCostMicroUsd,
+    costEstimateInputOnly: cost.costEstimateInputOnly,
+    costEstimateEstimatedInput: cost.costEstimateEstimatedInput,
+    costEstimateMissingOutputTokens: cost.costEstimateMissingOutputTokens,
+    ...(cost.unknownPricingReason ? { unknownPricingReason: cost.unknownPricingReason } : {})
+  };
+}
+
+function roundDashboardUsd(value: number): number {
+  return Math.round(value * 1_000_000_000) / 1_000_000_000;
 }
 
 function booleanValue(value: unknown): boolean {

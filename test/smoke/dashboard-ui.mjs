@@ -257,6 +257,7 @@ export async function testDashboardUi(context, collectionDir, continuation) {
           evidencePaths: ['evidence.json', auditWorkspaceProofPath],
           reasons: ['ownership violations present'],
           metadata: {
+            model: 'gpt-5.4-mini',
             contextBudget: {
               status: 'warning',
               measured: {
@@ -383,6 +384,7 @@ export async function testDashboardUi(context, collectionDir, continuation) {
         jobId: 'audit-job',
         taskId: 'audit-task',
         lane: 'codex-write-policy',
+        model: 'gpt-5.4-mini',
         generatedAt: auditGeneratedAt,
         status: 'failed',
         liveness: 'finished',
@@ -448,6 +450,16 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.strictEqual(auditJob.actualInputTokens, 28000);
   assert.strictEqual(auditJob.cachedInputTokens, 20000);
   assert.strictEqual(auditJob.uncachedInputTokens, 8000);
+  assert.strictEqual(auditJob.outputTokens, 0);
+  assert.strictEqual(auditJob.billableInputTokens, 28000);
+  assert.strictEqual(auditJob.priceKnown, true);
+  assert.strictEqual(auditJob.pricingModel, 'gpt-5.4-mini');
+  assert.strictEqual(auditJob.estimatedCostUsd, 0.0075);
+  assert.strictEqual(auditJob.estimatedInputCostUsd, 0.0075);
+  assert.strictEqual(auditJob.estimatedOutputCostUsd, 0);
+  assert.strictEqual(auditJob.estimatedCostMicroUsd, 7500);
+  assert.strictEqual(auditJob.costEstimateInputOnly, true);
+  assert.strictEqual(auditJob.costEstimateMissingOutputTokens, true);
   assert.strictEqual(auditJob.durationMs, 12000);
   assert.strictEqual(auditJob.health, 'failed');
   assert.strictEqual(auditJob.semanticAdmissionStatus, 'auto-merge-candidate');
@@ -471,6 +483,12 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.strictEqual(auditSnapshot.summary.averageDurationMs, 13000);
   assert.strictEqual(auditSnapshot.summary.maxDurationMs, 20000);
   assert.strictEqual(auditSnapshot.summary.actualInputTokens, 28000);
+  assert.strictEqual(auditSnapshot.summary.billableInputTokens, 28000);
+  assert.strictEqual(auditSnapshot.summary.priceKnownJobCount, 1);
+  assert.strictEqual(auditSnapshot.summary.unknownPriceJobCount, 0);
+  assert.strictEqual(auditSnapshot.summary.inputOnlyCostJobCount, 1);
+  assert.strictEqual(auditSnapshot.summary.estimatedCostUsd, 0.0075);
+  assert.strictEqual(auditSnapshot.summary.estimatedCostMicroUsd, 7500);
   assert.strictEqual(auditSnapshot.humanActions.length, 1);
   assert.strictEqual(auditSnapshot.humanActions[0].code, 'Q-TIME');
   assert.strictEqual(auditSnapshot.humanActions[0].question, 'Should stalled workers be retried automatically after ten minutes?');
@@ -528,6 +546,11 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.strictEqual(auditSnapshot.timeSeries.summary.actualInputTokens, 28000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.cachedInputTokens, 20000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.uncachedInputTokens, 8000);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.billableInputTokens, 28000);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.priceKnownJobCount, 1);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.inputOnlyCostJobCount, 1);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.estimatedCostUsd, 0.0075);
+  assert.strictEqual(auditSnapshot.timeSeries.summary.estimatedCostMicroUsd, 7500);
   assert.strictEqual(auditSnapshot.timeSeries.summary.durationMs, 52000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.averageDurationMs, 13000);
   assert.strictEqual(auditSnapshot.timeSeries.summary.maxDurationMs, 20000);

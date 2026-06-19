@@ -8,6 +8,7 @@ import {
   createCodexSwarmPlan,
   createSwarmWorkspaceManifest,
   discoverCodexHandoffArtifacts,
+  estimateCodexModelCost,
   continueCodexSwarmLoop,
   runCodexSwarm,
   scoreCodexSwarmPatches,
@@ -24,6 +25,7 @@ import {
   type FrontierCodexPatchScoreResult,
   type FrontierCodexResourceAllocation,
   type FrontierCodexResourceSchedulingOptions,
+  type FrontierCodexModelCostEstimate,
   type FrontierCodexSwarmRunOptions,
   type FrontierCodexSwarmRunResult
 } from '../dist/index.js';
@@ -116,6 +118,12 @@ const continuationPromise: Promise<FrontierCodexContinuationResult> = continueCo
 });
 const semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision = classifySemanticEditScriptAdmission(undefined);
 const semanticEditReplay: FrontierCodexSemanticEditReplaySummary | undefined = summarizeSemanticEditReplay(undefined);
+const costEstimate: FrontierCodexModelCostEstimate = estimateCodexModelCost({
+  model: 'gpt-5.1-codex-mini',
+  actualInputTokens: 1000,
+  cachedInputTokens: 100,
+  uncachedInputTokens: 900
+});
 
 args satisfies string[];
 workspacePlan satisfies FrontierCodexWorkspacePlan;
@@ -143,6 +151,8 @@ continuationPromise.then((continuation) => {
 });
 semanticEditAdmission.status satisfies string;
 semanticEditReplay?.acceptedClean satisfies number | undefined;
+costEstimate.estimatedCostUsd satisfies number;
+costEstimate.pricingModel satisfies string | undefined;
 scorePromise.then((score) => {
   const proofFailures: number | undefined = score.entries[0]?.semanticEvidence.proofSpecFailedObligations;
   const paradigmRecords: number | undefined = score.entries[0]?.semanticEvidence.paradigmSemanticsRecords;

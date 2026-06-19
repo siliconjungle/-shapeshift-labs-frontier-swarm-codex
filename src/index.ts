@@ -111,6 +111,8 @@ export {
 export { collectCodexSwarmRun } from './collect.js';
 export { continueCodexSwarmLoop } from './continuation.js';
 export { createCodexDashboardSteeringIntent, readCodexDashboardSnapshot, writeCodexDashboardSteeringIntent } from './dashboard-ui.js';
+export { estimateCodexModelCost, lookupCodexModelPricing } from './model-pricing.js';
+export type { FrontierCodexModelCostEstimate, FrontierCodexModelCostEstimateInput, FrontierCodexModelPricing } from './model-pricing.js';
 export { createCodexArtifactStore, readCodexArtifactRecords } from './artifact-store.js';
 export { createSemanticCompactSummary } from './semantic-compact-summary.js';
 export { createCodexCleanupPlan } from './cleanup.js';
