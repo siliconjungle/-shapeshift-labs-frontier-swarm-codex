@@ -32,10 +32,13 @@ frontier-swarm-codex run \
   --exclude node_modules,dist,agent-runs \
   --max-concurrency 4 \
   --semantic-import \
-  --focused-command "npm test"
+  --focused-command '{"name":"scope=package:frontier-swarm test","command":"npm","args":["--prefix","packages/frontier-swarm","run","test"],"metadata":{"packageId":"frontier-swarm","packagePath":"packages/frontier-swarm","packageName":"@shapeshift-labs/frontier-swarm"}}' \
+  --focused-command '{"name":"scope=package:frontier-swarm-codex test","command":"npm","args":["--prefix","packages/frontier-swarm-codex","run","test"],"metadata":{"packageId":"frontier-swarm-codex","packagePath":"packages/frontier-swarm-codex","packageName":"@shapeshift-labs/frontier-swarm-codex"}}'
 ```
 
 `run` starts the workers, records event streams, writes job evidence, and then enables auto-drain by default. Auto-drain collects worker merge bundles, admits ready auto-mergeable bundles for coordinator apply, runs the autonomous apply loop, and writes `auto-drain/auto-drain.json` plus summaries in `swarm-results.json` and `coordinator-dashboard.json`.
+
+`--focused-command` accepts either a shell command string or a JSON command descriptor with `name`, `command`, `args`, `cwd`, `required`, and `metadata`. Package-scoped descriptors should include `metadata.packageId`, `metadata.packagePath`, or `metadata.packageName`; auto-drain maps changed paths through `config/release-train.json`, selects the changed package's gate plus dependency package gates, skips unrelated package-scoped gates, and records the ordered gate proof in each autonomous decision.
 
 When auto-drain has coordinator verification gates (`--focused-command`, or matching `--global-command`/`--global-glob`), it may promote scoped patch candidates from `coordinator-review` into the autonomous apply queue. Promotion requires an owned patch, no stale check failure, no ownership violations, no failed worker commands, and a patch that can be checked under the apply lock. This is coordinator queue admission, not worker verification or a landing signal: the original worker bundle remains a patch candidate, the collected queue copy records `metadata.coordinatorPatchCandidatePromotion`, and no checkout change is retained until autonomous apply re-checks the patch, applies it under the lock, and runs the required coordinator gates successfully. If a required coordinator gate fails, autonomous apply records `rejected` and rolls the patch back.
 

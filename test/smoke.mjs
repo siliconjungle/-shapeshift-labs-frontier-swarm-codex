@@ -1312,6 +1312,7 @@ assert.ok(cliHelp.stdout.includes('Terminal coordinator decisions such as applie
 assert.ok(cliHelp.stdout.includes('queue outcomes, not\nhuman blockers.'));
 assert.ok(cliHelp.stdout.includes('--no-auto-drain (raw worker diagnostics only; skips coordinator drain-work)'));
 assert.ok(cliHelp.stdout.includes('--focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)'));
+assert.ok(cliHelp.stdout.includes('--focused-command <json> accepts command descriptors with metadata.packageId/packagePath/packageName for package-scoped gates'));
 assert.ok(cliHelp.stdout.includes('--rerun-manifest <file>'));
 assert.ok(cliHelp.stdout.includes('it does not apply old\npatches or bypass autonomous apply gates.'));
 await assert.rejects(
@@ -1732,6 +1733,134 @@ assert.deepStrictEqual(packageLocalGateArtifact.finalGateSummary.gates.map((gate
 assert.ok(!packageLocalGateArtifact.finalGateSummary.gates.some((gate) => gate.name === 'scope=repo root test'));
 assert.deepStrictEqual(packageLocalGateArtifact.decisions[0].changedPaths, ['packages/worker-runner/src/apply.ts']);
 assert.deepStrictEqual(packageLocalGateArtifact.decisions[0].lockKeys, ['region:packages/worker-runner/src/apply.ts#apply']);
+
+const cliPackageLocalGateRepo = path.join(tmp, 'cli-package-local-gate-repo');
+await fs.mkdir(path.join(cliPackageLocalGateRepo, 'config'), { recursive: true });
+await fs.mkdir(path.join(cliPackageLocalGateRepo, 'packages', 'shared-core', 'src'), { recursive: true });
+await fs.mkdir(path.join(cliPackageLocalGateRepo, 'packages', 'worker-runner', 'src'), { recursive: true });
+await fs.mkdir(path.join(cliPackageLocalGateRepo, 'packages', 'docs-site', 'src'), { recursive: true });
+await fs.writeFile(path.join(cliPackageLocalGateRepo, 'config', 'release-train.json'), JSON.stringify({
+  packages: [
+    {
+      id: 'shared-core',
+      name: '@example/shared-core',
+      deps: [],
+      candidates: ['packages/shared-core']
+    },
+    {
+      id: 'worker-runner',
+      name: '@example/worker-runner',
+      deps: ['shared-core'],
+      candidates: ['packages/worker-runner']
+    },
+    {
+      id: 'docs-site',
+      name: '@example/docs-site',
+      deps: [],
+      candidates: ['packages/docs-site']
+    }
+  ]
+}, null, 2) + '\n');
+await fs.writeFile(path.join(cliPackageLocalGateRepo, 'packages', 'shared-core', 'src', 'apply.ts'), 'core\n');
+await fs.writeFile(path.join(cliPackageLocalGateRepo, 'packages', 'worker-runner', 'src', 'apply.ts'), 'old\n');
+await fs.writeFile(path.join(cliPackageLocalGateRepo, 'packages', 'docs-site', 'src', 'apply.ts'), 'docs\n');
+await execFileP('git', ['init'], { cwd: cliPackageLocalGateRepo });
+await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: cliPackageLocalGateRepo });
+await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: cliPackageLocalGateRepo });
+await execFileP('git', ['add', '--', 'config/release-train.json', 'packages/shared-core/src/apply.ts', 'packages/worker-runner/src/apply.ts', 'packages/docs-site/src/apply.ts'], { cwd: cliPackageLocalGateRepo });
+await execFileP('git', ['commit', '-m', 'Initial CLI package-local gate fixture'], { cwd: cliPackageLocalGateRepo });
+const cliPackageLocalGateCollection = path.join(tmp, 'cli-package-local-gate-collection');
+const cliPackageLocalGateReadyDir = path.join(cliPackageLocalGateCollection, 'ready-to-apply', 'cli-package-local-worker-job');
+await fs.mkdir(cliPackageLocalGateReadyDir, { recursive: true });
+await fs.writeFile(path.join(cliPackageLocalGateReadyDir, 'changes.patch'), [
+  'diff --git a/packages/worker-runner/src/apply.ts b/packages/worker-runner/src/apply.ts',
+  '--- a/packages/worker-runner/src/apply.ts',
+  '+++ b/packages/worker-runner/src/apply.ts',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+  ''
+].join('\n'));
+await fs.writeFile(path.join(cliPackageLocalGateReadyDir, 'merge.json'), JSON.stringify({
+  ...mergeBundle,
+  jobId: 'cli-package-local-worker-job',
+  taskId: 'cli-package-local-worker-task',
+  lane: 'package-local-gates',
+  status: 'verified',
+  mergeReadiness: 'verified-patch',
+  disposition: 'auto-mergeable',
+  riskLevel: 'low',
+  autoMergeable: true,
+  changedPaths: ['packages/worker-runner/src/apply.ts'],
+  changedRegions: ['packages/worker-runner/src/apply.ts#apply'],
+  ownedFilesTouched: ['packages/worker-runner/src/apply.ts'],
+  allowedWrites: ['packages/worker-runner/**'],
+  ownershipViolations: [],
+  patchPath: 'changes.patch',
+  commandsPassed: [],
+  commandsFailed: [],
+  queueItemIds: ['cli-package-local-worker-task'],
+  staleAgainstHead: false,
+  reasons: []
+}, null, 2) + '\n');
+const cliPackageLocalGateLog = path.join(tmp, 'cli-package-local-gate.log');
+const cliPackageLocalGateScript = (label, expectedContent, requiredPrevious) => [
+  "const fs = require('fs');",
+  `const logPath = ${JSON.stringify(cliPackageLocalGateLog)};`,
+  "const current = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';",
+  requiredPrevious ? `if (!current.includes(${JSON.stringify(`${requiredPrevious}\n`)})) process.exit(1);` : '',
+  `if (fs.readFileSync('src/apply.ts', 'utf8') !== ${JSON.stringify(expectedContent)}) process.exit(1);`,
+  `fs.appendFileSync(logPath, ${JSON.stringify(`${label}\n`)});`
+].filter(Boolean).join('\n');
+const cliPackageCommand = (input) => JSON.stringify({
+  command: process.execPath,
+  required: true,
+  ...input
+});
+const cliPackageLocalGateResult = await execFileP(process.execPath, [
+  new URL('../dist/cli.js', import.meta.url).pathname,
+  'autonomous-apply',
+  '--collection',
+  cliPackageLocalGateCollection,
+  '--outDir',
+  path.join(tmp, 'cli-package-local-gate-out'),
+  '--focused-command',
+  cliPackageCommand({
+    name: 'scope=package:worker-runner cli test',
+    args: ['-e', cliPackageLocalGateScript('worker-runner', 'new\n', 'shared-core')],
+    cwd: 'packages/worker-runner',
+    metadata: { packageId: 'worker-runner', packagePath: 'packages/worker-runner', packageName: '@example/worker-runner' }
+  }),
+  '--focused-command',
+  cliPackageCommand({
+    name: 'scope=package:docs-site cli test',
+    args: ['-e', 'process.exit(77)'],
+    cwd: 'packages/docs-site',
+    metadata: { packageId: 'docs-site', packagePath: 'packages/docs-site', packageName: '@example/docs-site' }
+  }),
+  '--focused-command',
+  cliPackageCommand({
+    name: 'scope=package:shared-core cli test',
+    args: ['-e', cliPackageLocalGateScript('shared-core', 'core\n')],
+    cwd: 'packages/shared-core',
+    metadata: { packageId: 'shared-core', packagePath: 'packages/shared-core', packageName: '@example/shared-core' }
+  })
+], { cwd: cliPackageLocalGateRepo });
+const cliPackageLocalGateOutput = JSON.parse(cliPackageLocalGateResult.stdout);
+assert.strictEqual(cliPackageLocalGateOutput.ok, true);
+assert.strictEqual(cliPackageLocalGateOutput.summary.applied, 1);
+assert.deepStrictEqual(cliPackageLocalGateOutput.decisions[0].verification.names, [
+  'scope=package:shared-core cli test',
+  'scope=package:worker-runner cli test'
+]);
+assert.strictEqual(await fs.readFile(cliPackageLocalGateLog, 'utf8'), 'shared-core\nworker-runner\n');
+assert.strictEqual(await fs.readFile(path.join(cliPackageLocalGateRepo, 'packages', 'worker-runner', 'src', 'apply.ts'), 'utf8'), 'new\n');
+const cliPackageLocalGateArtifact = JSON.parse(await fs.readFile(path.join(tmp, 'cli-package-local-gate-out', 'autonomous-apply.json'), 'utf8'));
+assert.deepStrictEqual(cliPackageLocalGateArtifact.finalGateSummary.gates.map((gate) => gate.name), [
+  'scope=package:shared-core cli test',
+  'scope=package:worker-runner cli test'
+]);
+assert.ok(!cliPackageLocalGateArtifact.finalGateSummary.gates.some((gate) => gate.name === 'scope=package:docs-site cli test'));
 
 const autonomousHumanQuestionRepo = await createApplyFixtureRepo(tmp, 'autonomous-human-question-repo');
 const autonomousHumanQuestionCollection = path.join(tmp, 'autonomous-human-question-collection');
@@ -6045,6 +6174,8 @@ assert.ok(cliSource.includes('it does not apply old'));
 assert.ok(cliSource.includes('human/authority question'));
 assert.ok(cliSource.includes('--focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)'));
 assert.ok(cliSource.includes('debug/replay/watchpoint/trace artifacts'));
+assert.ok(cliSource.includes('--focused-command <json> accepts command descriptors with metadata.packageId/packagePath/packageName for package-scoped gates'));
+assert.ok(cliSource.includes('commandDescriptorArg'));
 
 const pidManifestPath = path.join(tmp, 'pid-test', 'pids.json');
 await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: 'pid-test', startedAt: Date.now() }, 'pid-test');

@@ -9859,6 +9859,8 @@ interface FrontierPackageGateAlias {
 
 interface FrontierPackageGateOrder {
   rankById: Map<string, number>;
+  dependencyIdsById: Map<string, string[]>;
+  pathAliases: FrontierPackageGateAlias[];
   aliases: FrontierPackageGateAlias[];
 }
 
@@ -9894,25 +9896,38 @@ function createFrontierPackageGateOrder(catalog: readonly FrontierPackageGateCat
   const entryById = new Map(catalog.map((entry) => [entry.id, entry]));
   const orderedIds = dependencyOrderedFrontierPackageIds(catalog);
   const rankById = new Map(orderedIds.map((id, index) => [id, index]));
+  const dependencyIdsById = new Map<string, string[]>();
+  for (const entry of catalog) {
+    dependencyIdsById.set(entry.id, entry.deps.filter((dep) => entryById.has(dep)));
+  }
   const aliases: FrontierPackageGateAlias[] = [];
+  const pathAliases: FrontierPackageGateAlias[] = [];
   for (const id of orderedIds) {
     const entry = entryById.get(id);
     if (!entry) continue;
     const rank = rankById.get(id) ?? Number.MAX_SAFE_INTEGER;
+    const pathCandidates = uniqueStrings([
+      `packages/${id}`,
+      ...entry.candidates
+    ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0));
     const candidates = uniqueStrings([
       id,
       entry.name,
       `@shapeshift-labs/${id}`,
-      `packages/${id}`,
-      ...entry.candidates
+      ...pathCandidates
     ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0));
     for (const candidate of candidates) {
       const alias = normalizePackageGateAlias(candidate);
       if (alias) aliases.push({ id, alias, rank });
     }
+    for (const candidate of pathCandidates) {
+      const alias = normalizePackageGateAlias(candidate);
+      if (alias) pathAliases.push({ id, alias, rank });
+    }
   }
   aliases.sort((left, right) => right.alias.length - left.alias.length || left.alias.localeCompare(right.alias));
-  return { rankById, aliases };
+  pathAliases.sort((left, right) => right.alias.length - left.alias.length || left.alias.localeCompare(right.alias));
+  return { rankById, dependencyIdsById, pathAliases, aliases };
 }
 
 function dependencyOrderedFrontierPackageIds(catalog: readonly FrontierPackageGateCatalogEntry[]): string[] {
@@ -9947,11 +9962,29 @@ function autonomousVerificationCommands(
   input: FrontierCodexAutonomousApplyInput,
   packageGateOrder: FrontierPackageGateOrder
 ): FrontierSwarmCommand[] {
-  const focused = normalizeScoreCommands(input.focusedCommands ?? []);
+  const focused = selectFocusedVerificationCommandsForBundle(
+    normalizeScoreCommands(input.focusedCommands ?? []),
+    bundle,
+    packageGateOrder
+  );
   const global = bundle.changedPaths.some((file) => (input.globalGlobs ?? []).some((glob) => matchesGlob(file, glob)))
     ? normalizeScoreCommands(input.globalCommands ?? [])
     : [];
   return dependencyOrderPackageVerificationCommands([...focused, ...global], packageGateOrder);
+}
+
+function selectFocusedVerificationCommandsForBundle(
+  commands: readonly FrontierSwarmCommand[],
+  bundle: FrontierSwarmMergeBundle,
+  packageGateOrder: FrontierPackageGateOrder
+): FrontierSwarmCommand[] {
+  const changedPackageIds = packageGateIdsForChangedPaths(bundle.changedPaths, packageGateOrder);
+  if (!changedPackageIds.size) return [...commands];
+  const selectedPackageIds = dependencyClosurePackageGateIds(changedPackageIds, packageGateOrder);
+  return commands.filter((command) => {
+    const packageId = inferFrontierPackageGateIdFromMetadata(command.metadata, packageGateOrder);
+    return !packageId || selectedPackageIds.has(packageId);
+  });
 }
 
 function dependencyOrderPackageVerificationCommands(commands: readonly FrontierSwarmCommand[], packageGateOrder: FrontierPackageGateOrder): FrontierSwarmCommand[] {
@@ -9975,17 +10008,23 @@ function dependencyOrderPackageVerificationCommands(commands: readonly FrontierS
 }
 
 function inferFrontierPackageGateId(command: FrontierSwarmCommand, packageGateOrder: FrontierPackageGateOrder): string | undefined {
-  const metadataCandidates = frontierPackageGateMetadataCandidates(command.metadata);
-  for (const candidate of metadataCandidates) {
-    const fromMetadata = inferFrontierPackageGateIdFromText(candidate, packageGateOrder);
-    if (fromMetadata) return fromMetadata;
-  }
+  const fromMetadata = inferFrontierPackageGateIdFromMetadata(command.metadata, packageGateOrder);
+  if (fromMetadata) return fromMetadata;
   return inferFrontierPackageGateIdFromText([
     command.cwd,
     command.name,
     command.command,
     ...command.args
   ].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0).join(' '), packageGateOrder);
+}
+
+function inferFrontierPackageGateIdFromMetadata(metadata: unknown, packageGateOrder: FrontierPackageGateOrder): string | undefined {
+  const metadataCandidates = frontierPackageGateMetadataCandidates(metadata);
+  for (const candidate of metadataCandidates) {
+    const fromMetadata = inferFrontierPackageGateIdFromText(candidate, packageGateOrder);
+    if (fromMetadata) return fromMetadata;
+  }
+  return undefined;
 }
 
 function frontierPackageGateMetadataCandidates(metadata: unknown): string[] {
@@ -9999,6 +10038,32 @@ function frontierPackageGateMetadataCandidates(metadata: unknown): string[] {
     metadata.frontierPackageId,
     metadata.frontierPackageName
   ].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+}
+
+function packageGateIdsForChangedPaths(changedPaths: readonly string[], packageGateOrder: FrontierPackageGateOrder): Set<string> {
+  const packageIds = new Set<string>();
+  for (const file of changedPaths) {
+    const normalized = normalizePackageGateAlias(file);
+    if (!normalized) continue;
+    for (const alias of packageGateOrder.pathAliases) {
+      if (normalized === alias.alias || normalized.startsWith(`${alias.alias}/`)) {
+        packageIds.add(alias.id);
+        break;
+      }
+    }
+  }
+  return packageIds;
+}
+
+function dependencyClosurePackageGateIds(packageIds: ReadonlySet<string>, packageGateOrder: FrontierPackageGateOrder): Set<string> {
+  const selected = new Set<string>();
+  const visit = (id: string) => {
+    if (selected.has(id)) return;
+    selected.add(id);
+    for (const dep of packageGateOrder.dependencyIdsById.get(id) ?? []) visit(dep);
+  };
+  for (const id of packageIds) visit(id);
+  return selected;
 }
 
 function inferFrontierPackageGateIdFromText(value: string, packageGateOrder: FrontierPackageGateOrder): string | undefined {

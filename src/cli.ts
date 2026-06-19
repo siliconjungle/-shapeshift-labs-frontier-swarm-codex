@@ -19,6 +19,16 @@ import {
 
 type CliValue = string | boolean | string[];
 type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
+type CliJsonValue = null | boolean | number | string | CliJsonValue[] | { [key: string]: CliJsonValue };
+type CliJsonObject = { [key: string]: CliJsonValue };
+type CliCommand = {
+  name: string;
+  command: string;
+  args: string[];
+  required: boolean;
+  cwd?: string;
+  metadata?: CliJsonObject;
+};
 
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'plan';
@@ -229,6 +239,7 @@ function printHelp() {
     '  --auto-drain-decision-log <path> --auto-drain-human-answer-log <path> --auto-drain-lock-path <path>',
     '  --auto-drain-lock-timeout-ms <n> --auto-drain-lock-stale-ms <n>',
     '  --focused-command <cmd> --global-command <cmd> (required auto-drain apply/commit gates)',
+    '  --focused-command <json> accepts command descriptors with metadata.packageId/packagePath/packageName for package-scoped gates',
     '',
     'Default run auto-drain is autonomous coordinator drain work. It collects',
     'worker merge bundles into hierarchical queues and writes the generic',
@@ -357,10 +368,69 @@ function semanticImportArg(args: CliArgs): boolean | { enabled: true; maxFiles?:
   };
 }
 
-function commandListArg(value: CliValue | undefined) {
+function commandListArg(value: CliValue | undefined): CliCommand[] | undefined {
   if (value === undefined) return undefined;
   const raw = Array.isArray(value) ? value : [String(value)];
-  return raw.map((command) => command.trim()).filter(Boolean).map((command) => ({ name: command, command: 'sh', args: ['-c', command], required: true }));
+  return raw.map(commandArg).filter((command): command is CliCommand => command !== undefined);
+}
+
+function commandArg(value: string): CliCommand | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (looksLikeCommandDescriptor(trimmed)) return commandDescriptorArg(trimmed);
+  return { name: trimmed, command: 'sh', args: ['-c', trimmed], required: true };
+}
+
+function looksLikeCommandDescriptor(value: string): boolean {
+  return value.startsWith('{') && value.endsWith('}') && /"command"\s*:/.test(value);
+}
+
+function commandDescriptorArg(value: string): CliCommand {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(`invalid JSON command descriptor: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!isRecord(parsed) || typeof parsed.command !== 'string' || !parsed.command.trim()) {
+    throw new Error('JSON command descriptors require a non-empty string command field');
+  }
+  const args = commandDescriptorArgs(parsed.args);
+  const name = typeof parsed.name === 'string' && parsed.name.trim()
+    ? parsed.name.trim()
+    : [parsed.command, ...args].join(' ');
+  const required = typeof parsed.required === 'boolean' ? parsed.required : true;
+  const command: CliCommand = {
+    name,
+    command: parsed.command.trim(),
+    args,
+    required
+  };
+  if (typeof parsed.cwd === 'string' && parsed.cwd.trim()) command.cwd = parsed.cwd.trim();
+  if (parsed.metadata !== undefined) {
+    if (!isCliJsonObject(parsed.metadata)) throw new Error('JSON command descriptor metadata must be a JSON object');
+    command.metadata = { ...parsed.metadata };
+  }
+  return command;
+}
+
+function commandDescriptorArgs(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new Error('JSON command descriptor args must be an array of strings');
+  }
+  return value.map((entry) => entry);
+}
+
+function isCliJsonObject(value: unknown): value is CliJsonObject {
+  if (!isRecord(value)) return false;
+  return Object.values(value).every(isCliJsonValue);
+}
+
+function isCliJsonValue(value: unknown): value is CliJsonValue {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') return true;
+  if (Array.isArray(value)) return value.every(isCliJsonValue);
+  return isCliJsonObject(value);
 }
 
 function boolArg(value: CliValue | undefined, fallback: boolean): boolean {
