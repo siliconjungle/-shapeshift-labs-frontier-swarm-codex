@@ -55,6 +55,7 @@ export interface FrontierCodexContinuationResult {
   backlogPath: string;
   routingPolicyPath: string;
   humanActionStatePath: string;
+  nextTasksPath?: string;
   nextPlanPath?: string;
   childBacklogNames: string[];
   childBacklogPaths: string[];
@@ -147,6 +148,7 @@ export interface FrontierCodexContinuationResult {
       backlogPath: string;
       routingPolicyPath: string;
       humanActionStatePath: string;
+      nextTasksPath?: string;
       nextPlanPath?: string;
       childBacklogPaths: string[];
     };

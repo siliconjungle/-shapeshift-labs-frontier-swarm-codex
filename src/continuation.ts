@@ -19,6 +19,7 @@ import { collectCodexSwarmRun } from './collect.js';
 import { readContinuationChildBacklogs, resolveContinuationChildBacklogNames } from './continuation-child-backlogs.js';
 import { createContinuationFeedback, createContinuationRoutingCostSummary, createContinuationTournamentSummary } from './continuation-feedback.js';
 import { createContinuationHumanActionState } from './continuation-human-actions.js';
+import { writeContinuationTaskSource } from './continuation-task-source.js';
 import { projectContinuationTerminalOutcomes } from './continuation-terminal-outcomes.js';
 import { coerceCodexSwarmTasksInput, createCodexSwarmPlan } from './index.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
@@ -107,6 +108,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
   const backlogPath = path.resolve(cwd, input.write && input.backlogPath ? input.backlogPath : path.join(outDir, 'backlog.next.json'));
   const routingPolicyPath = path.resolve(cwd, input.write && input.routingPolicyPath ? input.routingPolicyPath : path.join(outDir, 'model-routing-policy.next.json'));
   const nextPlanPath = nextPlan ? path.join(outDir, 'next-plan.json') : undefined;
+  const nextTasksPath = await writeContinuationTaskSource({ cwd, outDir, write: input.write, tasks: input.tasks, tasksPath: input.tasksPath, projectedTasks: projected.tasks });
   const childBacklogPaths = childBacklogs.map((entry) => entry.path);
   const nextJobs = nextPlan?.jobs ?? [];
   const nextJobRouting = summarizeNextJobRouting(nextJobs);
@@ -129,6 +131,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     backlogPath,
     routingPolicyPath,
     humanActionStatePath: humanActionState.statePath,
+    ...(nextTasksPath ? { nextTasksPath } : {}),
     ...(nextPlanPath ? { nextPlanPath } : {}),
     childBacklogNames,
     childBacklogPaths,
@@ -188,6 +191,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
         backlogPath,
         routingPolicyPath,
         humanActionStatePath: humanActionState.statePath,
+        ...(nextTasksPath ? { nextTasksPath } : {}),
         ...(nextPlanPath ? { nextPlanPath } : {}),
         childBacklogPaths
       }

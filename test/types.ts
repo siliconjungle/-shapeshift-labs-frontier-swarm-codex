@@ -153,6 +153,7 @@ continuationPromise.then((continuation) => {
   continuation.summary.nextJobRouting.routedJobCount satisfies number;
   continuation.summary.nextJobRouting.changedComputeCount satisfies number;
   continuation.summary.nextJobRouting.selectedComputeCounts satisfies Record<string, number>;
+  continuation.nextTasksPath satisfies string | undefined;
 });
 semanticEditAdmission.status satisfies string;
 semanticEditReplay?.acceptedClean satisfies number | undefined;
