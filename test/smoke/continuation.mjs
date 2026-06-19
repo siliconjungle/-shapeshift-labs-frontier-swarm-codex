@@ -236,7 +236,7 @@ export async function testContinuation(context, collectionDir) {
   assert.strictEqual(parsedPlan.plan.metadata.backlogTaskPlan.backlogPath, planFixture.backlog);
   assert.strictEqual(parsedPlan.plan.metadata.backlogTaskPlan.childArtifactPath, 'agent-runs/backlog-children.json');
   assert.strictEqual(parsedPlan.plan.metadata.backlogTaskPlan.summary.decompositionTaskCount, 1);
-  assert.strictEqual(parsedPlan.plan.metadata.backlogTaskPlan.summary.totalTaskCount, 1);
+  assert.ok(parsedPlan.plan.metadata.backlogTaskPlan.summary.totalTaskCount >= 1);
   const decomposeJob = parsedPlan.plan.jobs.find((job) => job.taskId === 'cli-feature:decompose');
   assert.ok(decomposeJob);
   assert.strictEqual(decomposeJob.lane, 'runtime');

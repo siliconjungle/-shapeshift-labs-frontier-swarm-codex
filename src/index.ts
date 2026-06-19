@@ -57,7 +57,8 @@ import {
 import {
   arrayOfObjects,
   isObject,
-  readStringArray
+  readStringArray,
+  uniqueStrings
 } from './common.js';
 import type { FrontierCodexSwarmCliInput } from './types.js';
 
@@ -198,6 +199,8 @@ export function createCodexSwarmPlan(input: FrontierCodexSwarmCliInput): Frontie
       tasks: baseTasks
     })
     : undefined;
+  const tasks = backlogTaskPlan?.tasks ?? baseTasks;
+  const manifest = declareTaskLanesAndCompute(coerceCodexSwarmManifestInput(input.manifest), tasks);
   const planOptions: FrontierSwarmPlanInput = {
     ...(input.plan ?? {}),
     ...(input.routingPolicy ? { routingPolicy: input.routingPolicy as FrontierSwarmPlanInput['routingPolicy'] } : {}),
@@ -208,8 +211,8 @@ export function createCodexSwarmPlan(input: FrontierCodexSwarmCliInput): Frontie
     ...(backlogTaskPlan ? { metadata: mergePlanMetadata(input.plan?.metadata, { backlogTaskPlan: summarizeBacklogTaskPlan(backlogTaskPlan) }) } : {})
   };
   return createSwarmPlan(
-    coerceCodexSwarmManifestInput(input.manifest),
-    backlogTaskPlan?.tasks ?? baseTasks,
+    manifest,
+    tasks,
     planOptions
   );
 }
@@ -298,6 +301,50 @@ export function coerceCodexSwarmTasksInput(value: unknown): FrontierSwarmTaskInp
 
 export { repairCodexWorkspacePackageLinks } from './workspace-link-repair.js';
 
+function declareTaskLanesAndCompute(
+  manifest: FrontierSwarmManifestInput,
+  tasks: readonly FrontierSwarmTaskInput[]
+): FrontierSwarmManifestInput {
+  const compute = [...((manifest.compute ?? []) as unknown as readonly Record<string, unknown>[])];
+  const layers = [...((manifest.layers ?? []) as unknown as readonly Record<string, unknown>[])];
+  const lanes = [...((manifest.lanes ?? []) as unknown as readonly Record<string, unknown>[])];
+  const computeIds = new Set(compute.map((entry) => typeof entry.id === 'string' ? entry.id : '').filter(Boolean));
+  const layerIds = new Set(layers.map((entry) => typeof entry.id === 'string' ? entry.id : '').filter(Boolean));
+  const laneIds = new Set(lanes.map((entry) => typeof entry.id === 'string' ? entry.id : '').filter(Boolean));
+
+  for (const task of tasks) {
+    const laneId = typeof task.lane === 'string' && task.lane.length > 0 ? task.lane : undefined;
+    if (!laneId || laneIds.has(laneId)) continue;
+    const layerId = typeof task.layer === 'string' && task.layer.length > 0 ? task.layer : 'implementation';
+    const computeId = typeof task.compute === 'string' && task.compute.length > 0
+      ? task.compute
+      : readManifestDefaultCompute(manifest);
+    if (!layerIds.has(layerId)) {
+      layers.push({ id: layerId, title: titleFromId(layerId) });
+      layerIds.add(layerId);
+    }
+    if (!computeIds.has(computeId)) {
+      compute.push(createTaskComputeProfile(computeId));
+      computeIds.add(computeId);
+    }
+    lanes.push({
+      id: laneId,
+      title: titleFromId(laneId),
+      layer: layerId,
+      compute: computeId,
+      allowedWrites: uniqueStrings([...(task.allowedWrites ?? []), ...(task.targetRefs ?? [])])
+    });
+    laneIds.add(laneId);
+  }
+
+  return {
+    ...manifest,
+    compute: compute as unknown as FrontierSwarmManifestInput['compute'],
+    layers: layers as unknown as FrontierSwarmManifestInput['layers'],
+    lanes: lanes as unknown as FrontierSwarmManifestInput['lanes']
+  };
+}
+
 function readCompute(value: unknown) {
   if (Array.isArray(value) && value.length > 0) return value as FrontierSwarmManifestInput['compute'];
   return [{
@@ -306,6 +353,28 @@ function readCompute(value: unknown) {
     model: FRONTIER_SWARM_CODEX_DEFAULT_MODEL,
     reasoningEffort: FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT
   }];
+}
+
+function readManifestDefaultCompute(manifest: FrontierSwarmManifestInput): string {
+  const policy = isObject(manifest.policy) ? manifest.policy as Record<string, unknown> : {};
+  return typeof policy.defaultCompute === 'string' && policy.defaultCompute.length > 0 ? policy.defaultCompute : 'codex.deep';
+}
+
+function createTaskComputeProfile(id: string): Record<string, unknown> {
+  return {
+    id,
+    kind: 'codex',
+    model: id.toLowerCase().includes('mini') ? 'gpt-5.4-mini' : FRONTIER_SWARM_CODEX_DEFAULT_MODEL,
+    reasoningEffort: id === 'codex.deep' ? FRONTIER_SWARM_CODEX_DEFAULT_REASONING_EFFORT : 'high'
+  };
+}
+
+function titleFromId(id: string): string {
+  return id
+    .split(/[-_.]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function mergePlanMetadata(existing: unknown, addition: Record<string, unknown>): Record<string, unknown> {

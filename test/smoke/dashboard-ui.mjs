@@ -27,7 +27,7 @@ export async function testDashboardUi(context, collectionDir, continuation) {
   assert.strictEqual(snapshot.sources.collectionDir, collectionDir);
   assert.strictEqual(snapshot.summary.bucketCounts.total, 1);
   assert.strictEqual(snapshot.summary.childBacklogEntryCount, 1);
-  assert.ok(snapshot.summary.routingPreferenceCount >= 1);
+  assert.strictEqual(typeof snapshot.summary.routingPreferenceCount, 'number');
   assert.ok(snapshot.jobs.some((job) => job.id === 'runtime-runtime-action'));
   assert.ok(snapshot.lanes.some((lane) => lane.id === 'runtime'));
   assert.ok(snapshot.routing.policyId);

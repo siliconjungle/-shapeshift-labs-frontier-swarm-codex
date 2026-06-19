@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { FrontierSwarmCommand } from '@shapeshift-labs/frontier-swarm';
@@ -167,7 +168,7 @@ function deletedChildEmptyDirectoryMarkers(
   const beforePaths = Array.from(before.keys());
   for (const file of changed) {
     const marker = after.get(file);
-    if (!marker?.startsWith('empty-dir:')) continue;
+    if (!marker?.startsWith('empty-dir')) continue;
     if (before.has(file)) continue;
     const prefix = file.replace(/\/+$/, '') + '/';
     if (beforePaths.some((candidate) => candidate.startsWith(prefix))) out.add(file);
@@ -571,24 +572,33 @@ async function walkWorkspaceFiles(root: string, current: string, snapshot: Front
     }
     if (stat.isDirectory()) {
       if (isWorkspaceNoisePath(relative)) {
-        snapshot.set(relative, snapshotMarker('ignored-dir', stat));
+        snapshot.set(relative, snapshotMarker('ignored-dir'));
         continue;
       }
       const beforeSize = snapshot.size;
       await walkWorkspaceFiles(root, absolute, snapshot);
-      if (relative && snapshot.size === beforeSize) snapshot.set(relative, snapshotMarker('empty-dir', stat));
+      if (relative && snapshot.size === beforeSize) snapshot.set(relative, snapshotMarker('empty-dir'));
       continue;
     }
     if (stat.isFile()) {
       snapshot.set(relative, isWorkspaceNoisePath(relative)
-        ? snapshotMarker('ignored-file', stat)
-        : snapshotMarker('file', stat));
+        ? await snapshotFileMarker('ignored-file', absolute, stat)
+        : await snapshotFileMarker('file', absolute, stat));
     }
   }
 }
 
-function snapshotMarker(kind: string, stat: { size: number; mtimeMs: number }): string {
-  return `${kind}:${stat.size}:${stat.mtimeMs}`;
+async function snapshotFileMarker(kind: string, absolute: string, stat: { size: number }): Promise<string> {
+  try {
+    const hash = createHash('sha256').update(await fs.readFile(absolute)).digest('hex');
+    return `${kind}:${stat.size}:${hash}`;
+  } catch {
+    return `${kind}:${stat.size}:unreadable`;
+  }
+}
+
+function snapshotMarker(kind: string): string {
+  return kind;
 }
 
 function diffWorkspaceFiles(before: FrontierCodexWorkspaceFileSnapshot, after: FrontierCodexWorkspaceFileSnapshot): string[] {

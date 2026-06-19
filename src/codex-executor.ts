@@ -36,12 +36,15 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
     const timer = setTimeout(() => child.kill('SIGTERM'), input.timeoutMs);
     let stdoutWrites = Promise.resolve();
     let stderrWrites = Promise.resolve();
+    const deferredFailureDetector = createCodexDeferredFailureDetector();
     child.stdout.on('data', (chunk: Buffer) => {
+      deferredFailureDetector.read(chunk);
       stdoutWrites = stdoutWrites
         .then(() => appendLimitedLogChunk(input.paths.eventsPath, chunk, eventLimit, logSummary, 'event', eventLogState))
         .catch(() => {});
     });
     child.stderr.on('data', (chunk: Buffer) => {
+      deferredFailureDetector.read(chunk);
       stderrWrites = stderrWrites
         .then(() => appendLimitedLogChunk(input.paths.stderrPath, chunk, stderrLimit, logSummary, 'stderr'))
         .catch(() => {});
@@ -52,11 +55,15 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
       await Promise.all([stdoutWrites, stderrWrites]);
       await flushEventLogRemainder(input.paths.eventsPath, eventLimit, logSummary, eventLogState).catch(() => {});
       await fs.writeFile(input.paths.logSummaryPath, JSON.stringify(logSummary, null, 2) + '\n').catch(() => {});
+      const lastMessage = await readOptionalText(input.paths.lastMessagePath);
+      deferredFailureDetector.read(lastMessage);
+      const deferredReason = deferredFailureDetector.reason();
       resolve({
         exitCode: code ?? 1,
         ...(signal ? { signal } : {}),
-        lastMessage: await readOptionalText(input.paths.lastMessagePath),
-        logSummary
+        lastMessage,
+        logSummary,
+        ...(deferredReason ? { deferredReason } : {})
       });
     });
     child.on('error', async (error: Error) => {
@@ -64,7 +71,9 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
       await Promise.all([stdoutWrites, stderrWrites]);
       await flushEventLogRemainder(input.paths.eventsPath, eventLimit, logSummary, eventLogState).catch(() => {});
       await fs.writeFile(input.paths.logSummaryPath, JSON.stringify(logSummary, null, 2) + '\n').catch(() => {});
-      resolve({ exitCode: 1, logSummary, error });
+      deferredFailureDetector.read(error.message);
+      const deferredReason = deferredFailureDetector.reason();
+      resolve({ exitCode: 1, logSummary, ...(deferredReason ? { deferredReason } : {}), error });
     });
   });
 }
@@ -210,4 +219,25 @@ function isJsonLine(line: string): boolean {
 function positiveInteger(value: unknown, fallback: number): number {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+interface CodexDeferredFailureDetector {
+  read(value: unknown): void;
+  reason(): 'usage-limit' | undefined;
+}
+
+function createCodexDeferredFailureDetector(): CodexDeferredFailureDetector {
+  let sample = '';
+  return {
+    read(value: unknown) {
+      if (value === undefined || value === null) return;
+      sample += Buffer.isBuffer(value) ? value.toString('utf8') : String(value);
+      if (sample.length > 128_000) sample = sample.slice(-128_000);
+    },
+    reason() {
+      const normalized = sample.toLowerCase();
+      if (normalized.includes('usage limit') || normalized.includes('purchase more credits')) return 'usage-limit';
+      return undefined;
+    }
+  };
 }

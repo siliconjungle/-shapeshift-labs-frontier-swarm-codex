@@ -68,8 +68,8 @@ for (const token of ['evidence handoff', 'target lane', 'target files', 'rationa
   assert.match(promptSource, new RegExp(escapeRegExp(token)), `missing prompt handoff token: ${token}`);
 }
 
-assert.match(changesSource, /snapshotMarker\('ignored-dir', stat\)/);
-assert.match(changesSource, /snapshotMarker\('ignored-file', stat\)/);
+assert.match(changesSource, /createHash\('sha256'\)/);
+assert.match(changesSource, /snapshotFileMarker\('ignored-file', absolute, stat\)/);
 assert.match(changesSource, /getIgnoredWorkspaceChangedPathReason/);
 assert.match(changesSource, /quarantineWorkspacePatchCandidatePaths/);
 assert.match(changesSource, /mergeWorkspaceChangedPathCollections/);

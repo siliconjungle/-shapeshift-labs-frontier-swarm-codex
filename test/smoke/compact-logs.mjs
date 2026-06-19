@@ -48,4 +48,20 @@ export async function testCompactLogTruncation({ tmp }) {
   assert.deepStrictEqual(JSON.parse(lines[0]), { type: 'ok', value: 1 });
   const summary = JSON.parse(await fs.readFile(paths.logSummaryPath, 'utf8'));
   assert.strictEqual(summary.eventBytesWritten, Buffer.byteLength(lines[0] + '\n'));
+
+  const quotaResult = await spawnCodexExecutor({
+    job: { id: 'quota-worker', taskId: 'quota-task' },
+    prompt: '',
+    args: ['-e', "process.stderr.write('You have hit your usage limit. Visit settings to purchase more credits.\\n'); process.exit(1);"],
+    cwd: tmp,
+    workspacePath: tmp,
+    codexPath: process.execPath,
+    paths,
+    resourceAllocation: { env: {} },
+    env: {},
+    timeoutMs: 5000,
+    compactLogs: { enabled: true, maxEventBytes: 80, maxStderrBytes: 80 }
+  });
+  assert.strictEqual(quotaResult.exitCode, 1);
+  assert.strictEqual(quotaResult.deferredReason, 'usage-limit');
 }

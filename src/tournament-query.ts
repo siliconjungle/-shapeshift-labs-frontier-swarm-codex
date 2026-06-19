@@ -80,18 +80,53 @@ export async function queryCodexSwarmTournament(input: FrontierCodexTournamentQu
 export async function compareCodexSwarmTournaments(input: { baseline: string; current: string; cwd?: string; scoreThreshold?: number }) {
   const baselinePath = await resolveTournamentPath({ tournament: input.baseline, cwd: input.cwd });
   const currentPath = await resolveTournamentPath({ tournament: input.current, cwd: input.cwd });
-  const comparison = compareSwarmStrategyTournaments({
+  const comparison = withTournamentComparisonSummary(compareSwarmStrategyTournaments({
     baseline: await readTournament(baselinePath),
     current: await readTournament(currentPath),
     scoreThreshold: input.scoreThreshold
-  });
+  }));
   return { baselinePath, currentPath, comparison };
 }
 
 export async function createCodexSwarmTournamentHistory(input: { tournaments: readonly string[]; cwd?: string }) {
   const tournamentPaths = await Promise.all(input.tournaments.map((entry) => resolveTournamentPath({ tournament: entry, cwd: input.cwd })));
-  const history = createSwarmStrategyTournamentHistory({ tournaments: await Promise.all(tournamentPaths.map(readTournament)) });
+  const history = withTournamentHistorySummary(
+    createSwarmStrategyTournamentHistory({ tournaments: await Promise.all(tournamentPaths.map(readTournament)) })
+  );
   return { tournamentPaths, history };
+}
+
+function withTournamentHistorySummary(history: FrontierSwarmStrategyTournamentHistory): FrontierSwarmStrategyTournamentHistory & { summary: Record<string, number> } {
+  const tournaments = history.tournaments ?? [];
+  return {
+    ...history,
+    summary: {
+      tournamentCount: tournaments.length,
+      candidateCount: tournaments.reduce((sum, tournament) => sum + tournament.candidates.length, 0),
+      matchCount: tournaments.reduce((sum, tournament) => sum + tournament.matches.length, 0),
+      standingCount: tournaments.reduce((sum, tournament) => sum + tournament.standings.length, 0)
+    }
+  };
+}
+
+function withTournamentComparisonSummary(
+  comparison: FrontierSwarmStrategyTournamentComparison
+): FrontierSwarmStrategyTournamentComparison & { summary: Record<string, number> } {
+  const regression = (comparison as unknown as { regression?: unknown }).regression === true;
+  return {
+    ...comparison,
+    summary: {
+      tournamentCount: nonNegativeNumber((comparison as unknown as { tournamentCount?: unknown }).tournamentCount),
+      candidateCount: nonNegativeNumber((comparison as unknown as { candidateCount?: unknown }).candidateCount),
+      stableCount: regression ? 0 : 1,
+      regressionCount: regression ? 1 : 0
+    }
+  };
+}
+
+function nonNegativeNumber(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
 export async function handleCodexTournamentCommand(args: CliArgs): Promise<void> {

@@ -3,6 +3,7 @@ import {
   buildCodexArgs,
   createBrowserPlan,
   createCodexResourceAllocation,
+  createCodexSwarmPlan,
   discoverCodexHandoffArtifacts,
   exists,
   fs,
@@ -19,6 +20,22 @@ export async function testPlanningAndLinks({ manifest, tasks, plan, tmp, paths }
   assert.strictEqual(plan.jobs.length, 1);
   assert.strictEqual(plan.jobs[0].compute.model, 'gpt-5.5');
   assert.strictEqual(plan.jobs[0].compute.reasoningEffort, 'xhigh');
+  const generatedLanePlan = createCodexSwarmPlan({
+    manifest: { id: 'rerun-manifest' },
+    tasks: {
+      items: [{
+        id: 'rerun-task',
+        lane: 'generated-rerun-lane',
+        layer: 'merge',
+        compute: 'codex.mini',
+        allowedWrites: ['src/rerun.ts']
+      }]
+    }
+  });
+  assert.strictEqual(generatedLanePlan.jobs.length, 1);
+  assert.strictEqual(generatedLanePlan.jobs[0].lane, 'generated-rerun-lane');
+  assert.strictEqual(generatedLanePlan.jobs[0].compute.id, 'codex.mini');
+  assert.strictEqual(generatedLanePlan.jobs[0].compute.model, 'gpt-5.4-mini');
 
   await fs.writeFile(path.join(tmp, 'last-message.md'), 'handoff\n');
   await fs.mkdir(path.join(tmp, 'evidence'), { recursive: true });

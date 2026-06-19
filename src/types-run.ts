@@ -187,6 +187,7 @@ export interface FrontierCodexExecutorResult {
   changedPaths?: readonly string[];
   lastMessage?: string;
   logSummary?: FrontierCodexLogSummary;
+  deferredReason?: 'usage-limit' | string;
   error?: unknown;
 }
 

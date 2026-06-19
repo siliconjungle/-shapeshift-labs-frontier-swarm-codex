@@ -242,7 +242,15 @@ export async function runCodexJob(
     : [];
   const verification = options.runVerification && !strictOwnershipBlocked ? await runVerification(job.verification, workspace) : [];
   const failedVerification = verification.some((entry) => entry.required !== false && entry.status !== 0);
-  const status = strictOwnershipBlocked
+  const codexDeferredFailure = execution.deferredReason
+    ? {
+      reason: execution.deferredReason,
+      exitCode: execution.exitCode
+    }
+    : undefined;
+  const status = codexDeferredFailure
+    ? 'blocked'
+    : strictOwnershipBlocked
     ? 'blocked'
     : ownership.ok && execution.exitCode === 0 && !failedVerification ? 'completed' : 'failed';
   const patchPath = await writeCodexPatchFile({
@@ -295,6 +303,7 @@ export async function runCodexJob(
     ...(patchPath ? { patchPath } : {}),
     queueItemIds: [job.taskId],
     verification,
+    ...(codexDeferredFailure ? { mergeReadiness: 'discovery-only', mergeDisposition: 'discovery-only' } : {}),
     ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {}),
     lastMessage: execution.lastMessage,
     error: strictOwnershipBlockMessage ?? execution.error,
@@ -307,6 +316,7 @@ export async function runCodexJob(
       workspacePatchQuarantine,
       ownershipRestore,
       preExecWriteFence,
+      ...(codexDeferredFailure ? { codexDeferredFailure } : {}),
       allowedWritePolicy: workspacePlan.allowedWritePolicy,
       observedChangedPaths: collected.observedChangedPaths,
       reportedChangedPaths: reportedChangedPaths.observedChangedPaths,
@@ -351,6 +361,7 @@ export async function runCodexJob(
       workspacePatchQuarantine,
       ownershipRestore,
       preExecWriteFence,
+      ...(codexDeferredFailure ? { codexDeferredFailure } : {}),
       allowedWritePolicy: workspacePlan.allowedWritePolicy,
       observedChangedPaths: collected.observedChangedPaths,
       reportedChangedPaths: reportedChangedPaths.observedChangedPaths,

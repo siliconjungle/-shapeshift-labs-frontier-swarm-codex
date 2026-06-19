@@ -20,6 +20,7 @@ export async function testHooksAndWorkspaces({ plan, tmp }) {
   await testChangedPathDiscovery(plan, tmp);
   await testReportedWorkspaceNoiseFiltering(plan, tmp);
   await testStrictAllowedWritePolicy(plan, tmp);
+  await testDeferredCodexFailure(plan, tmp);
 
   const writtenPlan = createCodexSwarmPlan({ manifest: manifestInput, tasks: tasksInput, plan: { limit: 1 } });
   await fs.writeFile(path.join(tmp, 'swarm-plan.json'), JSON.stringify(writtenPlan, null, 2) + '\n');
@@ -193,6 +194,7 @@ async function testGeneratedWorkspaceRefresh(plan, tmp) {
 }
 
 async function testChangedPathDiscovery(plan, tmp) {
+  await fs.writeFile(path.join(tmp, 'fixture.txt'), 'fixture\n');
   const changedResult = await runCodexSwarm(plan, {
     outDir: path.join(tmp, 'changed-run'),
     cwd: tmp,
@@ -204,6 +206,7 @@ async function testChangedPathDiscovery(plan, tmp) {
       linkNodeModules: false
     },
     executor: async (input) => {
+      await fs.writeFile(path.join(input.workspacePath, 'fixture.txt'), 'fixture\n');
       await fs.mkdir(path.join(input.workspacePath, 'src/runtime'), { recursive: true });
       await fs.writeFile(path.join(input.workspacePath, 'src/runtime/action.ts'), 'export const ok = true;\n');
       await fs.writeFile(path.join(input.workspacePath, 'loom.json'), '{}\n');
@@ -221,6 +224,7 @@ async function testChangedPathDiscovery(plan, tmp) {
   });
   assert.strictEqual(changedResult.ok, true);
   assert.deepStrictEqual(changedResult.run.results[0].changedPaths, ['src/runtime/action.ts']);
+  assert.ok(!changedResult.run.results[0].metadata.observedChangedPaths.includes('fixture.txt'));
   const changedPatchPath = changedResult.run.results[0].patchPath;
   assert.ok(changedPatchPath);
   const changedPatch = await fs.readFile(changedPatchPath, 'utf8');
@@ -340,6 +344,34 @@ async function testReportedWorkspaceNoiseFiltering(plan, tmp) {
   assert.equal(workspaceProof.ignoredChangedPathReasons.find((entry) => entry.path === 'packages/frontier-swarm/build/index.js')?.reasonCode, 'build_output');
 }
 
+async function testDeferredCodexFailure(plan, tmp) {
+  const deferredResult = await runCodexSwarm(plan, {
+    outDir: path.join(tmp, 'deferred-failure-run'),
+    cwd: tmp,
+    workspace: {
+      mode: 'copy',
+      root: path.join(tmp, 'deferred-failure-workspaces'),
+      replace: true,
+      linkNodeModules: false
+    },
+    executor: async (input) => {
+      await fs.writeFile(input.paths.lastMessagePath, 'usage limit; try again later\n');
+      return { exitCode: 1, changedPaths: [], lastMessage: 'usage limit', deferredReason: 'usage-limit' };
+    }
+  });
+  const result = deferredResult.run.results[0];
+  assert.strictEqual(result.status, 'blocked');
+  assert.strictEqual(result.exitCode, 1);
+  assert.strictEqual(result.mergeReadiness, 'discovery-only');
+  assert.strictEqual(result.mergeDisposition, 'discovery-only');
+  assert.strictEqual(result.metadata.codexDeferredFailure.reason, 'usage-limit');
+  const mergeBundlePath = result.evidencePaths.find((entry) => entry.endsWith('merge.json'));
+  assert.ok(mergeBundlePath);
+  const mergeBundle = JSON.parse(await fs.readFile(mergeBundlePath, 'utf8'));
+  assert.strictEqual(mergeBundle.disposition, 'discovery-only');
+  assert.strictEqual(mergeBundle.status, 'blocked');
+}
+
 async function testStrictAllowedWritePolicy(plan, tmp) {
   await fs.mkdir(path.join(tmp, 'src/other'), { recursive: true });
   await fs.writeFile(path.join(tmp, 'src/other/existing.ts'), 'export const original = true;\n');
@@ -452,9 +484,9 @@ assert.deepStrictEqual(await fs.readdir('src/other/existing-empty'), []);
   assert.ok(result.metadata.observedChangedPaths.includes('src/other/existing-empty'));
   assert.ok(result.metadata.observedChangedPaths.includes('src/other/existing-empty/nested.ts'));
   assert.ok(result.metadata.observedChangedPaths.includes('agent-runs'));
-  assert.ok(result.metadata.observedChangedPaths.includes('.git'));
-  assert.ok(result.metadata.observedChangedPaths.includes('.cache'));
-  assert.ok(result.metadata.observedChangedPaths.includes('build'));
+  assert.ok(!result.metadata.observedChangedPaths.includes('.git'));
+  assert.ok(!result.metadata.observedChangedPaths.includes('.cache'));
+  assert.ok(!result.metadata.observedChangedPaths.includes('build'));
   assert.ok(result.ownershipViolations.includes('src/other/out.ts'));
   assert.ok(result.ownershipViolations.includes('src/other/existing.ts'));
   assert.ok(result.ownershipViolations.includes('src/other/not-in-workspace.ts'));
@@ -503,12 +535,9 @@ assert.deepStrictEqual(await fs.readdir('src/other/existing-empty'), []);
   assert.ok(workspaceProof.preExecWriteFence.sampleLockedPaths.includes('src/other/existing.ts'));
   assert.ok(workspaceProof.ignoredChangedPaths.includes('agent-runs'));
   assert.equal(workspaceProof.ignoredChangedPathReasons.find((entry) => entry.path === 'agent-runs')?.reasonCode, 'agent_runs');
-  assert.ok(workspaceProof.ignoredChangedPaths.includes('.git'));
-  assert.ok(workspaceProof.ignoredChangedPaths.includes('.cache'));
-  assert.ok(workspaceProof.ignoredChangedPaths.includes('build'));
-  assert.equal(workspaceProof.ignoredChangedPathReasons.find((entry) => entry.path === '.git')?.reasonCode, 'git_metadata');
-  assert.equal(workspaceProof.ignoredChangedPathReasons.find((entry) => entry.path === '.cache')?.reasonCode, 'cache');
-  assert.equal(workspaceProof.ignoredChangedPathReasons.find((entry) => entry.path === 'build')?.reasonCode, 'build_output');
+  assert.ok(!workspaceProof.ignoredChangedPaths.includes('.git'));
+  assert.ok(!workspaceProof.ignoredChangedPaths.includes('.cache'));
+  assert.ok(!workspaceProof.ignoredChangedPaths.includes('build'));
   const workspacePath = path.join(tmp, 'strict-write-policy-workspaces', plan.jobs[0].id);
   assert.strictEqual(await exists(path.join(workspacePath, 'src/other/out.ts')), false);
   assert.strictEqual(await exists(path.join(workspacePath, 'src/other/not-in-workspace.ts')), false);
