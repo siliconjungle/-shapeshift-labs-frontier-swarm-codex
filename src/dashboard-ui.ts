@@ -508,7 +508,11 @@ function createDashboardSummary(
       childBacklogEntryCount: continuation.summary.childBacklogEntryCount,
       routingFeedbackCount: continuation.summary.totalRoutingFeedbackCount,
       routingPreferenceCount: continuation.summary.routingPreferenceCount,
-      nextJobCount: continuation.summary.nextJobCount
+      nextJobCount: continuation.summary.nextJobCount,
+      nextJobRoutedCount: continuation.summary.nextJobRouting.routedJobCount,
+      nextJobChangedComputeCount: continuation.summary.nextJobRouting.changedComputeCount,
+      nextJobRoutingFeedbackMatchCount: continuation.summary.nextJobRouting.policyFeedbackMatchCount,
+      nextJobRoutingCostSignalCount: continuation.summary.nextJobRouting.policyCostSignalCount
     } : {}),
     ...(run && jobs.length === 0 ? { jobCount: run.run.jobs.length } : {})
   };

@@ -455,6 +455,10 @@ export interface FrontierCodexDashboardSnapshot {
     routingFeedbackCount?: number;
     routingPreferenceCount?: number;
     nextJobCount?: number;
+    nextJobRoutedCount?: number;
+    nextJobChangedComputeCount?: number;
+    nextJobRoutingFeedbackMatchCount?: number;
+    nextJobRoutingCostSignalCount?: number;
   };
   semantic: FrontierCodexDashboardSemanticMetrics;
   health: FrontierCodexDashboardHealthMetrics;

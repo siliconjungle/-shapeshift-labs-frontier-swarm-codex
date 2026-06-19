@@ -104,6 +104,17 @@ export interface FrontierCodexContinuationResult {
     nextJobIds: string[];
     nextJobTaskIds: string[];
     nextJobLaneCounts: Record<string, number>;
+    nextJobRouting: {
+      routedJobCount: number;
+      changedComputeCount: number;
+      policyFeedbackMatchCount: number;
+      policyCostSignalCount: number;
+      policyPreferenceMatchCount: number;
+      selectedComputeCounts: Record<string, number>;
+      fallbackComputeCounts: Record<string, number>;
+      routedJobIds: string[];
+      changedComputeJobIds: string[];
+    };
     tournamentObservationCount: number;
     tournamentRecommendationCount: number;
     collectionBucketCounts?: FrontierCodexCollectResult['summary'];

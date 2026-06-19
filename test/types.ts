@@ -150,6 +150,9 @@ continuationPromise.then((continuation) => {
   continuation.summary.terminalOutcomeProjection.reviewTaskCount satisfies number;
   continuation.summary.routingCost.estimatedCostUsd satisfies number;
   continuation.summary.routingCost.pricedFeedbackCount satisfies number;
+  continuation.summary.nextJobRouting.routedJobCount satisfies number;
+  continuation.summary.nextJobRouting.changedComputeCount satisfies number;
+  continuation.summary.nextJobRouting.selectedComputeCounts satisfies Record<string, number>;
 });
 semanticEditAdmission.status satisfies string;
 semanticEditReplay?.acceptedClean satisfies number | undefined;

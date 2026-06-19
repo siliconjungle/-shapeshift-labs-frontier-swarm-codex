@@ -98,6 +98,10 @@ export async function testContinuation(context, collectionDir) {
   assert.strictEqual(continuation.nextRoutingPolicy.feedback[0].metadata.routingDimensions.workKind, 'runtime action');
   assert.strictEqual(continuation.nextRoutingPolicy.feedback[0].evidenceQuality.metadata.collectionBucket, 'needs-human-port');
   assert.ok(continuation.nextPlan.jobs.some((job) => job.taskId === 'runtime-follow-up'));
+  assert.strictEqual(continuation.summary.nextJobRouting.routedJobCount, continuation.summary.nextJobCount);
+  assert.strictEqual(typeof continuation.summary.nextJobRouting.policyFeedbackMatchCount, 'number');
+  assert.ok(continuation.summary.nextJobRouting.routedJobIds.includes(continuation.nextPlan.jobs.find((job) => job.taskId === 'runtime-follow-up').id));
+  assert.ok(continuation.nextPlan.jobs.find((job) => job.taskId === 'runtime-follow-up').metadata.modelRoute);
   assert.ok(!continuation.nextPlan.graph.issues.some((issue) => issue.code === 'missing-job-dependency'));
   assert.strictEqual(path.basename(continuation.backlogPath), 'backlog.next.json');
   assert.strictEqual(path.basename(continuation.routingPolicyPath), 'model-routing-policy.next.json');

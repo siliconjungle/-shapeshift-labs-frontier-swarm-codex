@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import {
   continueCodexSwarmLoop,
   fs,
+  manifestInput,
   path
 } from './context.mjs';
 
@@ -25,7 +26,35 @@ export async function testContinuationRoutingCost({ tmp }, collectionDir) {
   const continuation = await continueCodexSwarmLoop({
     collection: costCollectionDir,
     outDir: path.join(tmp, 'routing-cost-continuation'),
-    routingPolicy: { id: 'routing-cost-policy', defaultMode: 'fill' },
+    routingPolicy: {
+      id: 'routing-cost-policy',
+      defaultMode: 'fill',
+      signals: [{
+        mode: 'prefer',
+        lane: 'runtime',
+        workKind: 'runtime action',
+        computeId: 'codex.fast',
+        confidence: 'high',
+        reason: 'prefer cheaper compute for matching runtime action follow-ups'
+      }]
+    },
+    routingMode: 'fill',
+    manifest: {
+      ...manifestInput,
+      compute: [
+        { id: 'codex.deep', kind: 'codex', model: 'gpt-5.5', reasoningEffort: 'xhigh' },
+        { id: 'codex.fast', kind: 'codex', model: 'gpt-5.4-mini', reasoningEffort: 'medium' }
+      ],
+      policy: { defaultCompute: 'codex.deep' }
+    },
+    tasks: {
+      items: [{
+        id: 'runtime-next-action',
+        kind: 'runtime action',
+        lane: 'runtime',
+        targetRefs: ['src/runtime/next-action.ts']
+      }]
+    },
     repository: 'frontier-swarm-codex-smoke',
     package: '@shapeshift-labs/frontier-swarm-codex'
   });
@@ -41,6 +70,19 @@ export async function testContinuationRoutingCost({ tmp }, collectionDir) {
   assert.ok(feedback.tags.includes('cost-known'));
   assert.strictEqual(feedback.evidenceQuality.metadata.costEstimate.estimatedCostMicroUsd, 50000);
   assert.strictEqual(continuation.nextRoutingPolicy.metadata.routingCostSummary.estimatedCostMicroUsd, 50000);
+  assert.strictEqual(continuation.summary.nextJobCount, 1);
+  assert.strictEqual(continuation.summary.nextJobRouting.routedJobCount, 1);
+  assert.strictEqual(continuation.summary.nextJobRouting.changedComputeCount, 1);
+  assert.strictEqual(continuation.summary.nextJobRouting.policyFeedbackMatchCount, 1);
+  assert.strictEqual(continuation.summary.nextJobRouting.policyCostSignalCount, 1);
+  assert.strictEqual(continuation.summary.nextJobRouting.policyPreferenceMatchCount, 1);
+  assert.strictEqual(continuation.summary.nextJobRouting.selectedComputeCounts['codex.fast'], 1);
+  assert.strictEqual(continuation.summary.nextJobRouting.fallbackComputeCounts['codex.deep'], 1);
+  const routedJob = continuation.nextPlan.jobs.find((job) => job.taskId === 'runtime-next-action');
+  assert.strictEqual(routedJob.compute.id, 'codex.fast');
+  assert.strictEqual(routedJob.metadata.modelRoute.fallbackComputeId, 'codex.deep');
+  assert.strictEqual(routedJob.metadata.modelRoute.summary.routingPolicyFeedbackCount, 1);
+  assert.strictEqual(routedJob.metadata.modelRoute.summary.routingPolicyCostSignalCount, 1);
 }
 
 async function readJson(file) {
