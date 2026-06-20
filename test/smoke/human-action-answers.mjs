@@ -5,7 +5,8 @@ import {
   execFileP,
   fs,
   manifestInput,
-  path
+  path,
+  renderCodexPrompt
 } from './context.mjs';
 
 export async function testHumanActionAnswers({ tmp }) {
@@ -50,6 +51,10 @@ export async function testHumanActionAnswers({ tmp }) {
   assert.ok(continuation.summary.nextJobTaskIds.includes('runtime-action'));
   const nextJob = continuation.nextPlan.jobs.find((job) => job.taskId === 'runtime-action');
   assert.strictEqual(nextJob.task.metadata.terminalOutcome.humanAnswer.answer, 'yes, retry after ten minutes');
+  const nextPrompt = renderCodexPrompt(nextJob, { workspacePath: tmp, paths: promptPaths(tmp) });
+  assert.ok(nextPrompt.includes('Resolved human answers:'));
+  assert.ok(nextPrompt.includes('Q-RETRY Choose retry policy: yes, retry after ten minutes'));
+  assert.ok(nextPrompt.includes('Do not ask the same human question again'));
   const nextTasks = JSON.parse(await fs.readFile(continuation.nextTasksPath, 'utf8'));
   assert.strictEqual(nextTasks.items[0].metadata.terminalOutcome.humanAnswer.answer, 'yes, retry after ten minutes');
   assert.strictEqual(continuation.humanActions[0].status, 'answered');
@@ -181,4 +186,24 @@ async function fileExists(file) {
   } catch {
     return false;
   }
+}
+
+function promptPaths(tmp) {
+  const jobDir = path.join(tmp, 'answered-human-prompt-job');
+  return {
+    jobDir,
+    promptPath: path.join(jobDir, 'prompt.md'),
+    eventsPath: path.join(jobDir, 'events.jsonl'),
+    stderrPath: path.join(jobDir, 'stderr.log'),
+    lastMessagePath: path.join(jobDir, 'last.md'),
+    evidenceDir: path.join(jobDir, 'evidence'),
+    resourceAllocationPath: path.join(jobDir, 'resource-allocation.json'),
+    contextBudgetPath: path.join(jobDir, 'context-budget.json'),
+    workspaceProofPath: path.join(jobDir, 'workspace-proof.json'),
+    patchPath: path.join(jobDir, 'changes.patch'),
+    mergeBundlePath: path.join(jobDir, 'merge.json'),
+    patchIntentPath: path.join(jobDir, 'patch-intent.json'),
+    logSummaryPath: path.join(jobDir, 'log-summary.json'),
+    pidManifestPath: path.join(jobDir, 'pids.json')
+  };
 }

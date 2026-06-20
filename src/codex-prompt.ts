@@ -174,6 +174,7 @@ export function renderCodexPrompt(
     '',
     'Verification commands:',
     ...bullets(job.verification.map(formatCommand)),
+    ...formatResolvedHumanAnswers(job),
     '',
     '## Evidence',
     '',
@@ -185,6 +186,37 @@ export function renderCodexPrompt(
     '',
     JSON.stringify(job.task, null, 2)
   ].join('\n') + '\n';
+}
+
+function formatResolvedHumanAnswers(job: FrontierSwarmJob): string[] {
+  const answers = resolvedHumanAnswerRecords(job);
+  if (answers.length === 0) return [];
+  return [
+    '',
+    'Resolved human answers:',
+    '- Treat these as user-provided product context for this task.',
+    '- Do not ask the same human question again unless the answer is contradictory or insufficient.',
+    ...answers.flatMap((answer) => {
+      const code = stringValue(answer.code);
+      const title = stringValue(answer.title);
+      const question = stringValue(answer.question);
+      const value = stringValue(answer.answer) ?? stringValue(answer.resolution);
+      const requested = stringValue(answer.requestedAnswer);
+      return [
+        `- ${[code, title].filter(Boolean).join(' ') || 'human answer'}: ${value ?? 'answered'}`,
+        ...(question ? [`  Question: ${question}`] : []),
+        ...(requested ? [`  Requested answer: ${requested}`] : [])
+      ];
+    })
+  ];
+}
+
+function resolvedHumanAnswerRecords(job: FrontierSwarmJob): Record<string, unknown>[] {
+  const candidates = [
+    readNestedObject(job.task.metadata, ['terminalOutcome', 'humanAnswer']),
+    readNestedObject(job.metadata, ['terminalOutcome', 'humanAnswer'])
+  ].filter((entry): entry is Record<string, unknown> => !!entry);
+  return candidates.length ? [candidates[0]] : [];
 }
 
 function humanQuestionEvidenceInstructions(evidenceDir: string): string[] {
@@ -232,6 +264,19 @@ function formatCommand(command: FrontierSwarmCommand): string {
 
 function bullets(values: readonly string[]): string[] {
   return values.length ? values.map((value) => `- ${value}`) : ['- none'];
+}
+
+function readNestedObject(value: unknown, keys: readonly string[]): Record<string, unknown> | undefined {
+  let cursor = value;
+  for (const key of keys) {
+    if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor)) return undefined;
+    cursor = (cursor as Record<string, unknown>)[key];
+  }
+  return cursor && typeof cursor === 'object' && !Array.isArray(cursor) ? cursor as Record<string, unknown> : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function formatBudget(job: FrontierSwarmJob): string[] {
