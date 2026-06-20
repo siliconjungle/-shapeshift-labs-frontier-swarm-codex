@@ -31,6 +31,8 @@ import {
 import { testSemanticLineageCollection } from './smoke/semantic-lineage-collection.mjs';
 import { testSwarmRunCollection } from './smoke/swarm-run-collection.mjs';
 import { testSemanticAdmissionGates } from './smoke/semantic-admission-gates.mjs';
+import { testSemanticAdmissionSidecarGraph } from './smoke/semantic-admission-sidecars.mjs';
+import { testTerminalDrainMixedOracle } from './smoke/terminal-drain-e2e.mjs';
 import { testArtifactArchiveCompaction } from './smoke/artifact-archive.mjs';
 import { testTournamentCli } from './smoke/tournament-cli.mjs';
 import { testContextBudget } from './smoke/context-budget.mjs';
@@ -70,6 +72,8 @@ await testArtifactArchiveCompaction(context, collectionDir);
 await testTournamentCli(context);
 await testSemanticImportQuality(context, mergeBundle);
 await testSemanticAdmissionGates(context, mergeBundle);
+await testSemanticAdmissionSidecarGraph(context);
+await testTerminalDrainMixedOracle(context);
 await testSemanticAdmissionReasonCodes(context, mergeBundle);
 await testSemanticLineageCollection(context, mergeBundle);
 await testApplyAndScore(context, mergeBundle);

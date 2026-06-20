@@ -7,7 +7,8 @@ import type {
   FrontierCodexExecutorInput,
   FrontierCodexExecutorResult,
   FrontierCodexJobPaths,
-  FrontierCodexLogSummary
+  FrontierCodexLogSummary,
+  FrontierCodexWorkerTimeoutKind
 } from './index.js';
 
 export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Promise<FrontierCodexExecutorResult> {
@@ -18,6 +19,7 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
   const stderrLimit = logOptions.enabled === false ? Number.POSITIVE_INFINITY : logOptions.maxStderrBytes ?? 256_000;
   const logSummary = createEmptyCodexLogSummary(input.paths);
   const eventLogState = createEventLogState();
+  const startedAt = Date.now();
   return new Promise((resolve) => {
     const child = spawn(input.codexPath, input.args, {
       cwd: input.cwd,
@@ -33,17 +35,44 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
         command: [input.codexPath, ...input.args]
       }).catch(() => {});
     }
-    const timer = setTimeout(() => child.kill('SIGTERM'), input.timeoutMs);
+    let lastOutputAt: number | undefined;
+    let timeoutKind: FrontierCodexWorkerTimeoutKind | undefined;
+    const totalTimer = setTimeout(() => terminateForTimeout('total'), input.timeoutMs);
+    totalTimer.unref?.();
+    const noOutputTimeoutMs = positiveOptionalInteger(input.noOutputTimeoutMs);
+    let noOutputTimer: NodeJS.Timeout | undefined;
+    const refreshNoOutputTimer = () => {
+      if (!noOutputTimeoutMs || timeoutKind) return;
+      if (noOutputTimer) clearTimeout(noOutputTimer);
+      noOutputTimer = setTimeout(() => terminateForTimeout('no-output'), noOutputTimeoutMs);
+      noOutputTimer.unref?.();
+    };
+    const clearTimers = () => {
+      clearTimeout(totalTimer);
+      if (noOutputTimer) clearTimeout(noOutputTimer);
+    };
+    const markOutputProgress = () => {
+      lastOutputAt = Date.now();
+      refreshNoOutputTimer();
+    };
+    function terminateForTimeout(kind: FrontierCodexWorkerTimeoutKind) {
+      if (timeoutKind) return;
+      timeoutKind = kind;
+      child.kill('SIGTERM');
+    }
+    refreshNoOutputTimer();
     let stdoutWrites = Promise.resolve();
     let stderrWrites = Promise.resolve();
     const deferredFailureDetector = createCodexDeferredFailureDetector();
     child.stdout.on('data', (chunk: Buffer) => {
+      markOutputProgress();
       deferredFailureDetector.read(chunk);
       stdoutWrites = stdoutWrites
         .then(() => appendLimitedLogChunk(input.paths.eventsPath, chunk, eventLimit, logSummary, 'event', eventLogState))
         .catch(() => {});
     });
     child.stderr.on('data', (chunk: Buffer) => {
+      markOutputProgress();
       deferredFailureDetector.read(chunk);
       stderrWrites = stderrWrites
         .then(() => appendLimitedLogChunk(input.paths.stderrPath, chunk, stderrLimit, logSummary, 'stderr'))
@@ -51,29 +80,46 @@ export async function spawnCodexExecutor(input: FrontierCodexExecutorInput): Pro
     });
     child.stdin.end(input.prompt);
     child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
-      clearTimeout(timer);
+      clearTimers();
       await Promise.all([stdoutWrites, stderrWrites]);
       await flushEventLogRemainder(input.paths.eventsPath, eventLimit, logSummary, eventLogState).catch(() => {});
       await fs.writeFile(input.paths.logSummaryPath, JSON.stringify(logSummary, null, 2) + '\n').catch(() => {});
       const lastMessage = await readOptionalText(input.paths.lastMessagePath);
       deferredFailureDetector.read(lastMessage);
       const deferredReason = deferredFailureDetector.reason();
+      const timeoutMetadata = timeoutKind ? {
+        timedOut: true,
+        timeoutKind,
+        timeoutMs: input.timeoutMs,
+        ...(timeoutKind === 'no-output' && noOutputTimeoutMs ? { noOutputMs: noOutputTimeoutMs } : {}),
+        ...(lastOutputAt ? { lastOutputAt } : {}),
+        outputProgress: createWorkerOutputProgress({ startedAt, lastOutputAt, logSummary })
+      } : {};
       resolve({
         exitCode: code ?? 1,
         ...(signal ? { signal } : {}),
         lastMessage,
         logSummary,
+        ...timeoutMetadata,
         ...(deferredReason ? { deferredReason } : {})
       });
     });
     child.on('error', async (error: Error) => {
-      clearTimeout(timer);
+      clearTimers();
       await Promise.all([stdoutWrites, stderrWrites]);
       await flushEventLogRemainder(input.paths.eventsPath, eventLimit, logSummary, eventLogState).catch(() => {});
       await fs.writeFile(input.paths.logSummaryPath, JSON.stringify(logSummary, null, 2) + '\n').catch(() => {});
       deferredFailureDetector.read(error.message);
       const deferredReason = deferredFailureDetector.reason();
-      resolve({ exitCode: 1, logSummary, ...(deferredReason ? { deferredReason } : {}), error });
+      const timeoutMetadata = timeoutKind ? {
+        timedOut: true,
+        timeoutKind,
+        timeoutMs: input.timeoutMs,
+        ...(timeoutKind === 'no-output' && noOutputTimeoutMs ? { noOutputMs: noOutputTimeoutMs } : {}),
+        ...(lastOutputAt ? { lastOutputAt } : {}),
+        outputProgress: createWorkerOutputProgress({ startedAt, lastOutputAt, logSummary })
+      } : {};
+      resolve({ exitCode: 1, logSummary, ...timeoutMetadata, ...(deferredReason ? { deferredReason } : {}), error });
     });
   });
 }
@@ -219,6 +265,26 @@ function isJsonLine(line: string): boolean {
 function positiveInteger(value: unknown, fallback: number): number {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+function positiveOptionalInteger(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : undefined;
+}
+
+function createWorkerOutputProgress(input: {
+  startedAt: number;
+  lastOutputAt?: number;
+  logSummary: FrontierCodexLogSummary;
+}) {
+  return {
+    startedAt: input.startedAt,
+    ...(input.lastOutputAt ? { lastOutputAt: input.lastOutputAt } : {}),
+    eventBytes: input.logSummary.eventBytes,
+    stderrBytes: input.logSummary.stderrBytes,
+    eventBytesWritten: input.logSummary.eventBytesWritten,
+    stderrBytesWritten: input.logSummary.stderrBytesWritten
+  };
 }
 
 interface CodexDeferredFailureDetector {

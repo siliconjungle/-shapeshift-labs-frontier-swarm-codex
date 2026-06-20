@@ -50,13 +50,13 @@ export async function testSemanticAdmissionGates({ tmp }, mergeBundle) {
   });
 
   assert.strictEqual(collection.summary['ready-to-apply'], 1);
-  assert.strictEqual(collection.summary['needs-human-port'], 3);
-  assert.strictEqual(collection.summary['failed-evidence'], 0);
+  assert.strictEqual(collection.summary['needs-human-port'], 2);
+  assert.strictEqual(collection.summary['failed-evidence'], 1);
   assert.strictEqual(collection.summary['rerun-work'], 0);
   assert.ok(await existsCollectedMerge(collection.outDir, 'ready-to-apply', 'semantic-gate-success'));
   assert.ok(await existsCollectedMerge(collection.outDir, 'needs-human-port', 'semantic-gate-missing'));
   assert.ok(await existsCollectedMerge(collection.outDir, 'needs-human-port', 'semantic-conflict-sidecar'));
-  assert.ok(await existsCollectedMerge(collection.outDir, 'needs-human-port', 'semantic-evidence-only'));
+  assert.ok(await existsCollectedMerge(collection.outDir, 'failed-evidence', 'semantic-evidence-only'));
 
   const successMerge = await readCollectedMerge(collection.outDir, 'ready-to-apply', 'semantic-gate-success');
   assert.strictEqual(successMerge.disposition, 'auto-mergeable');
@@ -80,8 +80,10 @@ export async function testSemanticAdmissionGates({ tmp }, mergeBundle) {
   assert.strictEqual(outcomesByJob.get('semantic-gate-success').decision, 'ready');
   assert.strictEqual(outcomesByJob.get('semantic-gate-success').outcome, 'continued');
   assert.strictEqual(outcomesByJob.get('semantic-gate-missing').outcome, 'needs-port');
-  assert.strictEqual(outcomesByJob.get('semantic-conflict-sidecar').outcome, 'needs-port');
-  assert.strictEqual(outcomesByJob.get('semantic-evidence-only').outcome, 'needs-port');
+  assert.strictEqual(outcomesByJob.get('semantic-conflict-sidecar').category, 'conflict');
+  assert.strictEqual(outcomesByJob.get('semantic-conflict-sidecar').outcome, 'conflict-blocked');
+  assert.strictEqual(outcomesByJob.get('semantic-evidence-only').category, 'terminal');
+  assert.strictEqual(outcomesByJob.get('semantic-evidence-only').outcome, 'no-change');
 }
 
 async function writeSemanticAdmissionGateJob(runDir, mergeBundle, input) {

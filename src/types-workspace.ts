@@ -175,6 +175,9 @@ export interface FrontierCodexPidEntry {
   jobId?: string;
   startedAt: number;
   command?: string[];
+  stoppedAt?: number;
+  stopSignal?: NodeJS.Signals | string;
+  stopReason?: string;
 }
 
 export interface FrontierCodexPidManifest {

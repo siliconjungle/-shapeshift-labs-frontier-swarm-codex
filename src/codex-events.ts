@@ -109,6 +109,11 @@ export async function stopCodexSwarmRun(input: { run: string; signal?: NodeJS.Si
       else errors.push({ pid: entry.pid, error: error instanceof Error ? error.message : String(error) });
     }
   }
+  if (stopped.length || missing.length) {
+    await writeStoppedPidManifest(pidManifestPath, manifest, { signal, stopped, missing }).catch((error) => {
+      errors.push({ pid: 0, error: error instanceof Error ? error.message : String(error) });
+    });
+  }
   return { ok: errors.length === 0, pidManifestPath, signal, stopped, missing, errors };
 }
 
@@ -123,6 +128,26 @@ async function appendCodexPidManifestUnlocked(file: string, entry: FrontierCodex
   entries.push(entry);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await writeJsonAtomic(file, { ...manifest, ...(runId ? { runId } : {}), entries });
+}
+
+async function writeStoppedPidManifest(
+  file: string,
+  manifest: FrontierCodexPidManifest,
+  input: { signal: NodeJS.Signals; stopped: readonly number[]; missing: readonly number[] }
+): Promise<void> {
+  const stopped = new Set(input.stopped);
+  const missing = new Set(input.missing);
+  const stoppedAt = Date.now();
+  const entries = manifest.entries.map((entry) => {
+    if (stopped.has(entry.pid)) {
+      return { ...entry, stoppedAt, stopSignal: input.signal, stopReason: 'stop-command' };
+    }
+    if (missing.has(entry.pid)) {
+      return { ...entry, stoppedAt, stopSignal: input.signal, stopReason: 'stop-command-process-missing' };
+    }
+    return entry;
+  });
+  await writeJsonAtomic(file, { ...manifest, entries });
 }
 
 async function resolvePidManifestPath(runPath: string): Promise<string> {

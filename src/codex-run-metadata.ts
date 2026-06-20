@@ -9,6 +9,7 @@ export interface CodexRunMetadataInput {
   ownershipRestore: unknown;
   preExecWriteFence: unknown;
   codexDeferredFailure?: unknown;
+  workerTermination?: unknown;
   allowedWritePolicy: unknown;
   observedChangedPaths: unknown;
   reportedChangedPaths: unknown;
@@ -36,6 +37,7 @@ export function createCodexRunMetadata(input: CodexRunMetadataInput): Record<str
     ownershipRestore: input.ownershipRestore,
     preExecWriteFence: input.preExecWriteFence,
     ...(input.codexDeferredFailure ? { codexDeferredFailure: input.codexDeferredFailure } : {}),
+    ...(input.workerTermination ? { workerTermination: input.workerTermination } : {}),
     allowedWritePolicy: input.allowedWritePolicy,
     observedChangedPaths: input.observedChangedPaths,
     reportedChangedPaths: input.reportedChangedPaths,

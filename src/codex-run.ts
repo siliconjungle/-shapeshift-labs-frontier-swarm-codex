@@ -107,6 +107,8 @@ export async function runCodexJob(
   });
   let preExecWriteFence = writeFence.summary;
   const execution = await (async () => {
+    const timeoutMs = job.compute.timeoutMs ?? options.jobTimeoutMs ?? 7200000;
+    const noOutputTimeoutMs = resolveNoOutputTimeoutMs(job, options);
     try {
       return blockedByContextBudget
         ? { exitCode: 1, changedPaths: [], lastMessage: 'blocked by context budget', error: contextBudget.errors.join('; ') }
@@ -122,7 +124,8 @@ export async function runCodexJob(
           paths,
           resourceAllocation,
           env: resourceAllocation.env,
-          timeoutMs: job.compute.timeoutMs ?? options.jobTimeoutMs ?? 7200000,
+          timeoutMs,
+          ...(noOutputTimeoutMs ? { noOutputTimeoutMs } : {}),
           compactLogs: normalizeCompactLogOptions(options.compactLogs)
         });
     } finally {
@@ -187,6 +190,7 @@ export async function runCodexJob(
       exitCode: execution.exitCode
     }
     : undefined;
+  const workerTermination = createCodexWorkerTermination(execution, logSummary);
   const status = codexDeferredFailure
     ? 'blocked'
     : strictOwnershipBlocked
@@ -240,6 +244,7 @@ export async function runCodexJob(
     ownershipRestore,
     preExecWriteFence,
     codexDeferredFailure,
+    workerTermination,
     allowedWritePolicy: workspacePlan.allowedWritePolicy,
     observedChangedPaths: collected.observedChangedPaths,
     reportedChangedPaths: reportedChangedPaths.observedChangedPaths,
@@ -299,6 +304,7 @@ export async function runCodexJob(
     ...(workspacePatchQuarantine.quarantinedChangedPaths.length ? ['quarantined-disallowed-changes'] : []),
     ...(ownershipRestore.length ? ['restored-disallowed-changes'] : []),
     ...(strictOwnershipBlocked ? [strictOwnershipBlockReason] : []),
+    ...(workerTermination ? workerTermination.reasons : []),
     ...verificationSkipReasons,
     ...contextBudget.warnings,
     ...contextBudget.errors
@@ -341,4 +347,46 @@ export async function runCodexJob(
     await appendCodexLiveRunGraphEvent(liveRunGraphEventsPath, event);
   }
   return result;
+}
+
+function resolveNoOutputTimeoutMs(job: FrontierSwarmJob, options: FrontierCodexSwarmRunOptions): number | undefined {
+  const compute = job.compute as unknown as Record<string, unknown>;
+  return positiveOptionalInteger(
+    compute.noOutputTimeoutMs ?? compute.idleTimeoutMs ?? compute.stalledTimeoutMs ?? options.jobNoOutputTimeoutMs
+  );
+}
+
+function createCodexWorkerTermination(
+  execution: { signal?: string; timedOut?: boolean; timeoutKind?: string; timeoutMs?: number; noOutputMs?: number; lastOutputAt?: number; outputProgress?: unknown; lastMessage?: string },
+  logSummary: ReturnType<typeof createEmptyCodexLogSummary>
+): { outcome: string; stale: boolean; reasons: string[]; signal?: string; timedOut?: boolean; timeoutKind?: string; timeoutMs?: number; noOutputMs?: number; lastOutputAt?: number; outputProgress?: unknown; outputBytes: number; hasLastMessage: boolean } | undefined {
+  const reasons: string[] = [];
+  if (execution.timedOut) reasons.push(`worker-timeout:${execution.timeoutKind ?? 'unknown'}`);
+  if (execution.timeoutKind === 'no-output') reasons.push('worker-no-output-progress');
+  if (execution.signal) reasons.push(`worker-signal:${execution.signal}`);
+  const outputBytes = logSummary.eventBytes + logSummary.stderrBytes;
+  const hasLastMessage = Boolean(execution.lastMessage?.trim());
+  if ((execution.signal || execution.timedOut) && outputBytes === 0 && !hasLastMessage) reasons.push('worker-no-output-progress');
+  const stale = reasons.includes('worker-no-output-progress') || execution.timeoutKind === 'no-output';
+  if (stale) reasons.push('stale-worker-state');
+  if (!reasons.length) return undefined;
+  return {
+    outcome: execution.timedOut ? 'timed-out' : 'stopped',
+    stale,
+    reasons: uniqueStrings(reasons),
+    ...(execution.signal ? { signal: execution.signal } : {}),
+    ...(execution.timedOut ? { timedOut: true } : {}),
+    ...(execution.timeoutKind ? { timeoutKind: execution.timeoutKind } : {}),
+    ...(execution.timeoutMs ? { timeoutMs: execution.timeoutMs } : {}),
+    ...(execution.noOutputMs ? { noOutputMs: execution.noOutputMs } : {}),
+    ...(execution.lastOutputAt ? { lastOutputAt: execution.lastOutputAt } : {}),
+    ...(execution.outputProgress ? { outputProgress: execution.outputProgress } : {}),
+    outputBytes,
+    hasLastMessage
+  };
+}
+
+function positiveOptionalInteger(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : undefined;
 }

@@ -22,6 +22,9 @@ export function collectFailureReasonClasses(
     if (normalized.includes('patch applies to index but not dirty working tree')) classes.push('patch.dirty-workspace-conflict');
     if (normalized.includes('stale check disabled')) classes.push('stale.check-disabled');
     if (normalized.includes('stale-against-head cleared by patch freshness check')) classes.push('stale.cleared-by-freshness-check');
+    if (normalized.includes('stale-worker')) classes.push('stale.worker-stopped');
+    if (normalized.includes('worker-no-output-progress')) classes.push('stale.worker-no-output-progress');
+    if (normalized.startsWith('worker-timeout:')) classes.push('stale.worker-timeout');
     if (normalized.includes('no patch base hashes available')) classes.push('patch.no-base-hashes');
     if (normalized.includes('textual apply failed')) classes.push('patch.textual-apply-failed');
     if (normalized.includes('base hash mismatch')) classes.push('patch.base-hash-mismatch');

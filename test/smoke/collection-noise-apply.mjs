@@ -19,13 +19,13 @@ export async function runCollectionApplySmoke(root) {
   });
   assert.strictEqual(applyCollection.summary.total, 6);
   assert.strictEqual(applyCollection.summary['ready-to-apply'], 2);
-  assert.strictEqual(applyCollection.summary['needs-human-port'], 3);
+  assert.strictEqual(applyCollection.summary['needs-human-port'], 1);
   assert.strictEqual(applyCollection.summary['rerun-work'], 1);
-  assert.strictEqual(applyCollection.summary['failed-evidence'], 0);
+  assert.strictEqual(applyCollection.summary['failed-evidence'], 2);
   assert.strictEqual(applyCollection.summary['stale-against-head'], 0);
   assert.strictEqual(applyCollection.buckets['rerun-work'][0]?.jobId, 'failed-job');
-  assert.ok(applyCollection.buckets['needs-human-port'].some((entry) => entry.jobId === 'no-source-failed-job'));
-  assert.ok(applyCollection.buckets['needs-human-port'].some((entry) => entry.jobId === 'generated-failed-evidence-job'));
+  assert.ok(applyCollection.buckets['failed-evidence'].some((entry) => entry.jobId === 'no-source-failed-job'));
+  assert.ok(applyCollection.buckets['failed-evidence'].some((entry) => entry.jobId === 'generated-failed-evidence-job'));
   await assertEmptyPatchFailsAsEvidence({ root, tmp, collectCodexSwarmRun });
 
   const applyRepo = await initPatchRepo(path.join(tmp, 'apply-repo'));
@@ -69,8 +69,8 @@ export async function runCollectionApplySmoke(root) {
     staleCount: applyCollection.summary['stale-against-head']
   }, {
     landedSuccessCount: 2,
-    needsHumanCount: 3,
-    failedCount: 0,
+    needsHumanCount: 1,
+    failedCount: 2,
     rerunCount: 1,
     staleCount: 0
   });
@@ -178,9 +178,9 @@ async function writeCombinedLedger(applyCollection, appliedLedger, committedLedg
 
 function assertLandedCollection(landedCollection) {
   assert.strictEqual(landedCollection.summary['ready-to-apply'], 2);
-  assert.strictEqual(landedCollection.summary['needs-human-port'], 3);
+  assert.strictEqual(landedCollection.summary['needs-human-port'], 1);
   assert.strictEqual(landedCollection.summary['rerun-work'], 1);
-  assert.strictEqual(landedCollection.summary['failed-evidence'], 0);
+  assert.strictEqual(landedCollection.summary['failed-evidence'], 2);
   assert.strictEqual(landedCollection.summary['stale-against-head'], 0);
   assert.strictEqual(landedCollection.summary.landed, 3);
   assert.deepStrictEqual([...landedCollection.summary.landedJobIds].sort(), ['commit-ready-job', 'needs-human-job', 'ready-job']);
@@ -190,22 +190,24 @@ function assertLandedCollection(landedCollection) {
   assert.deepStrictEqual(landedCollection.summary.applyLedger.landedEntries.map((entry) => entry.status).sort(), ['applied', 'applied', 'committed']);
   assert.strictEqual(landedCollection.summary.landedHealth.successfulOutputCount, 3);
   assert.strictEqual(landedCollection.summary.landedHealth.landedNeedsHumanReviewCount, 1);
-  assert.strictEqual(landedCollection.summary.landedHealth.remainingNeedsHumanReviewCount, 2);
-  assert.strictEqual(landedCollection.summary.landedHealth.remainingFailedEvidenceCount, 0);
+  assert.strictEqual(landedCollection.summary.landedHealth.remainingNeedsHumanReviewCount, 0);
+  assert.strictEqual(landedCollection.summary.landedHealth.remainingFailedEvidenceCount, 2);
   assert.strictEqual(landedCollection.summary.landedHealth.reviewPressureCount, 3);
   assert.strictEqual(landedCollection.qualitySignals.landed.successfulOutputCount, 3);
   assert.strictEqual(landedCollection.qualitySignals.needsPort.landedJobCount, 1);
   assert.deepStrictEqual(landedCollection.qualitySignals.needsPort.landedJobIds, ['needs-human-job']);
-  assert.strictEqual(landedCollection.qualitySignals.needsPort.remainingJobCount, 2);
-  assert.deepStrictEqual([...landedCollection.qualitySignals.needsPort.remainingJobIds].sort(), ['generated-failed-evidence-job', 'no-source-failed-job']);
+  assert.strictEqual(landedCollection.qualitySignals.needsPort.remainingJobCount, 0);
+  assert.deepStrictEqual(landedCollection.qualitySignals.needsPort.remainingJobIds, []);
+  assert.strictEqual(landedCollection.qualitySignals.failure.remainingJobCount, 2);
+  assert.deepStrictEqual([...landedCollection.qualitySignals.failure.remainingJobIds].sort(), ['generated-failed-evidence-job', 'no-source-failed-job']);
   assert.deepStrictEqual(landedCollection.dashboard.summary.applyLedger, landedCollection.summary.applyLedger);
   assert.strictEqual(landedCollection.dashboard.summary.applyLedgerLandedCount, 3);
   assert.deepStrictEqual([...landedCollection.dashboard.summary.landedJobIds].sort(), ['commit-ready-job', 'needs-human-job', 'ready-job']);
   assert.deepStrictEqual(landedCollection.dashboard.summary.collectionQualitySignals, landedCollection.qualitySignals);
   assert.strictEqual(landedCollection.dashboard.summary.collectionLandedSuccessCount, 3);
   assert.strictEqual(landedCollection.dashboard.summary.collectionLandedNeedsHumanReviewCount, 1);
-  assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingNeedsHumanReviewCount, 2);
-  assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingFailedEvidenceCount, 0);
+  assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingNeedsHumanReviewCount, 0);
+  assert.strictEqual(landedCollection.dashboard.summary.collectionRemainingFailedEvidenceCount, 2);
   assert.strictEqual(landedCollection.dashboard.summary.collectionReviewPressureCount, 3);
   assert.deepStrictEqual(landedCollection.dashboard.metadata.applyLedger, landedCollection.summary.applyLedger);
   assert.deepStrictEqual(landedCollection.dashboard.metadata.landedHealth, landedCollection.summary.landedHealth);
@@ -215,7 +217,8 @@ function assertLandedCollection(landedCollection) {
   assert.deepStrictEqual(landedCollection.compactDashboard.landedHealth, landedCollection.summary.landedHealth);
   assert.strictEqual(landedCollection.compactDashboard.successfulOutputCount, 3);
   assert.strictEqual(landedCollection.compactDashboard.landedNeedsHumanReviewCount, 1);
-  assert.strictEqual(landedCollection.compactDashboard.remainingNeedsHumanReviewCount, 2);
+  assert.strictEqual(landedCollection.compactDashboard.remainingNeedsHumanReviewCount, 0);
+  assert.strictEqual(landedCollection.compactDashboard.remainingFailedEvidenceCount, 2);
   assert.strictEqual(landedCollection.compactDashboard.reviewPressureCount, 3);
 }
 

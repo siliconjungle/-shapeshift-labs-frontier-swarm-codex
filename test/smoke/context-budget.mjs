@@ -179,8 +179,9 @@ async function testFailBeforeLaunch(plan, tmp) {
   assert.ok(intent.warnings.some((entry) => entry.includes('estimated input tokens')));
   assert.ok(intent.warnings.some((entry) => entry.includes('autosplit oversized prompt/log context')));
   const collection = await collectCodexSwarmRun({ run: path.join(tmp, 'context-budget-fail'), checkStale: false });
-  assert.strictEqual(collection.summary['failed-evidence'], 0);
-  assert.strictEqual(collection.summary['needs-human-port'], 1);
+  assert.strictEqual(collection.summary['failed-evidence'], 1);
+  assert.strictEqual(collection.summary['needs-human-port'], 0);
+  assert.strictEqual(collection.queueOutcomeModel.latestDecisions[0].outcome, 'no-change');
   assert.strictEqual(collection.compactDashboard.contextBudget.failedCount, 1);
 }
 

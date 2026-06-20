@@ -9,6 +9,7 @@ import {
 } from '@shapeshift-labs/frontier-swarm';
 import { FRONTIER_SWARM_CODEX_COLLECTION_KIND } from './constants.js';
 import { uniqueStrings } from './common.js';
+import { nonActionableFailedEvidence } from './collect-bundle-reasons.js';
 import type {
   FrontierCodexCollectBucket,
   FrontierCodexCollectedBundle,
@@ -68,9 +69,22 @@ function createCodexCollectionQueueOutcomeDecisions(input: {
       } else if (bucket === 'ready-to-apply') {
         decisions.push({ ...base, decision: 'ready', category: 'continuation', outcome: 'ready', terminal: false, reasons: bundle.reasons });
       } else if (bucket === 'needs-human-port') {
-        decisions.push({ ...base, decision: 'needs-port', category: 'coordinator-review', outcome: 'needs-port', terminal: false, reasons: bundle.reasons });
+        if (codexCollectionBundleHasConflictSignal(bundle)) {
+          decisions.push({
+            ...base,
+            decision: 'conflict-blocked',
+            category: 'conflict',
+            outcome: 'conflict-blocked',
+            terminal: false,
+            reasons: uniqueStrings(['conflict-blocked', ...bundle.reasons])
+          });
+        } else {
+          decisions.push({ ...base, decision: 'needs-port', category: 'coordinator-review', outcome: 'needs-port', terminal: false, reasons: bundle.reasons });
+        }
       } else if (bucket === 'rerun-work' || bucket === 'stale-against-head') {
         decisions.push({ ...base, decision: 'rerun', category: 'stale-rerun', outcome: 'rerun', terminal: true, reasons: bundle.reasons });
+      } else if (bucket === 'failed-evidence' && codexCollectionBundleIsNoChange(bundle)) {
+        decisions.push({ ...base, decision: 'no-change', category: 'terminal', outcome: 'no-change', terminal: true, reasons: uniqueStrings(['no-change', ...bundle.reasons]) });
       } else {
         decisions.push({ ...base, decision: 'rejected', category: 'terminal', outcome: 'rejected', terminal: true, reasons: bundle.reasons });
       }
@@ -159,4 +173,25 @@ function codexCollectionSubjectAliases(bundle: FrontierSwarmMergeBundle): string
     ...bundle.queueItemIds,
     ...bundle.queueItemIds.map((id) => `queue:${id}`)
   ]);
+}
+
+function codexCollectionBundleIsNoChange(bundle: FrontierSwarmMergeBundle): boolean {
+  return nonActionableFailedEvidence(bundle, {
+    staleAgainstHead: bundle.staleAgainstHead,
+    hasActionablePatch: Boolean(bundle.patchPath)
+  });
+}
+
+function codexCollectionBundleHasConflictSignal(bundle: FrontierSwarmMergeBundle): boolean {
+  return [
+    bundle.disposition,
+    bundle.mergeReadiness,
+    bundle.status,
+    ...bundle.reasons,
+    ...bundle.ownershipViolations
+  ].some((signal) => typeof signal === 'string' && normalizedTerminalSignal(signal).includes('conflict'));
+}
+
+function normalizedTerminalSignal(signal: string): string {
+  return signal.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }

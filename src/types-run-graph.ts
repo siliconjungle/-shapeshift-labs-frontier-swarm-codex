@@ -11,6 +11,9 @@ export type FrontierCodexRunGraphNodeKind =
   | 'merge'
   | 'replay'
   | 'rsi'
+  | 'semantic-admission'
+  | 'semantic-candidate'
+  | 'semantic-ownership-region'
   | 'bucket'
   | 'ledger'
   | string;
@@ -80,6 +83,9 @@ export interface FrontierCodexRunGraph {
     evidenceCount: number;
     decisionCount: number;
     gateCount: number;
+    semanticAdmissionCount: number;
+    semanticCandidateCount: number;
+    semanticOwnershipRegionCount: number;
   };
 }
 

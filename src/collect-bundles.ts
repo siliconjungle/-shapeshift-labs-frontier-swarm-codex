@@ -112,7 +112,7 @@ export function classifyCodexCollectBucket(
     return 'rerun-work';
   }
   if (bundle.ownershipViolations.length > 0 && bundle.changedPaths.length > 0 && hasActionablePatch) return 'rerun-work';
-  if (nonActionableFailedEvidence(bundle, { staleAgainstHead, hasActionablePatch })) return 'needs-human-port';
+  if (nonActionableFailedEvidence(bundle, { staleAgainstHead, hasActionablePatch })) return 'failed-evidence';
   if (bundle.disposition === 'rejected' || bundle.disposition === 'blocked' || bundle.commandsFailed.length > 0 || bundle.status === 'failed') {
     if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-human-port';
     return 'failed-evidence';
@@ -144,7 +144,7 @@ export function normalizeCollectedDisposition(
   patchExists = Boolean(bundle.patchPath)
 ): FrontierSwarmMergeBundle['disposition'] {
   if (staleAgainstHead) return 'stale-against-head';
-  if (nonActionableFailedEvidence(bundle, { staleAgainstHead, hasActionablePatch: patchExists })) return 'needs-port';
+  if (nonActionableFailedEvidence(bundle, { staleAgainstHead, hasActionablePatch: patchExists })) return 'rejected';
   if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-port';
   if (bundle.disposition === 'stale-against-head') return 'needs-port';
   const semanticAdmission = classifyCodexSemanticCollectAdmission(bundle, { staleAgainstHead, hasActionablePatch: patchExists });

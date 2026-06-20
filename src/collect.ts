@@ -99,7 +99,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     outDir,
     ignoredCollectionSegments: COLLECTED_OUTPUT_SEGMENTS,
     existingJobIds: new Set(mergeRecordsByJob.keys()),
-    generatedAt
+    generatedAt,
+    pidManifestPath: path.join(runDir, 'pids.json')
   });
   for (const record of workspaceOnlyRecords) {
     if (!mergeRecordsByJob.has(record.bundle.jobId)) mergeRecordsByJob.set(record.bundle.jobId, record);

@@ -106,6 +106,17 @@ export interface FrontierCodexCompactLogOptions {
   maxStderrBytes?: number;
 }
 
+export type FrontierCodexWorkerTimeoutKind = 'total' | 'no-output';
+
+export interface FrontierCodexWorkerOutputProgress {
+  startedAt: number;
+  lastOutputAt?: number;
+  eventBytes: number;
+  stderrBytes: number;
+  eventBytesWritten: number;
+  stderrBytesWritten: number;
+}
+
 export interface FrontierCodexContextBudgetOptions {
   enabled?: boolean;
   mode?: 'off' | 'warn' | 'fail';
@@ -178,6 +189,7 @@ export interface FrontierCodexExecutorInput {
   resourceAllocation: FrontierCodexResourceAllocation;
   env: Record<string, string>;
   timeoutMs: number;
+  noOutputTimeoutMs?: number;
   compactLogs?: FrontierCodexCompactLogOptions;
 }
 
@@ -187,6 +199,12 @@ export interface FrontierCodexExecutorResult {
   changedPaths?: readonly string[];
   lastMessage?: string;
   logSummary?: FrontierCodexLogSummary;
+  timedOut?: boolean;
+  timeoutKind?: FrontierCodexWorkerTimeoutKind;
+  timeoutMs?: number;
+  noOutputMs?: number;
+  lastOutputAt?: number;
+  outputProgress?: FrontierCodexWorkerOutputProgress;
   deferredReason?: 'usage-limit' | string;
   error?: unknown;
 }
@@ -261,6 +279,7 @@ export interface FrontierCodexSwarmRunOptions {
   runVerification?: boolean;
   collectGitStatus?: boolean;
   jobTimeoutMs?: number;
+  jobNoOutputTimeoutMs?: number;
   addDirs?: readonly string[];
   executor?: FrontierCodexExecutor;
   eventStream?: FrontierSwarmEventStream;

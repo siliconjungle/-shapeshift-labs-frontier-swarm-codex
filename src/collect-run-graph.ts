@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import type {
   FrontierCodexCollectBucket,
@@ -45,6 +46,45 @@ interface RunGraphReferenceIndex {
   taskIds: Set<string>;
   jobIdsByLane: Map<string, string[]>;
   taskIdsByLane: Map<string, string[]>;
+}
+
+type SemanticSidecarAdmissionStatus = 'safe' | 'review' | 'conflict';
+
+interface SemanticSidecarCandidateProjection {
+  key: string;
+  label: string;
+  status: SemanticSidecarAdmissionStatus;
+  action?: string;
+  path?: string;
+  readiness?: string;
+  risk?: string;
+  reasonCodes: string[];
+  reasons: string[];
+  conflictKeys: string[];
+  ownershipRegionIds: string[];
+  data: Record<string, unknown>;
+}
+
+interface SemanticSidecarOwnershipRegionProjection {
+  key: string;
+  id?: string;
+  label: string;
+  path?: string;
+  status?: string;
+  data: Record<string, unknown>;
+}
+
+interface SemanticSidecarGraphProjection {
+  candidates: SemanticSidecarCandidateProjection[];
+  ownershipRegions: SemanticSidecarOwnershipRegionProjection[];
+  summary?: {
+    candidateCount: number;
+    safeCount: number;
+    reviewCount: number;
+    conflictCount: number;
+    reasonCodes: string[];
+    ownershipRegionIds: string[];
+  };
 }
 
 export function createCodexCollectRunGraph(input: {
@@ -124,7 +164,10 @@ export function createCodexCollectRunGraph(input: {
       candidateCount: nodeKinds.candidate ?? 0,
       evidenceCount: nodeKinds.evidence ?? 0,
       decisionCount: (nodeKinds.decision ?? 0) + (nodeKinds['queue-outcome'] ?? 0) + (nodeKinds['terminal-outcome'] ?? 0),
-      gateCount: nodeKinds.gate ?? 0
+      gateCount: nodeKinds.gate ?? 0,
+      semanticAdmissionCount: nodeKinds['semantic-admission'] ?? 0,
+      semanticCandidateCount: nodeKinds['semantic-candidate'] ?? 0,
+      semanticOwnershipRegionCount: nodeKinds['semantic-ownership-region'] ?? 0
     }
   };
 }
@@ -148,6 +191,7 @@ function addCollectedBundleNodes(
   const mergeNodeId = `merge:${bundle.id || bundle.jobId}`;
   const taskNodeId = bundle.taskId ? `task:${bundle.taskId}` : undefined;
   const bundleRefs = graphRefsFromUnknown(bundle);
+  const semanticSidecarProjection = createSemanticSidecarGraphProjection(entry);
 
   if (taskNodeId) {
     addNode({
@@ -201,6 +245,7 @@ function addCollectedBundleNodes(
       autoMergeable: bundle.autoMergeable,
       staleAgainstHead: bundle.staleAgainstHead,
       semanticAdmission,
+      semanticSidecarAdmission: semanticSidecarProjection.summary,
       reasons: bundle.reasons,
       changedPaths: bundle.changedPaths,
       patchPath: entry.patchPath ?? bundle.patchPath,
@@ -209,6 +254,7 @@ function addCollectedBundleNodes(
   });
   addEdge('produces', jobNodeId, candidateNodeId);
   addEdge('classifiedAs', bucketNodeId, candidateNodeId);
+  addSemanticSidecarAdmissionNodes(semanticSidecarProjection, bundle, candidateNodeId, addNode, addEdge);
 
   addNode({
     id: mergeNodeId,
@@ -247,6 +293,493 @@ function addCollectedBundleNodes(
   for (const command of bundle.commandsPassed ?? []) addGateNode(command, 'passed', candidateNodeId, bundle.jobId, bundle.taskId, bucket, addNode, addEdge);
   for (const command of bundle.commandsFailed ?? []) addGateNode(command, 'failed', candidateNodeId, bundle.jobId, bundle.taskId, bucket, addNode, addEdge);
   addBundleRoutingDecisionNodes(bundle, jobNodeId, candidateNodeId, addNode, addEdge);
+}
+
+function addSemanticSidecarAdmissionNodes(
+  projection: SemanticSidecarGraphProjection,
+  bundle: FrontierCodexCollectedBundle['bundle'],
+  candidateNodeId: string,
+  addNode: AddRunGraphNode,
+  addEdge: AddRunGraphEdge
+): void {
+  if (projection.candidates.length === 0) return;
+  const refs = graphRefsFromUnknown(bundle);
+  const regionNodeIds = new Map<string, string>();
+  for (const region of projection.ownershipRegions) {
+    const regionNodeId = `semantic-region:${bundle.jobId}:${stableCodexRunGraphPart(region.key)}`;
+    regionNodeIds.set(region.id ?? region.key, regionNodeId);
+    addNode({
+      id: regionNodeId,
+      kind: 'semantic-ownership-region',
+      label: region.label,
+      jobId: bundle.jobId,
+      taskId: bundle.taskId,
+      lane: bundle.lane,
+      status: region.status,
+      path: region.path,
+      generatedAt: bundle.generatedAt,
+      refs: graphNodeRefs(refs),
+      data: region.data
+    });
+    addEdge('produces', candidateNodeId, regionNodeId, 'semantic-ownership-region');
+  }
+
+  for (const candidate of projection.candidates) {
+    const semanticCandidateNodeId = `semantic-candidate:${bundle.jobId}:${stableCodexRunGraphPart(candidate.key)}`;
+    const admissionNodeId = `semantic-admission:${bundle.jobId}:${stableCodexRunGraphPart(candidate.key)}`;
+    addNode({
+      id: semanticCandidateNodeId,
+      kind: 'semantic-candidate',
+      label: candidate.label,
+      jobId: bundle.jobId,
+      taskId: bundle.taskId,
+      lane: bundle.lane,
+      status: candidate.status,
+      outcome: candidate.action,
+      path: candidate.path,
+      generatedAt: bundle.generatedAt,
+      refs: graphNodeRefs(refs, { candidate: candidateNodeId, admission: admissionNodeId }),
+      data: candidate.data
+    });
+    addEdge('produces', candidateNodeId, semanticCandidateNodeId, candidate.status);
+
+    addNode({
+      id: admissionNodeId,
+      kind: 'semantic-admission',
+      label: candidate.status,
+      jobId: bundle.jobId,
+      taskId: bundle.taskId,
+      lane: bundle.lane,
+      status: candidate.status,
+      outcome: candidate.action,
+      generatedAt: bundle.generatedAt,
+      refs: graphNodeRefs(refs, { candidate: semanticCandidateNodeId, bundleCandidate: candidateNodeId }),
+      data: compactRecord({
+        status: candidate.status,
+        action: candidate.action,
+        readiness: candidate.readiness,
+        risk: candidate.risk,
+        reasonCodes: candidate.reasonCodes,
+        reasons: candidate.reasons,
+        conflictKeys: candidate.conflictKeys,
+        ownershipRegionIds: candidate.ownershipRegionIds
+      })
+    });
+    addEdge('decides', admissionNodeId, semanticCandidateNodeId, candidate.status);
+    addEdge('decides', admissionNodeId, candidateNodeId, candidate.status);
+
+    for (const regionId of candidate.ownershipRegionIds) {
+      const regionNodeId = regionNodeIds.get(regionId);
+      if (regionNodeId) addEdge('touches', semanticCandidateNodeId, regionNodeId, candidate.status);
+    }
+  }
+}
+
+function createSemanticSidecarGraphProjection(entry: FrontierCodexCollectedBundle): SemanticSidecarGraphProjection {
+  const candidates = new Map<string, SemanticSidecarCandidateProjection>();
+  const ownershipRegions = new Map<string, SemanticSidecarOwnershipRegionProjection>();
+
+  const addRegion = (region: SemanticSidecarOwnershipRegionProjection) => {
+    const existing = ownershipRegions.get(region.key);
+    ownershipRegions.set(region.key, existing ? {
+      ...existing,
+      ...region,
+      data: compactRecord({ ...(existing.data ?? {}), ...(region.data ?? {}) })
+    } : region);
+  };
+  const addCandidate = (candidate: SemanticSidecarCandidateProjection) => {
+    const existing = candidates.get(candidate.key);
+    candidates.set(candidate.key, existing ? {
+      ...existing,
+      ...candidate,
+      reasonCodes: uniqueRunGraphStrings([...existing.reasonCodes, ...candidate.reasonCodes]),
+      reasons: uniqueRunGraphStrings([...existing.reasons, ...candidate.reasons]),
+      conflictKeys: uniqueRunGraphStrings([...existing.conflictKeys, ...candidate.conflictKeys]),
+      ownershipRegionIds: uniqueRunGraphStrings([...existing.ownershipRegionIds, ...candidate.ownershipRegionIds]),
+      data: compactRecord({ ...(existing.data ?? {}), ...(candidate.data ?? {}) })
+    } : candidate);
+  };
+
+  for (const source of semanticSidecarProjectionSources(entry)) {
+    addSemanticSidecarSourceProjection(source, addCandidate, addRegion);
+  }
+
+  const candidateList = Array.from(candidates.values()).sort((left, right) => left.key.localeCompare(right.key));
+  const regionList = Array.from(ownershipRegions.values()).sort((left, right) => left.key.localeCompare(right.key));
+  if (candidateList.length === 0) return { candidates: candidateList, ownershipRegions: regionList };
+  const reasonCodes = uniqueRunGraphStrings(candidateList.flatMap((candidate) => candidate.reasonCodes));
+  const ownershipRegionIds = uniqueRunGraphStrings(candidateList.flatMap((candidate) => candidate.ownershipRegionIds));
+  return {
+    candidates: candidateList,
+    ownershipRegions: regionList,
+    summary: {
+      candidateCount: candidateList.length,
+      safeCount: candidateList.filter((candidate) => candidate.status === 'safe').length,
+      reviewCount: candidateList.filter((candidate) => candidate.status === 'review').length,
+      conflictCount: candidateList.filter((candidate) => candidate.status === 'conflict').length,
+      reasonCodes,
+      ownershipRegionIds
+    }
+  };
+}
+
+function semanticSidecarProjectionSources(entry: FrontierCodexCollectedBundle): Record<string, unknown>[] {
+  const bundle = entry.bundle;
+  const metadata = recordValue(bundle.metadata);
+  const sources: Record<string, unknown>[] = [];
+  pushSemanticSidecarSources(sources, bundle.semanticImport);
+  pushSemanticSidecarSources(sources, metadata?.semanticImport);
+  pushSemanticSidecarSources(sources, metadata?.semanticImports);
+  pushSemanticSidecarSources(sources, metadata?.semanticImportSidecar);
+  pushSemanticSidecarSources(sources, metadata?.semanticSidecar);
+  pushSemanticSidecarSources(sources, metadata?.semanticSidecars);
+  for (const sidecar of readSemanticSidecarEvidenceFiles(entry)) pushSemanticSidecarSources(sources, sidecar);
+  return uniqueRecords(sources);
+}
+
+function pushSemanticSidecarSources(out: Record<string, unknown>[], value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) pushSemanticSidecarSources(out, entry);
+    return;
+  }
+  const record = recordValue(value);
+  if (record) out.push(record);
+}
+
+function readSemanticSidecarEvidenceFiles(entry: FrontierCodexCollectedBundle): Record<string, unknown>[] {
+  const files = semanticSidecarEvidenceFileCandidates(entry);
+  const records: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file)) continue;
+    seen.add(file);
+    try {
+      if (!fs.existsSync(file)) continue;
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const record = recordValue(parsed);
+      if (record) records.push(record);
+    } catch {
+      // Sidecar evidence is advisory for graph projection; collection should not fail on a malformed optional sidecar.
+    }
+  }
+  return records;
+}
+
+function semanticSidecarEvidenceFileCandidates(entry: FrontierCodexCollectedBundle): string[] {
+  const dirs = uniqueRunGraphStrings([entry.outputDir, path.dirname(entry.mergePath)]);
+  const files: string[] = [];
+  for (const evidencePath of entry.bundle.evidencePaths ?? []) {
+    if (path.basename(evidencePath) !== 'semantic-imports.json') continue;
+    if (path.isAbsolute(evidencePath)) files.push(evidencePath);
+    else {
+      for (const dir of dirs) files.push(path.resolve(dir, evidencePath));
+      for (const dir of dirs) files.push(path.resolve(dir, path.basename(evidencePath)));
+    }
+  }
+  return uniqueRunGraphStrings(files);
+}
+
+function addSemanticSidecarSourceProjection(
+  source: Record<string, unknown>,
+  addCandidate: (candidate: SemanticSidecarCandidateProjection) => void,
+  addRegion: (region: SemanticSidecarOwnershipRegionProjection) => void
+): void {
+  const sourceRegions = semanticOwnershipRegionProjections(source);
+  for (const region of sourceRegions) addRegion(region);
+
+  const records = recordsFromUnknown(source.records);
+  if (records.length > 0) {
+    records.forEach((record, index) => {
+      const recordRegions = uniqueSemanticRegionProjections([
+        ...sourceRegions,
+        ...semanticOwnershipRegionProjections(record)
+      ]);
+      for (const region of recordRegions) addRegion(region);
+      const candidate = semanticCandidateProjectionFromRecord(record, recordRegions, index);
+      if (candidate) addCandidate(candidate);
+    });
+    return;
+  }
+
+  const mergeCandidates = recordsFromUnknown(source.mergeCandidates);
+  mergeCandidates.forEach((candidate, index) => {
+    const projection = semanticCandidateProjectionFromCandidate(source, candidate, sourceRegions, index);
+    if (projection) addCandidate(projection);
+  });
+
+  if (mergeCandidates.length === 0) {
+    const candidate = semanticCandidateProjectionFromRecord(source, sourceRegions, 0);
+    if (candidate) addCandidate(candidate);
+  }
+}
+
+function semanticCandidateProjectionFromRecord(
+  record: Record<string, unknown>,
+  regions: readonly SemanticSidecarOwnershipRegionProjection[],
+  index: number
+): SemanticSidecarCandidateProjection | undefined {
+  const mergeCandidate = recordValue(record.mergeCandidate) ?? firstRecordAtPaths(record, [['semanticSidecar', 'mergeCandidate']]);
+  const semanticSliceAdmission = recordValue(record.semanticSliceAdmission);
+  const semanticSidecar = recordValue(record.semanticSidecar);
+  const semanticSlice = recordValue(record.semanticSlice);
+  const hasCandidate = Boolean(mergeCandidate || semanticSliceAdmission || semanticSidecar || semanticSlice);
+  if (!hasCandidate) return undefined;
+  return semanticCandidateProjectionFromParts({
+    record,
+    candidate: mergeCandidate ?? {},
+    semanticSliceAdmission,
+    semanticSidecar,
+    semanticSlice,
+    regions,
+    index
+  });
+}
+
+function semanticCandidateProjectionFromCandidate(
+  source: Record<string, unknown>,
+  candidate: Record<string, unknown>,
+  regions: readonly SemanticSidecarOwnershipRegionProjection[],
+  index: number
+): SemanticSidecarCandidateProjection | undefined {
+  return semanticCandidateProjectionFromParts({
+    record: source,
+    candidate,
+    semanticSidecar: source,
+    regions,
+    index
+  });
+}
+
+function semanticCandidateProjectionFromParts(input: {
+  record: Record<string, unknown>;
+  candidate: Record<string, unknown>;
+  semanticSliceAdmission?: Record<string, unknown>;
+  semanticSidecar?: Record<string, unknown>;
+  semanticSlice?: Record<string, unknown>;
+  regions: readonly SemanticSidecarOwnershipRegionProjection[];
+  index: number;
+}): SemanticSidecarCandidateProjection {
+  const candidate = input.candidate;
+  const admission = input.semanticSliceAdmission;
+  const sidecar = input.semanticSidecar;
+  const semanticSlice = input.semanticSlice;
+  const sourcePath = firstString([input.record.path, candidate.path, sidecar?.sourcePath, recordValue(sidecar?.summary)?.sourcePath]);
+  const readiness = firstString([
+    candidate.readiness,
+    admission?.readiness,
+    semanticSlice?.readiness,
+    sidecar?.readiness,
+    recordValue(sidecar?.summary)?.readiness,
+    recordValue(input.record.nativeDiff)?.readiness
+  ]);
+  const action = firstString([
+    admission?.action,
+    candidate.action,
+    recordValue(sidecar?.admission)?.action,
+    sidecar?.semanticImportRecordAction,
+    recordValue(sidecar?.summary)?.semanticImportRecordAction
+  ]);
+  const risk = firstString([candidate.risk, admission?.risk, recordValue(admission?.mergeScore)?.risk]);
+  const reasonCodes = uniqueRunGraphStrings([
+    ...stringValues(candidate.reasonCodes),
+    ...stringValues(candidate.reasons),
+    ...stringValues(admission?.reasonCodes),
+    ...stringValues(admission?.reasons),
+    ...stringValues(recordValue(sidecar?.admission)?.reasonCodes),
+    ...stringValues(recordValue(sidecar?.quality)?.reasonCodes),
+    ...stringValues(sidecar?.semanticImportExpectedMissingReasonCodes),
+    ...stringValues(recordValue(sidecar?.summary)?.semanticImportExpectedMissingReasonCodes),
+    ...stringValues(recordValue(sidecar?.summary)?.semanticImportRecordReasonCode),
+    ...stringValues(input.record.reasonCodes),
+    ...stringValues(input.record.reasons)
+  ]);
+  const reasons = uniqueRunGraphStrings([
+    ...stringValues(candidate.reasons),
+    ...stringValues(admission?.reasons),
+    ...stringValues(recordValue(sidecar?.admission)?.reasons),
+    ...stringValues(input.record.reasons)
+  ]);
+  const conflictKeys = uniqueRunGraphStrings([
+    ...stringValues(candidate.conflictKeys),
+    ...stringValues(admission?.conflictKeys),
+    ...stringValues(semanticSlice?.conflictKeys),
+    ...stringValues(recordValue(candidate.conflictSummary)?.conflictKeys)
+  ]);
+  const ownershipRegionIds = uniqueRunGraphStrings([
+    ...input.regions.map((region) => region.id ?? region.key),
+    ...stringValues(candidate.ownershipRegionIds),
+    ...stringValues(admission?.ownershipRegionIds)
+  ]);
+  const status = semanticSidecarAdmissionStatus({
+    candidate,
+    admission,
+    sidecar,
+    semanticSlice,
+    readiness,
+    risk,
+    action,
+    reasonCodes,
+    reasons,
+    conflictKeys
+  });
+  const key = firstString([
+    candidate.id,
+    admission?.id,
+    input.record.importId,
+    sidecar?.id,
+    semanticSlice?.id,
+    sourcePath ? `${sourcePath}:${input.index}` : undefined
+  ]) ?? `semantic-candidate:${input.index}`;
+  return {
+    key,
+    label: sourcePath ? `${path.basename(sourcePath)}:${status}` : `${key}:${status}`,
+    status,
+    action,
+    path: sourcePath,
+    readiness,
+    risk,
+    reasonCodes,
+    reasons,
+    conflictKeys,
+    ownershipRegionIds,
+    data: compactRecord({
+      path: sourcePath,
+      readiness,
+      risk,
+      action,
+      reasonCodes,
+      reasons,
+      conflictKeys,
+      ownershipRegionIds,
+      mergeCandidate: Object.keys(candidate).length ? candidate : undefined,
+      semanticSliceAdmission: admission,
+      semanticSlice,
+      semanticSidecar: sidecar ? compactRecord({
+        kind: sidecar.kind,
+        id: sidecar.id,
+        readiness: sidecar.readiness,
+        symbols: sidecar.symbols,
+        ownershipRegions: sidecar.ownershipRegions,
+        patchHints: sidecar.patchHints,
+        semanticImportExpectedSatisfied: sidecar.semanticImportExpectedSatisfied,
+        semanticImportExpectedMissingReasonCodes: sidecar.semanticImportExpectedMissingReasonCodes,
+        sampleOwnershipRegions: sidecar.sampleOwnershipRegions
+      }) : undefined
+    })
+  };
+}
+
+function semanticSidecarAdmissionStatus(input: {
+  candidate: Record<string, unknown>;
+  admission?: Record<string, unknown>;
+  sidecar?: Record<string, unknown>;
+  semanticSlice?: Record<string, unknown>;
+  readiness?: string;
+  risk?: string;
+  action?: string;
+  reasonCodes: readonly string[];
+  reasons: readonly string[];
+  conflictKeys: readonly string[];
+}): SemanticSidecarAdmissionStatus {
+  const statusSignals = uniqueRunGraphStrings([
+    input.readiness,
+    input.action,
+    input.risk,
+    stringFromUnknown(input.candidate.status),
+    stringFromUnknown(input.admission?.status),
+    stringFromUnknown(input.sidecar?.status),
+    stringFromUnknown(input.semanticSlice?.status),
+    ...input.reasonCodes,
+    ...input.reasons
+  ].filter((entry): entry is string => typeof entry === 'string')).map(normalizedSemanticSidecarSignal);
+  if (
+    input.conflictKeys.length > 0 ||
+    statusSignals.some((signal) => signal.includes('conflict') || signal === 'blocked' || signal === 'block' || signal === 'reject' || signal === 'rejected')
+  ) {
+    return 'conflict';
+  }
+  if (
+    booleanFromUnknown(input.admission?.reviewRequired) === true ||
+    statusSignals.some((signal) =>
+      signal === 'needs-review' ||
+      signal === 'ready-with-losses' ||
+      signal === 'manual-review' ||
+      signal === 'human-review' ||
+      signal === 'review' ||
+      signal === 'prioritize' ||
+      signal === 'medium' ||
+      signal === 'high'
+    )
+  ) {
+    return 'review';
+  }
+  if (
+    booleanFromUnknown(input.candidate.mergeable) === true ||
+    booleanFromUnknown(input.admission?.autoMergeClaim) === true ||
+    statusSignals.some((signal) => signal === 'ready' || signal === 'admit' || signal === 'apply' || signal === 'auto-merge')
+  ) {
+    return 'safe';
+  }
+  return 'review';
+}
+
+function normalizedSemanticSidecarSignal(value: string): string {
+  return value.trim().replace(/_/g, '-').toLowerCase();
+}
+
+function semanticOwnershipRegionProjections(record: Record<string, unknown>): SemanticSidecarOwnershipRegionProjection[] {
+  const sidecar = recordValue(record.semanticSidecar);
+  return uniqueSemanticRegionProjections([
+    ...recordsFromUnknown(record.ownershipRegions).map(semanticOwnershipRegionProjection),
+    ...recordsFromUnknown(record.sampleOwnershipRegions).map(semanticOwnershipRegionProjection),
+    ...recordsFromUnknown(sidecar?.ownershipRegions).map(semanticOwnershipRegionProjection),
+    ...recordsFromUnknown(sidecar?.sampleOwnershipRegions).map(semanticOwnershipRegionProjection),
+    ...recordsFromUnknown(recordValue(record.semanticSlice)?.ownershipRegions).map(semanticOwnershipRegionProjection)
+  ].filter((entry): entry is SemanticSidecarOwnershipRegionProjection => Boolean(entry)));
+}
+
+function semanticOwnershipRegionProjection(region: Record<string, unknown>): SemanticSidecarOwnershipRegionProjection | undefined {
+  const id = firstString([region.id, region.key, region.conflictKey]);
+  const sourcePath = firstString([region.sourcePath, region.path]);
+  const symbolName = stringFromUnknown(region.symbolName);
+  const key = id ?? firstString([sourcePath && symbolName ? `${sourcePath}:${symbolName}` : undefined, sourcePath]);
+  if (!key) return undefined;
+  return {
+    key,
+    id,
+    label: symbolName ?? id ?? sourcePath ?? key,
+    path: sourcePath,
+    status: firstString([region.readiness, region.mergePolicy, region.precision]),
+    data: compactRecord({
+      id: region.id,
+      key: region.key,
+      conflictKey: region.conflictKey,
+      sourcePath,
+      symbolName,
+      symbolKind: region.symbolKind,
+      regionKind: region.regionKind,
+      granularity: region.granularity,
+      precision: region.precision,
+      mergePolicy: region.mergePolicy,
+      sourceSpan: region.sourceSpan
+    })
+  };
+}
+
+function uniqueSemanticRegionProjections(
+  regions: readonly (SemanticSidecarOwnershipRegionProjection | undefined)[]
+): SemanticSidecarOwnershipRegionProjection[] {
+  const out = new Map<string, SemanticSidecarOwnershipRegionProjection>();
+  for (const region of regions) {
+    if (!region) continue;
+    const existing = out.get(region.key);
+    out.set(region.key, existing ? {
+      ...existing,
+      ...region,
+      data: compactRecord({ ...(existing.data ?? {}), ...(region.data ?? {}) })
+    } : region);
+  }
+  return Array.from(out.values());
 }
 
 function addGateNode(
@@ -918,6 +1451,24 @@ function firstString(values: readonly unknown[]): string | undefined {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0) : [];
+}
+
+function stringValues(value: unknown): string[] {
+  const single = stringFromUnknown(value);
+  if (single) return [single];
+  return stringArray(value);
+}
+
+function uniqueRunGraphStrings(values: readonly (string | undefined)[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const normalized = stringFromUnknown(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {

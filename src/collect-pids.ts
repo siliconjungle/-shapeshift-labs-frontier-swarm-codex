@@ -3,15 +3,22 @@ import path from 'node:path';
 import type { FrontierSwarmCoordinatorProcessInput } from '@shapeshift-labs/frontier-swarm';
 
 export async function readCodexPidProcesses(file: string): Promise<FrontierSwarmCoordinatorProcessInput[]> {
-  const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as { entries?: Array<{ pid: number; role: string; jobId?: string; runId?: string; startedAt: number; command?: string[] }> };
+  const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as { entries?: Array<{ pid: number; role: string; jobId?: string; runId?: string; startedAt: number; command?: string[]; stoppedAt?: number; stopSignal?: string; stopReason?: string }> };
   return Promise.all((parsed.entries ?? []).map(async (entry) => ({
     pid: entry.pid,
     role: entry.role,
     ...(entry.jobId ? { jobId: entry.jobId } : {}),
     ...(entry.runId ? { runId: entry.runId } : {}),
-    status: await pidIsAlive(entry.pid) ? 'running' : 'missing',
+    status: entry.stoppedAt ? 'stopped' : await pidIsAlive(entry.pid) ? 'running' : 'missing',
     startedAt: entry.startedAt,
-    ...(entry.command ? { command: entry.command } : {})
+    ...(entry.command ? { command: entry.command } : {}),
+    ...(entry.stoppedAt || entry.stopSignal || entry.stopReason ? {
+      metadata: {
+        ...(entry.stoppedAt ? { stoppedAt: entry.stoppedAt } : {}),
+        ...(entry.stopSignal ? { stopSignal: entry.stopSignal } : {}),
+        ...(entry.stopReason ? { stopReason: entry.stopReason } : {})
+      }
+    } : {})
   })));
 }
 

@@ -90,6 +90,7 @@ export async function testWorkspaceOnlyCollection(tmp) {
   assert.ok(await exists(path.join(collection.outDir, 'terminal-state.json')));
 
   await assertWorkspaceOnlyFailedPatch(tmp);
+  await assertWorkspaceOnlyStoppedPartialRecovery(tmp);
 }
 
 async function assertWorkspaceOnlyFailedPatch(tmp) {
@@ -173,4 +174,106 @@ async function assertWorkspaceOnlyFailedPatch(tmp) {
   assert.ok(dashboardJob);
   assert.deepStrictEqual(dashboardJob.changedPaths, [changedFile]);
   assert.strictEqual(dashboardJob.changedPaths.length, 1);
+}
+
+async function assertWorkspaceOnlyStoppedPartialRecovery(tmp) {
+  const runDir = path.join(tmp, 'workspace-only-stopped-run');
+  const jobId = 'workspace-only-stopped-partial';
+  const taskId = 'workspace-only-stopped-task';
+  const workspacePath = path.join(tmp, 'workspace-only-stopped-workspace');
+  const changedFile = 'src/workspace-only-stopped.ts';
+  await fs.rm(path.join(tmp, changedFile), { force: true });
+  await fs.mkdir(path.dirname(path.join(workspacePath, changedFile)), { recursive: true });
+  await fs.writeFile(path.join(workspacePath, changedFile), 'export const stoppedPartialRecovery = true;\n');
+  const jobDir = path.join(runDir, jobId);
+  const evidenceDir = path.join(jobDir, 'evidence');
+  await fs.mkdir(evidenceDir, { recursive: true });
+  await fs.writeFile(path.join(jobDir, 'codex-events.jsonl'), '');
+  await fs.writeFile(path.join(jobDir, 'codex-stderr.log'), '');
+  await fs.writeFile(path.join(runDir, 'pids.json'), JSON.stringify({
+    kind: 'frontier.swarm-codex.pid-manifest',
+    version: 1,
+    runId: 'workspace-only-stopped-run',
+    entries: [{
+      pid: 987654,
+      role: 'codex',
+      jobId,
+      startedAt: Date.now() - 600000,
+      stoppedAt: Date.now(),
+      stopSignal: 'SIGTERM',
+      stopReason: 'stop-command'
+    }]
+  }, null, 2) + '\n');
+  await fs.writeFile(path.join(jobDir, 'prompt.md'), [
+    '# Frontier Swarm Codex Job',
+    '',
+    `Job: ${jobId}`,
+    `Task: ${taskId}`,
+    'Lane: workspace-only',
+    `Workspace: ${workspacePath}`,
+    '',
+    'Raw task JSON:',
+    '',
+    JSON.stringify({
+      id: taskId,
+      lane: 'workspace-only',
+      title: 'Recover stopped workspace-only output',
+      allowedWrites: ['src/**'],
+      targetRefs: [changedFile]
+    }, null, 2)
+  ].join('\n') + '\n');
+  await fs.writeFile(path.join(evidenceDir, 'workspace-proof.json'), JSON.stringify({
+    kind: 'frontier.swarm-codex.workspace-proof',
+    version: 1,
+    id: 'workspace-proof:workspace-only-stopped-partial',
+    generatedAt: Date.now(),
+    manifest: { mode: 'copy', path: workspacePath },
+    copiedPaths: [],
+    linkedPaths: [],
+    missingRequired: [],
+    missingOptional: [],
+    ignoredChangedPaths: [],
+    ignoredChangedPathReasons: [],
+    observedChangedPaths: [changedFile],
+    reportedChangedPaths: [],
+    summary: {
+      copiedCount: 0,
+      linkedCount: 0,
+      missingRequiredCount: 0,
+      missingOptionalCount: 0,
+      ignoredChangedPathCount: 0,
+      ignoredChangedPathReasonCounts: {},
+      observedChangedPathCount: 1,
+      reportedChangedPathCount: 0
+    }
+  }, null, 2) + '\n');
+  const collection = await collectCodexSwarmRun({ run: runDir, cwd: tmp, checkStale: false, artifactStoreMode: 'compact' });
+  assert.strictEqual(collection.summary.total, 1);
+  assert.strictEqual(collection.summary.collectorGeneratedPatchCount, 1);
+  assert.strictEqual(collection.summary['rerun-work'], 1);
+  const entry = collection.buckets['rerun-work'].find((item) => item.jobId === jobId);
+  assert.ok(entry);
+  assert.strictEqual(entry.generatedByCollector, true);
+  assert.ok(entry.patchPath);
+  const recoveredBundle = JSON.parse(await fs.readFile(path.join(entry.outputDir, 'merge.json'), 'utf8'));
+  assert.deepStrictEqual(recoveredBundle.changedPaths, [changedFile]);
+  assert.strictEqual(recoveredBundle.status, 'failed');
+  assert.strictEqual(recoveredBundle.disposition, 'needs-port');
+  assert.ok(recoveredBundle.reasons.includes('stale-worker-stopped'));
+  assert.ok(recoveredBundle.reasons.includes('worker-no-output-progress'));
+  assert.ok(recoveredBundle.reasons.includes('collector-partial-source-recovery'));
+  assert.strictEqual(recoveredBundle.metadata.frontierSwarmCodex.workspaceOnlyCollection.recoveryStatus, 'stale-worker-patch-generated');
+  assert.strictEqual(recoveredBundle.metadata.frontierSwarmCodex.workspaceOnlyCollection.workerState.outcome, 'stopped');
+  assert.strictEqual(recoveredBundle.metadata.frontierSwarmCodex.workspaceOnlyCollection.workerState.noOutputProgress, true);
+  const recoveredPatch = await fs.readFile(path.join(entry.outputDir, 'changes.patch'), 'utf8');
+  assert.match(recoveredPatch, /diff --git a\/src\/workspace-only-stopped\.ts b\/src\/workspace-only-stopped\.ts/);
+  const dashboardJob = collection.dashboard.jobs.find((item) => item.jobId === jobId);
+  assert.ok(dashboardJob);
+  assert.deepStrictEqual(dashboardJob.changedPaths, [changedFile]);
+  assert.notStrictEqual(dashboardJob.disposition, 'evidence-only');
+  assert.notStrictEqual(dashboardJob.mergeReadiness, 'evidence-only');
+  const compactJob = collection.compactDashboard.topJobs.find((item) => item.jobId === jobId);
+  assert.ok(compactJob);
+  assert.deepStrictEqual(compactJob.changedPaths, [changedFile]);
+  assert.notStrictEqual(compactJob.disposition, 'evidence-only');
 }

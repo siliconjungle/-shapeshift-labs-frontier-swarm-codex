@@ -222,7 +222,7 @@ function assertNoiseClassificationRegexes(collectBundleSources, collectDashboard
   assert.match(collectBundleSources, /generatedMissingHeadBlob = reasonClasses\.includes\('patch\.missing-head-blob\.generated'\)/);
   assert.match(collectDashboardSources, /failedEvidenceCount: failureJobEntries\.filter/);
   assert.match(collectBundleSources, /ignoredWorkspaceNoiseOnlyFailure\(bundle\)[\s\S]+return 'needs-human-port'/);
-  assert.match(collectBundleSources, /nonActionableFailedEvidence\(bundle,[\s\S]+return 'needs-human-port'/);
+  assert.match(collectBundleSources, /nonActionableFailedEvidence\(bundle,[\s\S]+return 'failed-evidence'/);
   assert.match(collectBundleSources, /generated-failed-evidence/);
 }
 
