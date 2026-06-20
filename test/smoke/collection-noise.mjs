@@ -14,6 +14,8 @@ const collectBundleSources = [collectBundles, collectBundleReasons, collectBundl
 const contextBudgetSource = await readOptional(path.join(root, 'src/context-budget.ts'));
 const collect = await fs.readFile(path.join(root, 'src/collect.ts'), 'utf8');
 const collectDashboard = await readOptional(path.join(root, 'src/collect-dashboard.ts'));
+const collectDashboardQuality = await readOptional(path.join(root, 'src/collect-dashboard-quality.ts'));
+const collectDashboardSources = [collectDashboard, collectDashboardQuality].join('\n');
 const typesCollection = [
   await fs.readFile(path.join(root, 'src/types-collection.ts'), 'utf8'),
   await readOptional(path.join(root, 'src/types-collection-quality.ts')) ?? '',
@@ -103,7 +105,7 @@ assert.match(
   'incomplete artifact-store modes should only describe guards that did not finish'
 );
 
-if (collectDashboard) {
+if (collectDashboardSources.trim()) {
   for (const token of [
     'collectionQualitySignals',
     'collectionAutosplitRerunGuidance',
@@ -128,10 +130,10 @@ if (collectDashboard) {
     'isIgnoredWorkspaceNoiseOnlyFailureJob',
     'compactReasonClassesForFailureJob'
   ]) {
-    assert.match(collectDashboard, new RegExp(escapeRegExp(token)), `dashboard quality KPI token missing: ${token}`);
+    assert.match(collectDashboardSources, new RegExp(escapeRegExp(token)), `dashboard quality KPI token missing: ${token}`);
   }
   assert.match(
-    collectDashboard,
+    collectDashboardSources,
     /collectionOwnershipViolationSignalCount: collectionQualitySignals\.ownership\.sourceViolationCount/,
     'top-level ownership signal count should report source ownership blockers, not ignored workspace setup noise'
   );
@@ -226,7 +228,7 @@ if (collectBundleSources.trim()) {
     'invalid index and generated missing-blob classes should be compacted as infrastructure noise'
   );
   assert.match(
-    collectDashboard,
+    collectDashboardSources,
     /failedEvidenceCount: failureJobEntries\.filter/,
     'failed-evidence dashboard counts should be based on non-noise failure entries'
   );
