@@ -26,10 +26,12 @@ import type {
   FrontierCodexCollectionNoiseBreakdown
 } from './types-collection-quality.js';
 import type { FrontierCodexCompactDashboard } from './types-evidence.js';
+import type { FrontierCodexRunGraph } from './types-run-graph.js';
 import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
 
 export type * from './types-collection-quality.js';
 export type * from './types-collection-score.js';
+export type * from './types-run-graph.js';
 
 export type FrontierCodexCollectBucket =
   | 'ready-to-apply'
@@ -85,6 +87,7 @@ export interface FrontierCodexCollectResult {
   semanticPatchBundleOverlaps: FrontierCodexSemanticPatchBundleOverlapSummary;
   qualitySignals: FrontierCodexCollectQualitySignals;
   noiseBreakdown: FrontierCodexCollectionNoiseBreakdown;
+  runGraph?: FrontierCodexRunGraph;
   landedHealth?: FrontierCodexLandedHealthSummary;
   artifactStore?: FrontierCodexArtifactStoreResult;
   artifactStoreStatus?: FrontierCodexArtifactStoreStatus;
