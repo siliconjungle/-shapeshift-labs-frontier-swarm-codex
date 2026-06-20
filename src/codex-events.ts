@@ -12,6 +12,7 @@ import {
 } from './constants.js';
 import { writeJsonAtomic } from './common.js';
 import { readCodexPidProcesses } from './collect.js';
+import { createCodexLiveRunGraphDashboardMetadata } from './run-graph-live.js';
 import type {
   FrontierCodexPidEntry,
   FrontierCodexPidManifest,
@@ -48,6 +49,9 @@ export async function writeSwarmCoordinatorSnapshot(
   input: FrontierCodexSwarmRunResult & { eventStream?: FrontierSwarmEventStream; pidManifestPath?: string; liveRunGraphEventsPath?: string }
 ): Promise<void> {
   const processes = input.pidManifestPath ? await readCodexPidProcesses(input.pidManifestPath).catch(() => []) : [];
+  const liveRunGraphMetadata = createCodexLiveRunGraphDashboardMetadata({
+    liveRunGraphEventsPath: input.liveRunGraphEventsPath
+  });
   const dashboard = createSwarmCoordinatorDashboard({
     plan: input.plan,
     run: input.run,
@@ -58,6 +62,11 @@ export async function writeSwarmCoordinatorSnapshot(
       eventStream: input.eventStream ?? null,
       pidManifestPath: input.pidManifestPath ?? null,
       liveRunGraphEventsPath: input.liveRunGraphEventsPath ?? null,
+      artifactPaths: {
+        coordinatorDashboard: file,
+        ...liveRunGraphMetadata.artifactPaths
+      },
+      runSource: liveRunGraphMetadata.runSource,
       proof: input.proof
     }
   });

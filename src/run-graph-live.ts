@@ -11,6 +11,7 @@ import type {
   FrontierCodexRunGraphEdge,
   FrontierCodexRunGraphNode
 } from './types-run-graph.js';
+import type { FrontierCodexDashboardArtifactPaths, FrontierCodexDashboardRunSourceMetadata } from './types-dashboard.js';
 import { stableCodexRunGraphPart } from './run-graph-utils.js';
 
 export const FRONTIER_SWARM_CODEX_LIVE_RUN_GRAPH_EVENTS_FILE = 'live-run-graph-events.jsonl';
@@ -29,8 +30,31 @@ export function resolveCodexLiveRunGraphEventsPath(input: {
 
 export async function initCodexLiveRunGraphEvents(file: string | undefined): Promise<void> {
   if (!file) return;
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, '');
+  const absolute = path.resolve(file);
+  await fs.mkdir(path.dirname(absolute), { recursive: true });
+  await writeTextFileAtomic(absolute, '');
+}
+
+export function createCodexLiveRunGraphDashboardMetadata(input: {
+  liveRunGraphEventsPath?: string;
+}): {
+  artifactPaths: FrontierCodexDashboardArtifactPaths;
+  runSource: FrontierCodexDashboardRunSourceMetadata;
+} {
+  if (!input.liveRunGraphEventsPath) {
+    return {
+      artifactPaths: {},
+      runSource: { mode: 'disabled' }
+    };
+  }
+  return {
+    artifactPaths: { liveRunGraphEvents: input.liveRunGraphEventsPath },
+    runSource: {
+      mode: 'live-run-graph-events',
+      format: 'jsonl',
+      liveRunGraphEventsPath: input.liveRunGraphEventsPath
+    }
+  };
 }
 
 export async function appendCodexLiveRunGraphEvent(
@@ -399,4 +423,15 @@ function errorString(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (value instanceof Error) return value.message;
   return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+async function writeTextFileAtomic(file: string, text: string): Promise<void> {
+  const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+  try {
+    await fs.writeFile(tmp, text);
+    await fs.rename(tmp, file);
+  } catch (error) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 }

@@ -57,9 +57,22 @@ export async function testLiveRunGraphEvents({ tmp }) {
 
   const dashboard = JSON.parse(await fs.readFile(path.join(outDir, 'coordinator-dashboard.json'), 'utf8'));
   assert.strictEqual(dashboard.metadata.liveRunGraphEventsPath, liveEventsPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.coordinatorDashboard, path.join(outDir, 'coordinator-dashboard.json'));
+  assert.strictEqual(dashboard.metadata.artifactPaths.liveRunGraphEvents, liveEventsPath);
+  assert.strictEqual(dashboard.metadata.runSource.mode, 'live-run-graph-events');
+  assert.strictEqual(dashboard.metadata.runSource.format, 'jsonl');
+  assert.strictEqual(dashboard.metadata.runSource.liveRunGraphEventsPath, liveEventsPath);
+  assert.strictEqual(discoverLiveRunGraphEventsPath(dashboard), liveEventsPath);
+  assert.strictEqual((await readLiveEvents(discoverLiveRunGraphEventsPath(dashboard))).length, events.length);
 }
 
 async function readLiveEvents(file) {
   const text = await fs.readFile(file, 'utf8');
   return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+}
+
+function discoverLiveRunGraphEventsPath(dashboard) {
+  return dashboard.metadata?.artifactPaths?.liveRunGraphEvents
+    ?? dashboard.metadata?.runSource?.liveRunGraphEventsPath
+    ?? dashboard.metadata?.liveRunGraphEventsPath;
 }
