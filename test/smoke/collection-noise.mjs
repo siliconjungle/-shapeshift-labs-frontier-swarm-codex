@@ -11,7 +11,11 @@ const collectBundles = await readOptional(path.join(root, 'src/collect-bundles.t
 const contextBudgetSource = await readOptional(path.join(root, 'src/context-budget.ts'));
 const collect = await fs.readFile(path.join(root, 'src/collect.ts'), 'utf8');
 const collectDashboard = await readOptional(path.join(root, 'src/collect-dashboard.ts'));
-const typesCollection = await fs.readFile(path.join(root, 'src/types-collection.ts'), 'utf8');
+const typesCollection = [
+  await fs.readFile(path.join(root, 'src/types-collection.ts'), 'utf8'),
+  await readOptional(path.join(root, 'src/types-collection-quality.ts')) ?? '',
+  await readOptional(path.join(root, 'src/types-collection-score.ts')) ?? ''
+].join('\n');
 
 if (collectBundles) {
   for (const token of [

@@ -1,5 +1,4 @@
 import type {
-  FrontierSwarmCommand,
   FrontierSwarmCoordinatorDashboard,
   FrontierSwarmEvidenceIndex,
   FrontierSwarmMergeAdmission,
@@ -20,19 +19,17 @@ import type {
   FRONTIER_SWARM_CODEX_CLEANUP_PLAN_KIND,
   FRONTIER_SWARM_CODEX_CLEANUP_PLAN_VERSION,
   FRONTIER_SWARM_CODEX_COLLECTION_KIND,
-  FRONTIER_SWARM_CODEX_COLLECTION_VERSION,
-  FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND,
-  FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION
+  FRONTIER_SWARM_CODEX_COLLECTION_VERSION
 } from './constants.js';
-import type { FrontierCodexCompactDashboard, FrontierCodexContextBudgetReport } from './types-evidence.js';
-import type { FrontierCodexPatchScoreCalibration } from './types-score-calibration.js';
-import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
 import type {
-  FrontierCodexSemanticEditAdmissionDecision,
-  FrontierCodexSemanticEditScriptSummary
-} from './types-semantic-edit.js';
-import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
-import type { FrontierCodexSemanticEditReplaySummary } from './types-semantic-edit-replay.js';
+  FrontierCodexCollectQualitySignals,
+  FrontierCodexCollectionNoiseBreakdown
+} from './types-collection-quality.js';
+import type { FrontierCodexCompactDashboard } from './types-evidence.js';
+import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
+
+export type * from './types-collection-quality.js';
+export type * from './types-collection-score.js';
 
 export type FrontierCodexCollectBucket =
   | 'ready-to-apply'
@@ -190,119 +187,6 @@ export interface FrontierCodexArtifactStoreStatus {
   error?: string;
 }
 
-export interface FrontierCodexCollectQualitySignals {
-  failure: {
-    jobCount: number;
-    failedEvidenceCount: number;
-    statusFailedCount: number;
-    blockedCount: number;
-    rejectedCount: number;
-    failedCommandCount: number;
-    requiredFailedCommandCount: number;
-    reasonClasses: string[];
-    reasonClassCounts: Record<string, number>;
-    compactReasonClasses: string[];
-    compactReasonClassCounts: Record<string, number>;
-    sourceBlockerJobCount: number;
-    sourceBlockerJobIds: string[];
-    infrastructureNoiseJobCount: number;
-    infrastructureNoiseJobIds: string[];
-    ignoredWorkspaceNoiseJobCount: number;
-    ignoredWorkspaceNoiseJobIds: string[];
-    ignoredWorkspaceNoiseReasonClasses: string[];
-    ignoredWorkspaceNoiseReasonClassCounts: Record<string, number>;
-    jobIds: string[];
-    landedJobCount?: number;
-    landedJobIds?: string[];
-    remainingJobCount?: number;
-    remainingJobIds?: string[];
-  };
-  needsPort: {
-    jobCount: number;
-    jobIds: string[];
-    landedJobCount?: number;
-    landedJobIds?: string[];
-    remainingJobCount?: number;
-    remainingJobIds?: string[];
-  };
-  stale: {
-    jobCount: number;
-    jobIds: string[];
-    landedJobCount?: number;
-    landedJobIds?: string[];
-    remainingJobCount?: number;
-    remainingJobIds?: string[];
-  };
-  landed?: FrontierCodexLandedHealthSummary;
-  ownership: {
-    jobCount: number;
-    violationCount: number;
-    sourceViolationCount: number;
-    ignoredWorkspaceNoiseViolationCount: number;
-    paths: string[];
-    sourcePaths: string[];
-    ignoredWorkspaceNoisePaths: string[];
-    jobIds: string[];
-    sourceJobIds: string[];
-    ignoredWorkspaceNoiseJobIds: string[];
-  };
-  quarantine: {
-    jobCount: number;
-    pathCount: number;
-    sourcePathCount: number;
-    ignoredWorkspaceNoisePathCount: number;
-    paths: string[];
-    sourcePaths: string[];
-    ignoredWorkspaceNoisePaths: string[];
-    jobIds: string[];
-    sourceJobIds: string[];
-    ignoredWorkspaceNoiseJobIds: string[];
-  };
-  contextBudget: {
-    jobCount: number;
-    warningCount: number;
-    failedCount: number;
-    jobsWithActualUsage: number;
-    maxPromptBytes: number;
-    maxEstimatedInputTokens: number;
-    maxActualInputTokens: number;
-    maxCachedInputTokens: number;
-    maxUncachedInputTokens: number;
-    warnings: string[];
-    errors: string[];
-    warningJobIds: string[];
-    failedJobIds: string[];
-  };
-  logTruncation: {
-    jobCount: number;
-    truncatedJobCount: number;
-    eventBytes: number;
-    stderrBytes: number;
-    eventBytesTruncated: number;
-    stderrBytesTruncated: number;
-    bytesTruncated: number;
-    jobIds: string[];
-  };
-  noiseBreakdown?: FrontierCodexCollectionNoiseBreakdown;
-}
-
-export interface FrontierCodexCollectionNoiseBreakdown {
-  restored: FrontierCodexCollectionNoiseSignal;
-  quarantined: FrontierCodexCollectionNoiseSignal;
-  generatedNoise: FrontierCodexCollectionNoiseSignal;
-  ignoredWorkspaceNoise: FrontierCodexCollectionNoiseSignal;
-  sourceOwnershipViolations: FrontierCodexCollectionNoiseSignal;
-}
-
-export interface FrontierCodexCollectionNoiseSignal {
-  jobCount: number;
-  pathCount: number;
-  paths: string[];
-  jobIds: string[];
-  reasonClasses: string[];
-  reasonClassCounts: Record<string, number>;
-}
-
 export interface FrontierCodexArtifactRecord {
   id: string;
   runDir: string;
@@ -415,123 +299,4 @@ export interface FrontierCodexApplyResult {
     skipped: number;
     failed: number;
   };
-}
-
-export type FrontierCodexPatchScoreStatus =
-  | 'accepted-clean'
-  | 'accepted-needs-port'
-  | 'conflict'
-  | 'test-fail'
-  | 'stale'
-  | 'evidence-only';
-
-export interface FrontierCodexPatchScoreInput {
-  collection?: string;
-  run?: string;
-  outDir?: string;
-  cwd?: string;
-  bucket?: FrontierCodexCollectBucket | 'all';
-  jobIds?: readonly string[];
-  workspaceIncludes?: readonly string[];
-  workspaceExcludes?: readonly string[];
-  focusedCommands?: readonly (string | FrontierSwarmCommand)[];
-  globalCommands?: readonly (string | FrontierSwarmCommand)[];
-  globalGlobs?: readonly string[];
-  limit?: number;
-  keepWorkspaces?: boolean;
-}
-
-export interface FrontierCodexPatchScoreSemanticEvidence {
-  present: boolean;
-  total: number;
-  imported: number;
-  errors: number;
-  sourceMapMappings: number;
-  semanticSymbols: number;
-  ownershipRegions: number;
-  patchHints: number;
-  semanticFacts: number;
-  semanticFactPredicates: string[];
-  semanticFactSummary: Record<string, number>;
-  dependencyRelations: number;
-  dependencyPredicates: string[];
-  dependencyEdges: string[];
-  dependencyEdgeHints: string[];
-  universalAstLayers: number;
-  universalAstLayerNames: string[];
-  proofSpecObligations: number;
-  proofSpecFailedObligations: number;
-  paradigmSemanticsRecords: number;
-  paradigmSemanticsGroups: number;
-  paradigmSemanticsLoweringRecords: number;
-  semanticLineageEvents: number;
-  semanticLineageMoved: number;
-  semanticLineageRenamed: number;
-  semanticLineageDeleted: number;
-  semanticLineageAmbiguous: number;
-  semanticLineageBlocked: number;
-  semanticLineageNeedsReview: number;
-  semanticLineageEventKinds: string[];
-  semanticLineageReasonCodes: string[];
-  semanticEditScript: FrontierCodexSemanticEditScriptSummary;
-  semanticEditProjection: FrontierCodexSemanticEditProjectionSummary;
-  semanticEditReplay: FrontierCodexSemanticEditReplaySummary;
-  semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision;
-  semanticEditOperationAutoMergeCandidate: boolean;
-  semanticEditOperationCleanEligible: boolean;
-  readiness: Record<string, number>;
-  lossesBySeverity: Record<string, number>;
-  scoreAdjustment: number;
-  cleanEligible: boolean;
-  reasons: string[];
-}
-
-export interface FrontierCodexPatchScoreEntry {
-  jobId: string;
-  status: FrontierCodexPatchScoreStatus;
-  score: number;
-  bundlePath: string;
-  patchPath?: string;
-  workspacePath?: string;
-  changedPaths: string[];
-  reasons: string[];
-  semanticEvidence: FrontierCodexPatchScoreSemanticEvidence;
-  contextBudget?: FrontierCodexContextBudgetReport;
-  commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
-}
-
-export interface FrontierCodexPatchScoreResult {
-  kind: typeof FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND;
-  version: typeof FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION;
-  ok: boolean;
-  cwd: string;
-  collectionDir: string;
-  outDir: string;
-  generatedAt: number;
-  entries: FrontierCodexPatchScoreEntry[];
-  summary: Record<FrontierCodexPatchScoreStatus, number> & { total: number };
-  calibration: FrontierCodexPatchScoreCalibration;
-}
-
-export type FrontierCodexHandoffArtifactKind =
-  | 'debug-handoff'
-  | 'replay'
-  | 'watchpoint'
-  | 'trace'
-  | 'diagnostic'
-  | 'log'
-  | 'last-message'
-  | 'evidence'
-  | string;
-
-export interface FrontierCodexHandoffArtifact {
-  path: string;
-  kind: FrontierCodexHandoffArtifactKind;
-  bytes?: number;
-}
-
-export interface FrontierCodexHandoffDiscoveryInput {
-  root: string;
-  maxDepth?: number;
-  maxArtifacts?: number;
 }
