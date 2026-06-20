@@ -3,6 +3,9 @@ import type { FrontierCodexSemanticEditAdmissionDecision, FrontierCodexSemanticE
 import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
 import type { FrontierCodexSemanticEditReplaySummary } from './types-semantic-edit-replay.js';
 
+interface FrontierCodexSemanticImportBaseSource { path: string; source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string; }
+interface FrontierCodexSemanticImportHeadSource { path: string; source: 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string; }
+
 export interface FrontierCodexSemanticImportOptions {
   enabled?: boolean;
   maxFiles?: number;
@@ -21,18 +24,8 @@ export interface FrontierCodexSemanticImportRecord {
   bytes?: number;
   dependencyEdges?: string[];
   dependencyEdgeHints?: string[];
-  baseSource?: {
-    path: string;
-    source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head';
-    bytes: number;
-    foundBy: string;
-  };
-  headSource?: {
-    path: string;
-    source: 'coordinator-workspace' | 'git-head';
-    bytes: number;
-    foundBy: string;
-  };
+  baseSource?: FrontierCodexSemanticImportBaseSource;
+  headSource?: FrontierCodexSemanticImportHeadSource;
   importId?: string;
   universalAstHash?: string;
   nativeAstId?: string;

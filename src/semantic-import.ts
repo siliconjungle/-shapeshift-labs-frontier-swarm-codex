@@ -28,16 +28,11 @@ import { discoverSemanticImportFallbackPaths, withSemanticImportFallback } from 
 import type { SemanticImportBaseSourceSnapshot } from './semantic-import-base.js';
 import { resolveSemanticImportWorkspacePath } from './semantic-import-path.js';
 
-export async function createCodexSemanticImportSidecar(input: {
-  job: FrontierSwarmJob;
-  workspace: string;
-  changedPaths: readonly string[];
-  evidenceDir: string;
-  baseCwd?: string;
-  baseSources?: SemanticImportBaseSourceSnapshot;
-  options?: boolean | FrontierCodexSemanticImportOptions;
-  semanticImportExpected?: boolean;
-}): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
+type CodexSemanticImportSidecarInput = { job: FrontierSwarmJob; workspace: string; changedPaths: readonly string[]; evidenceDir: string; baseCwd?: string; baseSources?: SemanticImportBaseSourceSnapshot; options?: boolean | FrontierCodexSemanticImportOptions; semanticImportExpected?: boolean };
+type SemanticImportBaseSourceSummaryInput = { path: string; source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string };
+type SemanticImportHeadSourceSummaryInput = { path: string; source: 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string };
+
+export async function createCodexSemanticImportSidecar(input: CodexSemanticImportSidecarInput): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
   const options = normalizeSemanticImportOptions(input.options);
   if (!options) return undefined;
   const candidatePaths = semanticImportCandidatePaths(input.job, input.changedPaths, input.workspace);
@@ -277,21 +272,10 @@ export async function createCodexSemanticImportSidecar(input: {
 }
 
 function semanticImportMetadata(job: FrontierSwarmJob, phase: string, sourcePath: string): Record<string, unknown> {
-  return {
-    swarmJobId: job.id,
-    swarmTaskId: job.taskId,
-    swarmLane: job.lane,
-    phase,
-    sourcePath
-  };
+  return { swarmJobId: job.id, swarmTaskId: job.taskId, swarmLane: job.lane, phase, sourcePath };
 }
 
-function summarizeSemanticImportBaseSource(baseSource: {
-  path: string;
-  source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head';
-  bytes: number;
-  foundBy: string;
-}) {
+function summarizeSemanticImportBaseSource(baseSource: SemanticImportBaseSourceSummaryInput) {
   return {
     path: baseSource.path,
     source: baseSource.source,
@@ -300,12 +284,7 @@ function summarizeSemanticImportBaseSource(baseSource: {
   };
 }
 
-function summarizeSemanticImportHeadSource(headSource: {
-  path: string;
-  source: 'coordinator-workspace' | 'git-head';
-  bytes: number;
-  foundBy: string;
-}) {
+function summarizeSemanticImportHeadSource(headSource: SemanticImportHeadSourceSummaryInput) {
   return {
     path: headSource.path,
     source: headSource.source,

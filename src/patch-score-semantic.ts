@@ -14,7 +14,6 @@ import { semanticEditReplayScore } from './semantic-edit-replay-score.js';
 import { classifySemanticEditScriptAdmission } from './semantic-edit-admission.js';
 import { isCleanSemanticEditOperationScript, isCleanSemanticEditProjection } from './semantic-edit-clean-eligibility.js';
 
-
 export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBundle): FrontierCodexPatchScoreSemanticEvidence {
   const summary = semanticImportSummaryFromBundle(bundle);
   const changed = bundle.changedPaths.length > 0;
@@ -29,36 +28,16 @@ export function summarizePatchScoreSemanticEvidence(bundle: FrontierSwarmMergeBu
     }
     return {
       present: false,
-      total: 0,
-      imported: 0,
-      errors: 0,
-      sourceMapMappings: 0,
-      semanticSymbols: 0,
-      ownershipRegions: 0,
-      patchHints: 0,
-      semanticFacts: 0,
-      semanticFactPredicates: [],
-      semanticFactSummary: {},
-      dependencyRelations: 0,
-      dependencyPredicates: [],
-      dependencyEdges: [],
-      dependencyEdgeHints: [],
-      universalAstLayers: 0,
-      universalAstLayerNames: [],
-      proofSpecObligations: 0,
-      proofSpecFailedObligations: 0,
-      paradigmSemanticsRecords: 0,
-      paradigmSemanticsGroups: 0,
-      paradigmSemanticsLoweringRecords: 0,
-      semanticLineageEvents: 0,
-      semanticLineageMoved: 0,
-      semanticLineageRenamed: 0,
-      semanticLineageDeleted: 0,
-      semanticLineageAmbiguous: 0,
-      semanticLineageBlocked: 0,
-      semanticLineageNeedsReview: 0,
-      semanticLineageEventKinds: [],
-      semanticLineageReasonCodes: [],
+      total: 0, imported: 0, errors: 0, sourceMapMappings: 0,
+      semanticSymbols: 0, ownershipRegions: 0, patchHints: 0,
+      semanticFacts: 0, semanticFactPredicates: [], semanticFactSummary: {},
+      dependencyRelations: 0, dependencyPredicates: [], dependencyEdges: [], dependencyEdgeHints: [],
+      universalAstLayers: 0, universalAstLayerNames: [],
+      proofSpecObligations: 0, proofSpecFailedObligations: 0,
+      paradigmSemanticsRecords: 0, paradigmSemanticsGroups: 0, paradigmSemanticsLoweringRecords: 0,
+      semanticLineageEvents: 0, semanticLineageMoved: 0, semanticLineageRenamed: 0, semanticLineageDeleted: 0,
+      semanticLineageAmbiguous: 0, semanticLineageBlocked: 0, semanticLineageNeedsReview: 0,
+      semanticLineageEventKinds: [], semanticLineageReasonCodes: [],
       semanticEditScript: emptySemanticEditScriptSummary(),
       semanticEditProjection: emptySemanticEditProjectionSummary(),
       semanticEditReplay: emptySemanticEditReplaySummary(),

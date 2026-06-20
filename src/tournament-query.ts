@@ -1,24 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {
-  compareSwarmStrategyTournaments,
-  createSwarmStrategyTournamentHistory,
-  createSwarmTournamentAdaptiveFeedback,
-  querySwarmStrategyTournament,
-  type FrontierSwarmStrategyTournament,
-  type FrontierSwarmStrategyTournamentComparison,
-  type FrontierSwarmStrategyTournamentHistory,
-  type FrontierSwarmTournamentAdaptiveFeedback
-} from '@shapeshift-labs/frontier-swarm';
-import {
-  FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_KIND,
-  FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_VERSION
-} from './constants.js';
+import { compareSwarmStrategyTournaments, createSwarmStrategyTournamentHistory, createSwarmTournamentAdaptiveFeedback, querySwarmStrategyTournament, type FrontierSwarmStrategyTournament, type FrontierSwarmStrategyTournamentComparison, type FrontierSwarmStrategyTournamentHistory, type FrontierSwarmTournamentAdaptiveFeedback } from '@shapeshift-labs/frontier-swarm';
+import { FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_KIND, FRONTIER_SWARM_CODEX_TOURNAMENT_QUERY_VERSION } from './constants.js';
 import { isObject, pathExists } from './common.js';
-import {
-  attachCodexCalibrationAdaptiveFeedback,
-  createCodexCalibrationAdaptiveFeedback
-} from './calibration-feedback.js';
+import { attachCodexCalibrationAdaptiveFeedback, createCodexCalibrationAdaptiveFeedback } from './calibration-feedback.js';
 import type { FrontierCodexCompactDashboard } from './types-evidence.js';
 import type { FrontierCodexSemanticImportQuality } from './types-semantic.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
@@ -29,33 +14,19 @@ type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
 export type FrontierCodexTournamentView = 'summary' | 'standings' | 'matches' | 'full' | 'bandit';
 
 export interface FrontierCodexTournamentQueryInput {
-  tournament?: string;
-  collection?: string;
-  run?: string;
+  tournament?: string; collection?: string; run?: string;
   view?: FrontierCodexTournamentView;
-  limit?: number;
-  strategyId?: string;
-  gameId?: string;
-  outcome?: string;
-  tag?: string;
-  payoffTag?: string;
-  strategyTag?: string;
-  gameTag?: string;
-  minScore?: number;
-  maxScore?: number;
+  limit?: number; strategyId?: string; gameId?: string; outcome?: string; tag?: string;
+  payoffTag?: string; strategyTag?: string; gameTag?: string;
+  minScore?: number; maxScore?: number;
   cwd?: string;
 }
 
+export type FrontierCodexTournamentSemanticImportQueryJob = { jobId: string; lane?: string; disposition?: string; mergeScore?: number; changedPaths: string[]; semanticImportQuality: FrontierCodexSemanticImportQuality };
+
 export interface FrontierCodexTournamentSemanticImportQueryRecord {
   summary?: FrontierCodexCompactDashboard['semanticImport'];
-  jobs: Array<{
-    jobId: string;
-    lane?: string;
-    disposition?: string;
-    mergeScore?: number;
-    changedPaths: string[];
-    semanticImportQuality: FrontierCodexSemanticImportQuality;
-  }>;
+  jobs: FrontierCodexTournamentSemanticImportQueryJob[];
   sources: string[];
 }
 
@@ -340,9 +311,7 @@ function listArg(value: CliValue | undefined): string[] {
   return (Array.isArray(value) ? value : String(value).split(',')).map((entry) => String(entry).trim()).filter(Boolean);
 }
 
-function stringArg(value: CliValue | undefined): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
+function stringArg(value: CliValue | undefined): string | undefined { return typeof value === 'string' && value.length > 0 ? value : undefined; }
 
 function numberArg(value: CliValue | undefined): number | undefined {
   const parsed = Number(value);

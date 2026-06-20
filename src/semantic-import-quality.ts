@@ -11,6 +11,9 @@ import { summarizeSemanticEditProjection, emptySemanticEditProjectionSummary } f
 import { emptySemanticEditReplaySummary, summarizeSemanticEditReplay } from './semantic-edit-replay.js';
 import { classifySemanticEditScriptAdmission } from './semantic-edit-admission.js';
 
+type SemanticImportExpectedSatisfiedInput = { expected: boolean; present: boolean; empty: boolean; imported: number; symbols: number; ownershipRegions: number; patchHints: number; reasonCodes: readonly string[] };
+type SemanticImportExpectedMissingInput = { expected: boolean; present: boolean; empty: boolean; selected: number; imported: number; symbols: number; ownershipRegions: number; patchHints: number };
+
 export function summarizeCodexSemanticImportQuality(
   summary: FrontierSwarmMergeBundle['semanticImport'] | FrontierCodexSemanticImportSidecar['summary'] | FrontierSwarmJobResultInput['semanticImport'] | undefined,
   expected = false
@@ -167,19 +170,7 @@ function semanticImportExpected(summary: unknown, fallback: boolean): boolean {
     (record.admission as { expected?: unknown } | undefined)?.expected === true;
 }
 
-function semanticImportExpectedSatisfied(
-  summary: unknown,
-  input: {
-    expected: boolean;
-    present: boolean;
-    empty: boolean;
-    imported: number;
-    symbols: number;
-    ownershipRegions: number;
-    patchHints: number;
-    reasonCodes: readonly string[];
-  }
-): boolean {
+function semanticImportExpectedSatisfied(summary: unknown, input: SemanticImportExpectedSatisfiedInput): boolean {
   if (!input.expected) return true;
   const explicit = semanticImportExplicitExpectedSatisfied(summary);
   if (explicit !== undefined) return explicit && input.reasonCodes.length === 0;
@@ -192,19 +183,7 @@ function semanticImportExpectedSatisfied(
     input.reasonCodes.length === 0;
 }
 
-function semanticImportExpectedMissingReasonCodes(
-  summary: unknown,
-  input: {
-    expected: boolean;
-    present: boolean;
-    empty: boolean;
-    selected: number;
-    imported: number;
-    symbols: number;
-    ownershipRegions: number;
-    patchHints: number;
-  }
-): string[] {
+function semanticImportExpectedMissingReasonCodes(summary: unknown, input: SemanticImportExpectedMissingInput): string[] {
   const record = summaryRecord(summary);
   const explicitCodes = uniqueStrings([
     ...readStringArray(record?.semanticImportExpectedMissingReasonCodes),
