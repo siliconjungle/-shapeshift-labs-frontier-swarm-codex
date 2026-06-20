@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import {
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND,
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION,
@@ -150,9 +151,8 @@ async function createArtifactRecord(
 }
 
 async function readArtifactMetadata(file: string): Promise<Record<string, unknown>> {
-  if (path.extname(file) !== '.json') return {};
   try {
-    const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+    const parsed = await readJsonArtifact(file);
     if (!isObject(parsed)) return {};
     const semanticImport = semanticImportSummaryForArtifact(parsed, file);
     const lineage = semanticLineageForArtifact(parsed, semanticImport);
@@ -265,7 +265,7 @@ function renderArtifactSql(records: readonly FrontierCodexArtifactRecord[]): str
 }
 
 function artifactKindForEvidencePath(file: string): string {
-  const name = path.basename(file).toLowerCase();
+  const name = path.basename(logicalArtifactPath(file)).toLowerCase();
   if (name === 'semantic-imports.json') return 'semantic-imports';
   if (name === 'patch-intent.json') return 'patch-intent';
   if (name === 'log-summary.json') return 'log-summary';
@@ -277,7 +277,7 @@ function artifactKindForEvidencePath(file: string): string {
 }
 
 function semanticImportSummaryForArtifact(parsed: Record<string, unknown>, file: string): Record<string, unknown> | undefined {
-  if (path.basename(file) === 'semantic-imports.json' || parsed.kind === FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND) {
+  if (path.basename(logicalArtifactPath(file)) === 'semantic-imports.json' || parsed.kind === FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND) {
     return readObject(parsed.summary) ?? {};
   }
   const metadata = readObject(parsed.metadata);
@@ -311,6 +311,23 @@ function numberField(value: Record<string, unknown> | undefined, key: string): n
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+async function readJsonArtifact(file: string): Promise<unknown> {
+  const logical = logicalArtifactPath(file);
+  if (path.extname(logical) !== '.json') return undefined;
+  const bytes = await fs.readFile(file);
+  const gzip = file.endsWith('.gz') || hasGzipMagic(bytes);
+  const raw = gzip ? gunzipSync(bytes).toString('utf8') : bytes.toString('utf8');
+  return JSON.parse(raw);
+}
+
+function logicalArtifactPath(file: string): string {
+  return file.endsWith('.gz') ? file.slice(0, -3) : file;
+}
+
+function hasGzipMagic(bytes: Buffer): boolean {
+  return bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
 function sqlValue(value: unknown): string {

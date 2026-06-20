@@ -13,6 +13,13 @@ export interface FrontierCodexSemanticImportOptions {
   include?: readonly string[];
   exclude?: readonly string[];
   languages?: Readonly<Record<string, string>>;
+  outputPolicy?: FrontierCodexSemanticImportOutputPolicy;
+}
+
+export interface FrontierCodexSemanticImportOutputPolicy {
+  maxBytes?: number;
+  archive?: boolean;
+  archiveName?: string;
 }
 
 export interface FrontierCodexSemanticImportRecord {
@@ -269,6 +276,17 @@ export interface FrontierCodexSemanticImportSidecar {
     semanticImportExpected: boolean;
     semanticImportExpectedSatisfied: boolean;
     semanticImportExpectedMissingReasonCodes: string[];
+    sidecarOutputPolicy?: {
+      mode: 'full' | 'compact-summary' | string;
+      maxBytes: number;
+      originalBytes: number;
+      summaryBytes: number;
+      archivePath?: string;
+      archiveBytes?: number;
+      originalSha256?: string;
+      archiveSha256?: string;
+      reason?: string;
+    };
   };
 }
 

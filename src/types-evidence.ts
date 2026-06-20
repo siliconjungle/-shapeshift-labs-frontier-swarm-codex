@@ -169,6 +169,19 @@ export interface FrontierCodexCompactDashboard {
   usefulPatchCount: number;
   stalePatchCount: number;
   duplicateDiscoveryCount: number;
+  mergeQueueHealth: {
+    openCoordinatorReviewCount: number;
+    openHumanQuestionCount: number;
+    realBlockerCount: number;
+    activeWorkerCount: number;
+    readyToApplyCount: number;
+    researchCompleteCount: number;
+    rerunCount: number;
+    failedEvidenceCount: number;
+    staleAgainstHeadCount: number;
+    terminalOutcomeCount: number;
+    staleRerunCleanupRate: number;
+  };
   semanticEditAdmission: FrontierCodexSemanticEditAdmissionSummary;
   semanticEditScriptAdmission: FrontierCodexSemanticEditScriptAdmissionSummary;
   semanticEditReplay: {

@@ -12,6 +12,7 @@ import { mergeSemanticEditProjectionSummaries } from './semantic-edit-projection
 import { mergeSemanticEditReplaySummaries } from './semantic-edit-replay.js';
 import { codexJobTraceSummary, summarizeCodexTraceSummaries } from './trace-summary.js';
 import { contextBudgetFromCoordinatorJob } from './context-budget.js';
+import { humanActionsFromDashboard } from './human-actions.js';
 
 
 export function createCodexCompactDashboard(input: {
@@ -75,6 +76,7 @@ export function createCodexCompactDashboard(input: {
     usefulPatchCount: usefulPatchJobs.length,
     stalePatchCount: input.dashboard.summary.staleAgainstHeadCount,
     duplicateDiscoveryCount: input.dashboard.duplicateGroups.length,
+    mergeQueueHealth: compactMergeQueueHealth(input.dashboard),
     semanticEditAdmission,
     semanticEditScriptAdmission,
     semanticEditReplay: {
@@ -153,6 +155,43 @@ export function createCodexCompactDashboard(input: {
     },
     topJobs
   };
+}
+
+function compactMergeQueueHealth(dashboard: FrontierSwarmCoordinatorDashboard): FrontierCodexCompactDashboard['mergeQueueHealth'] {
+  const summary = dashboard.summary as Record<string, unknown>;
+  const jobs = dashboard.jobs;
+  const openHumanQuestionCount = humanActionsFromDashboard(dashboard)
+    .filter((action) => !['answered', 'resolved', 'closed', 'consumed'].includes(String(action.status ?? 'open').toLowerCase()))
+    .length;
+  const readyToApplyCount = numberField(summary.readyToApplyCount);
+  const failedEvidenceCount = numberField(summary.failedEvidenceCount);
+  const staleAgainstHeadCount = numberField(summary.staleAgainstHeadCount);
+  const rerunCount = numberField(summary.rerunWorkCount);
+  const openCoordinatorReviewCount = Math.max(0, numberField(summary.needsHumanPortCount) - openHumanQuestionCount);
+  const terminalOutcomeCount = jobs.filter((job) => (
+    job.disposition === 'discovery-only' ||
+    job.disposition === 'evidence-only' ||
+    job.disposition === 'rejected'
+  )).length;
+  const cleanupTotal = staleAgainstHeadCount + rerunCount + terminalOutcomeCount;
+  return {
+    openCoordinatorReviewCount,
+    openHumanQuestionCount,
+    realBlockerCount: openHumanQuestionCount + failedEvidenceCount + staleAgainstHeadCount,
+    activeWorkerCount: numberField(summary.activeCount),
+    readyToApplyCount,
+    researchCompleteCount: jobs.filter((job) => job.disposition === 'discovery-only' || job.disposition === 'evidence-only').length,
+    rerunCount,
+    failedEvidenceCount,
+    staleAgainstHeadCount,
+    terminalOutcomeCount,
+    staleRerunCleanupRate: cleanupTotal > 0 ? Math.round((terminalOutcomeCount / cleanupTotal) * 10000) / 10000 : 1
+  };
+}
+
+function numberField(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
 function mergeNumberRecords(records: readonly Record<string, number>[]): Record<string, number> {

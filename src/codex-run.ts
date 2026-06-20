@@ -213,7 +213,7 @@ export async function runCodexJob(
     options: options.semanticImport,
     semanticImportExpected
   });
-  const semanticImportSummary = semanticImport?.sidecar.summary;
+  const semanticImportSummary = semanticImport?.summary;
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: paths.jobDir });
   const humanActions = await readCodexHumanActionArtifacts({ evidenceDir: paths.evidenceDir, jobId: job.id, taskId: job.taskId, lane: job.lane });
   const tournamentStrategy = createCodexTournamentStrategyMetadata(
@@ -224,7 +224,7 @@ export async function runCodexJob(
     paths.evidenceDir, evidenceSummaryPath, paths.resourceAllocationPath, paths.contextBudgetPath,
     paths.workspaceProofPath, paths.mergeBundlePath,
     ...(patchPath ? [patchPath] : []),
-    ...(semanticImport ? [semanticImport.path] : []),
+    ...(semanticImport ? semanticImport.evidencePaths : []),
     paths.patchIntentPath, paths.logSummaryPath,
     ...humanActions.paths,
     ...handoffArtifacts.map((artifact) => artifact.path)
@@ -284,7 +284,7 @@ export async function runCodexJob(
       paths.evidenceDir, evidenceSummaryPath, paths.resourceAllocationPath, paths.contextBudgetPath,
       paths.workspaceProofPath, paths.patchIntentPath, paths.logSummaryPath,
       ...humanActions.paths,
-      ...(semanticImport ? [semanticImport.path] : []),
+      ...(semanticImport ? semanticImport.evidencePaths : []),
       ...handoffArtifacts.map((artifact) => artifact.path)
     ]),
     queueItemIds: [job.taskId],

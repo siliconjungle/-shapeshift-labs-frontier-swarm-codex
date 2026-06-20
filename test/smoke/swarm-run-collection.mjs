@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { gunzipSync } from 'node:zlib';
 import { collectCodexSwarmRun, createCodexCleanupPlan, createBrowserPlan, exists, execFileP, fs, path, queryCodexSwarmCollection, runCodexSwarm } from './context.mjs';
 import { testNoIndexCollection } from './swarm-run-no-index.mjs';
 import { testWorkspaceOnlyCollection } from './workspace-only-collection.mjs';
@@ -106,12 +107,59 @@ export async function testSwarmRunCollection({ plan, tmp }) {
   assert.ok(Array.isArray(mergeBundle.metadata.semanticImport.semanticImportExpectedMissingReasonCodes));
 
   await testSemanticImportFallbackFromTaskRefs(plan, tmp);
+  await testSemanticImportSidecarCompaction(plan, tmp);
   const collectionDir = await testCollectedRun(tmp);
   await testResearchCompleteCollection(tmp);
   await testWorkspaceOnlyCollection(tmp);
   await testNoIndexCollection(tmp, mergeBundle);
   await testBrowserRun(tmp);
   return { mergeBundle, collectionDir };
+}
+
+async function testSemanticImportSidecarCompaction(plan, tmp) {
+  const compactRun = await runCodexSwarm(plan, {
+    outDir: path.join(tmp, 'semantic-import-compact-run'),
+    cwd: tmp,
+    maxConcurrency: 1,
+    semanticImport: {
+      enabled: true,
+      outputPolicy: {
+        maxBytes: 600,
+        archive: true
+      }
+    },
+    semanticImportExpected: true,
+    dryRun: false,
+    executor: async (input) => {
+      await fs.mkdir(path.join(tmp, 'src', 'runtime'), { recursive: true });
+      await fs.writeFile(path.join(tmp, 'src', 'runtime', 'action.ts'), [
+        'export interface RuntimeAction { id: string; tags: string[]; }',
+        'export function helper(input: RuntimeAction) { return input.tags.join(":"); }',
+        'export function action(input: RuntimeAction) { return helper(input).toUpperCase(); }',
+        ''
+      ].join('\n'));
+      await fs.writeFile(input.paths.lastMessagePath, 'semantic import compacted\n');
+      return { exitCode: 0, changedPaths: ['src/runtime/action.ts'], lastMessage: 'semantic import compacted' };
+    }
+  });
+  const result = compactRun.run.results[0];
+  const compactPath = result.evidencePaths.find((entry) => entry.endsWith('semantic-imports.json'));
+  const archivePath = result.evidencePaths.find((entry) => entry.endsWith('semantic-imports.full.json.gz'));
+  assert.ok(compactPath);
+  assert.ok(archivePath);
+  const compact = JSON.parse(await fs.readFile(compactPath, 'utf8'));
+  assert.strictEqual(compact.kind, 'frontier.swarm-codex.semantic-imports');
+  assert.strictEqual(compact.summary.sidecarOutputPolicy.mode, 'compact-summary');
+  assert.strictEqual(compact.summary.sidecarOutputPolicy.archivePath, archivePath);
+  assert.strictEqual(compact.summary.sidecarOutputPolicy.maxBytes, 600);
+  assert.ok(compact.summary.sidecarOutputPolicy.originalBytes > compact.summary.sidecarOutputPolicy.summaryBytes);
+  assert.ok(compact.summary.sidecarOutputPolicy.archiveSha256);
+  const archived = JSON.parse(gunzipSync(await fs.readFile(archivePath)).toString('utf8'));
+  assert.strictEqual(archived.kind, 'frontier.swarm-codex.semantic-imports');
+  assert.ok(Array.isArray(archived.records));
+  assert.ok(archived.records.length >= compact.records.length);
+  assert.strictEqual(result.metadata.semanticImport.sidecarOutputPolicy.mode, 'compact-summary');
+  assert.strictEqual(result.semanticImport.sidecarOutputPolicy.mode, 'compact-summary');
 }
 
 async function testSemanticImportFallbackFromTaskRefs(plan, tmp) {
@@ -196,6 +244,10 @@ async function testCollectedRun(tmp) {
   const persistedRunGraph = JSON.parse(await fs.readFile(path.join(collection.outDir, 'run-graph.json'), 'utf8'));
   assert.strictEqual(persistedRunGraph.summary.candidateCount, collection.runGraph.summary.candidateCount);
   assert.strictEqual(collection.compactDashboard.kind, 'frontier.swarm-codex.compact-dashboard');
+  assert.strictEqual(collection.compactDashboard.mergeQueueHealth.openCoordinatorReviewCount, 1);
+  assert.strictEqual(collection.compactDashboard.mergeQueueHealth.openHumanQuestionCount, 0);
+  assert.strictEqual(collection.compactDashboard.mergeQueueHealth.realBlockerCount, 0);
+  assert.strictEqual(collection.compactDashboard.mergeQueueHealth.activeWorkerCount, 1);
   assert.strictEqual(collection.compactDashboard.tournament.matchCount, 1);
   assert.strictEqual(collection.compactDashboard.tournament.topStrategyId, 'runtime');
   assert.strictEqual(collection.compactDashboard.semanticImport.presentCount, 1);

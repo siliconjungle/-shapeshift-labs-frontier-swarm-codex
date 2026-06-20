@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { type FrontierSwarmJob } from '@shapeshift-labs/frontier-swarm';
 import type { FrontierCodexSemanticImportOptions, FrontierCodexSemanticImportRecord, FrontierCodexSemanticImportSidecar } from './index.js';
 import { summarizeUniversalAstLayers, summarizeNativeSourceProjection, summarizeNativeSourceCompile, summarizeSemanticLosses, summarizeSemanticMergeCandidate } from './semantic-import-layers.js';
@@ -32,7 +34,18 @@ type CodexSemanticImportSidecarInput = { job: FrontierSwarmJob; workspace: strin
 type SemanticImportBaseSourceSummaryInput = { path: string; source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string };
 type SemanticImportHeadSourceSummaryInput = { path: string; source: 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string };
 
-export async function createCodexSemanticImportSidecar(input: CodexSemanticImportSidecarInput): Promise<{ path: string; sidecar: FrontierCodexSemanticImportSidecar } | undefined> {
+const DEFAULT_SEMANTIC_IMPORT_SIDECAR_MAX_BYTES = 16 * 1024 * 1024;
+const DEFAULT_SEMANTIC_IMPORT_ARCHIVE_NAME = 'semantic-imports.full.json.gz';
+
+export interface FrontierCodexSemanticImportEvidence {
+  path: string;
+  archivePath?: string;
+  evidencePaths: string[];
+  sidecar: FrontierCodexSemanticImportSidecar;
+  summary: FrontierCodexSemanticImportSidecar['summary'];
+}
+
+export async function createCodexSemanticImportSidecar(input: CodexSemanticImportSidecarInput): Promise<FrontierCodexSemanticImportEvidence | undefined> {
   const options = normalizeSemanticImportOptions(input.options);
   if (!options) return undefined;
   const candidatePaths = semanticImportCandidatePaths(input.job, input.changedPaths, input.workspace);
@@ -52,8 +65,7 @@ export async function createCodexSemanticImportSidecar(input: CodexSemanticImpor
   const importPath = path.join(input.evidenceDir, 'semantic-imports.json');
   if (!selected.length) {
     const sidecar = createSemanticImportSidecar(input.job, records, selection, input.semanticImportExpected === true);
-    await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
-    return { path: importPath, sidecar };
+    return writeSemanticImportEvidence({ importPath, evidenceDir: input.evidenceDir, sidecar, options });
   }
   const api = await loadFrontierLangForSemanticImport();
   if (!api.ok) {
@@ -67,8 +79,7 @@ export async function createCodexSemanticImportSidecar(input: CodexSemanticImpor
       });
     }
     const sidecar = createSemanticImportSidecar(input.job, records, selection, input.semanticImportExpected === true);
-    await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
-    return { path: importPath, sidecar };
+    return writeSemanticImportEvidence({ importPath, evidenceDir: input.evidenceDir, sidecar, options });
   }
   for (const file of selected) {
     const resolved = await resolveSemanticImportWorkspacePath(input.workspace, file.path);
@@ -267,8 +278,183 @@ export async function createCodexSemanticImportSidecar(input: CodexSemanticImpor
     }
   }
   const sidecar = createSemanticImportSidecar(input.job, records, selection, input.semanticImportExpected === true);
-  await fs.writeFile(importPath, JSON.stringify(sidecar, null, 2) + '\n');
-  return { path: importPath, sidecar };
+  return writeSemanticImportEvidence({ importPath, evidenceDir: input.evidenceDir, sidecar, options });
+}
+
+async function writeSemanticImportEvidence(input: {
+  importPath: string;
+  evidenceDir: string;
+  sidecar: FrontierCodexSemanticImportSidecar;
+  options: ReturnType<typeof normalizeSemanticImportOptions> & {};
+}): Promise<FrontierCodexSemanticImportEvidence> {
+  const fullJson = JSON.stringify(input.sidecar, null, 2) + '\n';
+  const originalBytes = Buffer.byteLength(fullJson, 'utf8');
+  const maxBytes = semanticImportSidecarMaxBytes(input.options.outputPolicy?.maxBytes);
+  const shouldArchive = originalBytes > maxBytes && input.options.outputPolicy?.archive !== false;
+  if (!shouldArchive) {
+    await fs.writeFile(input.importPath, fullJson);
+    return {
+      path: input.importPath,
+      evidencePaths: [input.importPath],
+      sidecar: input.sidecar,
+      summary: input.sidecar.summary
+    };
+  }
+  const archiveName = path.basename(input.options.outputPolicy?.archiveName ?? DEFAULT_SEMANTIC_IMPORT_ARCHIVE_NAME);
+  const archivePath = path.join(input.evidenceDir, archiveName);
+  const archiveBytes = gzipSync(Buffer.from(fullJson));
+  await fs.writeFile(archivePath, archiveBytes);
+  const originalSha256 = sha256Text(fullJson);
+  const archiveSha256 = sha256Buffer(archiveBytes);
+  const compactSidecar = compactSemanticImportSidecar(input.sidecar, {
+    maxBytes,
+    originalBytes,
+    archivePath,
+    archiveBytes: archiveBytes.byteLength,
+    originalSha256,
+    archiveSha256
+  });
+  await fs.writeFile(input.importPath, JSON.stringify(compactSidecar, null, 2) + '\n');
+  return {
+    path: input.importPath,
+    archivePath,
+    evidencePaths: [input.importPath, archivePath],
+    sidecar: compactSidecar,
+    summary: compactSidecar.summary
+  };
+}
+
+function semanticImportSidecarMaxBytes(value: unknown): number {
+  const parsed = Number(value ?? process.env.FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_SIDECAR_MAX_BYTES);
+  if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  return DEFAULT_SEMANTIC_IMPORT_SIDECAR_MAX_BYTES;
+}
+
+function compactSemanticImportSidecar(
+  sidecar: FrontierCodexSemanticImportSidecar,
+  policy: {
+    maxBytes: number;
+    originalBytes: number;
+    archivePath: string;
+    archiveBytes: number;
+    originalSha256: string;
+    archiveSha256: string;
+  }
+): FrontierCodexSemanticImportSidecar {
+  let compactRecords = sidecar.records.map(compactSemanticImportRecord);
+  let compact = semanticImportSidecarWithOutputPolicy(sidecar, compactRecords, { ...policy, summaryBytes: 0 });
+  let compactBytes = Buffer.byteLength(JSON.stringify(compact, null, 2) + '\n', 'utf8');
+  if (compactBytes > policy.maxBytes) {
+    compactRecords = sidecar.records.map(minimalSemanticImportRecord);
+    compact = semanticImportSidecarWithOutputPolicy(sidecar, compactRecords, {
+      ...policy,
+      summaryBytes: 0,
+      reason: 'compact-records-minimized'
+    });
+    compactBytes = Buffer.byteLength(JSON.stringify(compact, null, 2) + '\n', 'utf8');
+  }
+  if (compactBytes > policy.maxBytes) {
+    compactRecords = [];
+    compact = semanticImportSidecarWithOutputPolicy(sidecar, compactRecords, {
+      ...policy,
+      summaryBytes: 0,
+      reason: 'records-omitted-after-compaction'
+    });
+    compactBytes = Buffer.byteLength(JSON.stringify(compact, null, 2) + '\n', 'utf8');
+  }
+  return semanticImportSidecarWithOutputPolicy(compact, compactRecords, {
+    ...policy,
+    summaryBytes: compactBytes,
+    reason: compact.summary.sidecarOutputPolicy?.reason
+  });
+}
+
+function semanticImportSidecarWithOutputPolicy(
+  sidecar: FrontierCodexSemanticImportSidecar,
+  records: FrontierCodexSemanticImportRecord[],
+  policy: {
+    maxBytes: number;
+    originalBytes: number;
+    summaryBytes: number;
+    archivePath: string;
+    archiveBytes: number;
+    originalSha256: string;
+    archiveSha256: string;
+    reason?: string;
+  }
+): FrontierCodexSemanticImportSidecar {
+  return {
+    ...sidecar,
+    records,
+    summary: {
+      ...sidecar.summary,
+      sidecarOutputPolicy: {
+        mode: 'compact-summary',
+        maxBytes: policy.maxBytes,
+        originalBytes: policy.originalBytes,
+        summaryBytes: policy.summaryBytes,
+        archivePath: policy.archivePath,
+        archiveBytes: policy.archiveBytes,
+        originalSha256: policy.originalSha256,
+        archiveSha256: policy.archiveSha256,
+        ...(policy.reason ? { reason: policy.reason } : {})
+      }
+    }
+  };
+}
+
+function compactSemanticImportRecord(record: FrontierCodexSemanticImportRecord): FrontierCodexSemanticImportRecord {
+  return {
+    path: record.path,
+    ...(record.requestedPath ? { requestedPath: record.requestedPath } : {}),
+    ...(record.language ? { language: record.language } : {}),
+    status: record.status,
+    ...(record.reason ? { reason: record.reason } : {}),
+    ...(record.bytes !== undefined ? { bytes: record.bytes } : {}),
+    ...(record.importId ? { importId: record.importId } : {}),
+    ...(record.universalAstHash ? { universalAstHash: record.universalAstHash } : {}),
+    ...(record.nativeAstId ? { nativeAstId: record.nativeAstId } : {}),
+    ...(record.nativeSourceId ? { nativeSourceId: record.nativeSourceId } : {}),
+    ...(record.sourceMapCount !== undefined ? { sourceMapCount: record.sourceMapCount } : {}),
+    ...(record.sourceMapMappingCount !== undefined ? { sourceMapMappingCount: record.sourceMapMappingCount } : {}),
+    ...(record.lossCount !== undefined ? { lossCount: record.lossCount } : {}),
+    ...(record.semanticIndex ? { semanticIndex: record.semanticIndex } : {}),
+    ...(record.semanticSidecar ? { semanticSidecar: record.semanticSidecar } : {}),
+    ...(record.semanticLineage ? { semanticLineage: record.semanticLineage } : {}),
+    ...(record.semanticEditScript ? { semanticEditScript: record.semanticEditScript } : {}),
+    ...(record.semanticEditProjection ? { semanticEditProjection: record.semanticEditProjection } : {}),
+    ...(record.semanticEditReplay ? { semanticEditReplay: record.semanticEditReplay } : {}),
+    ...(record.nativeDiff ? { nativeDiff: record.nativeDiff } : {}),
+    ...(record.sourceProjection ? { sourceProjection: record.sourceProjection } : {}),
+    ...(record.nativeCompile ? { nativeCompile: record.nativeCompile } : {}),
+    ...(record.mergeCandidate ? { mergeCandidate: record.mergeCandidate } : {}),
+    ...(record.semanticSliceAdmission ? { semanticSliceAdmission: record.semanticSliceAdmission } : {}),
+    ...(record.error ? { error: record.error } : {})
+  };
+}
+
+function minimalSemanticImportRecord(record: FrontierCodexSemanticImportRecord): FrontierCodexSemanticImportRecord {
+  return {
+    path: record.path,
+    ...(record.requestedPath ? { requestedPath: record.requestedPath } : {}),
+    ...(record.language ? { language: record.language } : {}),
+    status: record.status,
+    ...(record.reason ? { reason: record.reason } : {}),
+    ...(record.bytes !== undefined ? { bytes: record.bytes } : {}),
+    ...(record.universalAstHash ? { universalAstHash: record.universalAstHash } : {}),
+    ...(record.nativeAstId ? { nativeAstId: record.nativeAstId } : {}),
+    ...(record.nativeSourceId ? { nativeSourceId: record.nativeSourceId } : {}),
+    ...(record.nativeDiff ? { nativeDiff: record.nativeDiff } : {}),
+    ...(record.error ? { error: record.error } : {})
+  };
+}
+
+function sha256Text(value: string): string {
+  return sha256Buffer(Buffer.from(value));
+}
+
+function sha256Buffer(value: Buffer): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 function semanticImportMetadata(job: FrontierSwarmJob, phase: string, sourcePath: string): Record<string, unknown> {

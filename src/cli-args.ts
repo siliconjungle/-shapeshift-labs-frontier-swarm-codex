@@ -228,15 +228,33 @@ function readWorkspaceMode(value: CliValue | undefined) {
   return 'current';
 }
 
-function semanticImportArg(args: CliArgs): boolean | { enabled: true; maxFiles?: number; maxBytes?: number; include?: string[]; exclude?: string[] } {
+function semanticImportArg(args: CliArgs): boolean | {
+  enabled: true;
+  maxFiles?: number;
+  maxBytes?: number;
+  include?: string[];
+  exclude?: string[];
+  outputPolicy?: { maxBytes?: number; archive?: boolean; archiveName?: string };
+} {
   const enabled = boolArg(args.semanticImport ?? args['semantic-import'], false);
   if (!enabled) return false;
+  const sidecarMaxBytes = numberArg(args.semanticImportSidecarMaxBytes ?? args['semantic-import-sidecar-max-bytes'], undefined);
+  const archive = args.semanticImportArchive ?? args['semantic-import-archive'];
+  const archiveName = stringArg(args.semanticImportArchiveName ?? args['semantic-import-archive-name']);
+  const outputPolicy = sidecarMaxBytes !== undefined || archive !== undefined || archiveName
+    ? {
+      ...(sidecarMaxBytes !== undefined ? { maxBytes: sidecarMaxBytes } : {}),
+      ...(archive !== undefined ? { archive: boolArg(archive, true) } : {}),
+      ...(archiveName ? { archiveName } : {})
+    }
+    : undefined;
   return {
     enabled: true,
     maxFiles: numberArg(args.semanticImportMaxFiles ?? args['semantic-import-max-files'], undefined),
     maxBytes: numberArg(args.semanticImportMaxBytes ?? args['semantic-import-max-bytes'], undefined),
     include: listArg(args.semanticImportInclude ?? args['semantic-import-include']),
-    exclude: listArg(args.semanticImportExclude ?? args['semantic-import-exclude'])
+    exclude: listArg(args.semanticImportExclude ?? args['semantic-import-exclude']),
+    ...(outputPolicy ? { outputPolicy } : {})
   };
 }
 

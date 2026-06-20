@@ -36,6 +36,7 @@ export function printHelp(): void {
     '  --include <path> --exclude <path> --workspace-include <path> --workspace-exclude <path> --link <path>',
     '  --semantic-import --semantic-import-include <glob> --semantic-import-exclude <glob>',
     '  --semantic-import-max-files <n> --semantic-import-max-bytes <n>',
+    '  --semantic-import-sidecar-max-bytes <n> --semantic-import-archive true|false',
     '  --semantic-import-expected',
     '  collect prints compact JSON by default; use collect --full for full artifacts JSON',
     '  collect writes strategy-tournament.json and tournament-adaptive-feedback.json',
