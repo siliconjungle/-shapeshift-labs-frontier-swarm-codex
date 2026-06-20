@@ -264,6 +264,7 @@ export interface FrontierCodexSwarmRunOptions {
   addDirs?: readonly string[];
   executor?: FrontierCodexExecutor;
   eventStream?: FrontierSwarmEventStream;
+  liveRunGraphEventsPath?: string | false;
   coordinatorSnapshotPath?: string;
   pidManifestPath?: string;
   prepareJobWorkspace?: FrontierCodexJobWorkspaceHook;

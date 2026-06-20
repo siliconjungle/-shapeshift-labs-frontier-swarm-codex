@@ -1,4 +1,20 @@
 import type { FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
+import { isObject } from './common.js';
+
+const RESEARCH_OUTCOME_SIGNALS = [
+  'discovery-only',
+  'discovery complete',
+  'discovery-complete',
+  'evidence-only',
+  'evidence only',
+  'research',
+  'research-complete',
+  'research complete',
+  'gap-analysis',
+  'gap analysis',
+  'synthesized',
+  'synthesis'
+] as const;
 
 export function isCompletedResearchEvidenceBundle(
   bundle: FrontierSwarmMergeBundle,
@@ -17,18 +33,8 @@ function bundleHasResearchOutcomeSignal(bundle: FrontierSwarmMergeBundle): boole
     || bundle.disposition === 'evidence-only'
     || bundle.mergeReadiness === 'evidence-only'
     || bundle.status === 'evidence-only'
-    || bundle.reasons.some((reason) => normalizedReasonIncludes(reason, [
-      'discovery-only',
-      'discovery complete',
-      'discovery-complete',
-      'evidence-only',
-      'research-complete',
-      'research complete',
-      'gap-analysis',
-      'gap analysis',
-      'synthesized',
-      'synthesis'
-    ]));
+    || bundle.reasons.some((reason) => normalizedReasonIncludes(reason, RESEARCH_OUTCOME_SIGNALS))
+    || bundleResearchMetadataSignals(bundle).some((signal) => normalizedReasonIncludes(signal, RESEARCH_OUTCOME_SIGNALS));
 }
 
 function bundleHasUsefulEvidence(bundle: FrontierSwarmMergeBundle): boolean {
@@ -46,4 +52,35 @@ function bundleHasUsefulEvidence(bundle: FrontierSwarmMergeBundle): boolean {
 function normalizedReasonIncludes(reason: string, needles: readonly string[]): boolean {
   const normalized = reason.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return needles.some((needle) => normalized.includes(needle.toLowerCase().replace(/[^a-z0-9]+/g, '-')));
+}
+
+function bundleResearchMetadataSignals(bundle: FrontierSwarmMergeBundle): string[] {
+  const metadata = isObject(bundle.metadata) ? bundle.metadata : {};
+  const task = objectField(metadata, 'task');
+  const source = objectField(metadata, 'source');
+  const routing = objectField(metadata, 'routing');
+  const routingKey = objectField(metadata, 'routingKey');
+  const tournamentStrategy = objectField(metadata, 'tournamentStrategy');
+  return [
+    bundle.lane,
+    stringField(metadata, 'workKind'),
+    stringField(metadata, 'taskKind'),
+    stringField(task, 'workKind'),
+    stringField(task, 'kind'),
+    stringField(source, 'workKind'),
+    stringField(source, 'kind'),
+    stringField(routing, 'workKind'),
+    stringField(routingKey, 'workKind'),
+    stringField(tournamentStrategy, 'workKind')
+  ].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+}
+
+function objectField(input: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = input[key];
+  return isObject(value) ? value : {};
+}
+
+function stringField(input: Record<string, unknown>, key: string): string | undefined {
+  const value = input[key];
+  return typeof value === 'string' && value ? value : undefined;
 }

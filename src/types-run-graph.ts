@@ -82,3 +82,27 @@ export interface FrontierCodexRunGraph {
     gateCount: number;
   };
 }
+
+export type FrontierCodexLiveRunGraphEventType =
+  | 'run.started'
+  | 'run.finished'
+  | 'job.started'
+  | 'job.finished'
+  | 'evidence.discovered'
+  | 'gate.result'
+  | 'terminal.outcome'
+  | string;
+
+export interface FrontierCodexLiveRunGraphEvent {
+  kind: 'frontier.swarm-codex.live-run-graph-event';
+  version: 1;
+  type: FrontierCodexLiveRunGraphEventType;
+  runId?: string;
+  jobId?: string;
+  taskId?: string;
+  lane?: string;
+  generatedAt: number;
+  nodes?: FrontierCodexRunGraphNode[];
+  edges?: FrontierCodexRunGraphEdge[];
+  data?: Record<string, unknown>;
+}

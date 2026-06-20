@@ -138,7 +138,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       ...(patchExists && patchPath ? { patchPath } : {})
     }, staleAgainstHead, patchHasContent);
     const generatedByCollector = recordGeneratedByCollector || patchResolution.generatedByCollector;
-    if (generatedByCollector) collectorGeneratedPatchCount += 1;
+    if (generatedByCollector && patchHasContent) collectorGeneratedPatchCount += 1;
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(patchResolution.bundle.jobId)}` : patchResolution.bundle.branchName;
     const outputDir = path.join(outDir, bucket, slug(patchResolution.bundle.jobId));
     const collectedEvidencePath = path.join(outputDir, 'evidence.json');

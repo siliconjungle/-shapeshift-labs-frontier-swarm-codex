@@ -117,12 +117,12 @@ export function classifyCodexCollectBucket(
     if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-human-port';
     return 'failed-evidence';
   }
+  if (isCompletedResearchEvidenceBundle(bundle, { staleAgainstHead, hasActionablePatch })) return 'research-complete';
   if (semanticAdmission.status === 'rerun') return 'rerun-work';
   if (semanticAdmission.status === 'fail') return 'failed-evidence';
   if (semanticAdmission.status === 'review') return 'needs-human-port';
   if (semanticAdmission.status === 'ready' && hasActionablePatch) return 'ready-to-apply';
   if (bundle.disposition === 'auto-mergeable' && bundle.autoMergeable) return 'ready-to-apply';
-  if (isCompletedResearchEvidenceBundle(bundle, { staleAgainstHead, hasActionablePatch })) return 'research-complete';
   return 'needs-human-port';
 }
 

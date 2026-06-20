@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { FRONTIER_SWARM_MERGE_BUNDLE_KIND, FRONTIER_SWARM_MERGE_BUNDLE_VERSION, matchesGlob, type FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
 import { FRONTIER_SWARM_CODEX_COLLECTION_KIND } from './constants.js';
-import { isObject, normalizeWorkspacePath, pathExists, pathHasIgnoredSegment, readOptionalText, slug, stableHash, uniqueStrings, uniqueWorkspacePaths } from './common.js';
+import { isObject, isWorkspaceNoisePath, normalizeWorkspacePath, pathExists, pathHasIgnoredSegment, readOptionalText, slug, stableHash, uniqueStrings, uniqueWorkspacePaths } from './common.js';
 import { noIndexWorkspacePatch } from './codex-workspace-changes.js';
 import { discoverCodexHandoffArtifacts } from './handoff-artifacts.js';
 import { readFrontierCodexWorkspaceProof } from './collect-workspace-proof.js';
@@ -61,12 +61,12 @@ async function synthesizeWorkspaceOnlyMergeRecord(input: {
   const changedPaths = await collectWorkspaceOnlyChangedPaths({ cwd: input.cwd, workspacePath, workspaceProof, candidateGlobs, allowedWrites });
   if (!changedPaths.length) return undefined;
   const diff = await noIndexWorkspacePatch(input.cwd, workspacePath, changedPaths);
-  if (!diff.trim()) return undefined;
+  const hasPatch = diff.trim().length > 0;
   const generatedDir = path.join(input.outDir, 'generated-by-collector', slug(jobId));
   await fs.mkdir(generatedDir, { recursive: true });
-  const patchPath = path.join(generatedDir, 'changes.patch');
+  const patchPath = hasPatch ? path.join(generatedDir, 'changes.patch') : undefined;
   const mergePath = path.join(generatedDir, 'merge.json');
-  await fs.writeFile(patchPath, diff);
+  if (patchPath) await fs.writeFile(patchPath, diff);
   const ownershipViolations = allowedWrites.length ? changedPaths.filter((file) => !allowedWrites.some((glob) => matchesGlob(file, glob))).sort() : [];
   const bundle = await workspaceOnlyMergeBundle({
     ...input,
@@ -76,14 +76,15 @@ async function synthesizeWorkspaceOnlyMergeRecord(input: {
     workspacePath,
     workspaceProof,
     workspaceProofPath,
-    patchPath,
+    ...(patchPath ? { patchPath } : {}),
     diff,
     changedPaths,
     allowedWrites,
-    ownershipViolations
+    ownershipViolations,
+    recoveryFailureReasons: hasPatch ? [] : ['empty patch', 'collector-workspace-only-recovery-failed-patch']
   });
   await fs.writeFile(mergePath, JSON.stringify(bundle, null, 2) + '\n');
-  return { mergePath, bundle, generatedByCollector: true, patchPath };
+  return { mergePath, bundle, generatedByCollector: true, ...(patchPath ? { patchPath } : {}) };
 }
 
 async function workspaceOnlyMergeBundle(input: {
@@ -97,27 +98,29 @@ async function workspaceOnlyMergeBundle(input: {
   workspacePath: string;
   workspaceProof?: FrontierCodexWorkspaceProof;
   workspaceProofPath: string;
-  patchPath: string;
+  patchPath?: string;
   diff: string;
   changedPaths: string[];
   allowedWrites: string[];
   ownershipViolations: string[];
+  recoveryFailureReasons: string[];
 }): Promise<FrontierSwarmMergeBundle> {
   const taskId = readFirstString(input.promptTask.taskId);
   const handoffArtifacts = await discoverCodexHandoffArtifacts({ root: input.jobDir }).catch(() => []);
   const evidencePaths = uniqueStrings([
     path.join(input.jobDir, 'evidence'),
     input.promptPath,
-    input.patchPath,
+    ...(input.patchPath ? [input.patchPath] : []),
     ...(await pathExists(input.workspaceProofPath) ? [input.workspaceProofPath] : []),
     ...(await pathExists(path.join(input.jobDir, 'last-message.md')) ? [path.join(input.jobDir, 'last-message.md')] : []),
     ...handoffArtifacts.map((artifact) => artifact.path)
   ]).sort();
-  const status: FrontierSwarmMergeBundle['status'] = input.ownershipViolations.length ? 'failed' : 'completed';
+  const failed = input.ownershipViolations.length > 0 || input.recoveryFailureReasons.length > 0;
+  const status: FrontierSwarmMergeBundle['status'] = failed ? 'failed' : 'completed';
   return {
     kind: FRONTIER_SWARM_MERGE_BUNDLE_KIND,
     version: FRONTIER_SWARM_MERGE_BUNDLE_VERSION,
-    id: `swarm-merge-bundle:${stableHash(['workspace-only', input.jobId, input.patchPath, input.diff])}`,
+    id: `swarm-merge-bundle:${stableHash(['workspace-only', input.jobId, input.patchPath, input.diff, input.recoveryFailureReasons])}`,
     runId: path.basename(input.runDir),
     jobId: input.jobId,
     ...(taskId ? { taskId } : {}),
@@ -125,9 +128,9 @@ async function workspaceOnlyMergeBundle(input: {
     ...(readFirstString(input.promptTask.title) ? { title: readFirstString(input.promptTask.title) } : {}),
     generatedAt: input.generatedAt,
     status,
-    mergeReadiness: input.ownershipViolations.length ? 'rejected' : 'patch-candidate',
-    disposition: input.ownershipViolations.length ? 'rejected' : 'needs-port',
-    riskLevel: input.ownershipViolations.length ? 'high' : 'unknown',
+    mergeReadiness: failed ? 'rejected' : 'patch-candidate',
+    disposition: failed ? 'rejected' : 'needs-port',
+    riskLevel: failed ? 'high' : 'unknown',
     autoMergeable: false,
     changedPaths: input.changedPaths,
     changedRegions: uniqueStrings([
@@ -138,16 +141,16 @@ async function workspaceOnlyMergeBundle(input: {
     ownedFilesTouched: input.ownershipViolations.length === 0 ? [...input.changedPaths] : [],
     allowedWrites: input.allowedWrites,
     ownershipViolations: input.ownershipViolations,
-    patchPath: input.patchPath,
-    patchHash: stableHash(input.diff),
+    ...(input.patchPath ? { patchPath: input.patchPath, patchHash: stableHash(input.diff) } : {}),
     evidencePaths,
     commandsPassed: [],
     commandsFailed: [],
     queueItemIds: taskId ? [taskId] : [],
     staleAgainstHead: false,
     reasons: uniqueStrings([
-      input.ownershipViolations.length ? 'rejected' : 'collector-workspace-only-recovery-needs-coordinator-review',
+      failed ? 'rejected' : 'collector-workspace-only-recovery-needs-coordinator-review',
       'collector-workspace-only-recovery',
+      ...input.recoveryFailureReasons,
       ...input.ownershipViolations.map((file) => `ownership-violation:${file}`)
     ]).sort(),
     metadata: { frontierSwarmCodex: { workspaceOnlyCollection: workspaceOnlyMetadata(input) } } as FrontierSwarmMergeBundle['metadata']
@@ -158,24 +161,27 @@ function workspaceOnlyMetadata(input: {
   cwd: string;
   jobDir: string;
   promptPath: string;
-  patchPath: string;
+  patchPath?: string;
   workspacePath: string;
   workspaceProof?: FrontierCodexWorkspaceProof;
   workspaceProofPath: string;
   changedPaths: string[];
   allowedWrites: string[];
+  recoveryFailureReasons: string[];
 }): Record<string, unknown> {
   return {
     source: FRONTIER_SWARM_CODEX_COLLECTION_KIND,
     reason: 'worker checkout changed source files but emitted no merge.json or changes.patch',
     jobDir: input.jobDir,
     promptPath: input.promptPath,
-    patchPath: input.patchPath,
+    ...(input.patchPath ? { patchPath: input.patchPath } : {}),
     workspacePath: input.workspacePath,
     workspaceMode: input.workspaceProof?.manifest.mode ?? 'unknown',
     changedPathSource: 'worker-checkout',
+    recoveryStatus: input.patchPath ? 'patch-generated' : 'failed-patch',
     changedPaths: input.changedPaths,
     allowedWrites: input.allowedWrites,
+    ...(input.recoveryFailureReasons.length ? { recoveryFailureReasons: input.recoveryFailureReasons } : {}),
     ...(input.workspaceProof ? { workspaceProofPath: input.workspaceProofPath } : {}),
     cwd: input.cwd
   };
@@ -227,7 +233,7 @@ async function workspaceOnlyCandidatePaths(input: {
 }
 
 function workspaceOnlyPathIsCandidate(file: string, candidateGlobs: readonly string[], allowedWrites: readonly string[]): boolean {
-  if (pathHasIgnoredSegment(file, ['node_modules', 'dist', 'coverage', '.frontier-framework', 'agent-runs'])) return false;
+  if (isWorkspaceNoisePath(file)) return false;
   if (allowedWrites.length && !allowedWrites.some((glob) => matchesGlob(file, glob))) return false;
   return candidateGlobs.some((glob) => matchesGlob(file, glob) || file === normalizeWorkspacePath(glob));
 }
@@ -239,7 +245,7 @@ async function listWorkspaceOnlyFiles(root: string, base: string): Promise<strin
     for (const entry of entries) {
       const absolute = path.join(current, entry.name);
       const relative = path.relative(base, absolute).replace(/\\/g, '/');
-      if (pathHasIgnoredSegment(relative, ['node_modules', 'dist', 'coverage', '.frontier-framework', 'agent-runs'])) continue;
+      if (isWorkspaceNoisePath(relative)) continue;
       if (entry.isDirectory()) await walk(absolute);
       else if (entry.isFile() || entry.isSymbolicLink()) out.push(relative);
     }

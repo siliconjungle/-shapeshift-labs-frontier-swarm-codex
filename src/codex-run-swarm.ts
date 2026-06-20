@@ -18,6 +18,13 @@ import {
 import { runCodexDependencyHealthPreflight } from './codex-run-health.js';
 import { runScheduledJobPool } from './codex-run-scheduler.js';
 import { runCodexJob } from './codex-run.js';
+import {
+  appendCodexLiveRunGraphEvent,
+  createCodexLiveRunFinishedEvent,
+  createCodexLiveRunStartedEvent,
+  initCodexLiveRunGraphEvents,
+  resolveCodexLiveRunGraphEventsPath
+} from './run-graph-live.js';
 import type { FrontierCodexSwarmRunOptions, FrontierCodexSwarmRunResult } from './index.js';
 
 export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {
@@ -31,13 +38,25 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     lanes: Array.from(new Set(plan.jobs.map((job) => job.lane)))
   });
   await initFileSwarmEventStream(eventStream);
+  const liveRunGraphEventsPath = resolveCodexLiveRunGraphEventsPath({
+    cwd: options.cwd,
+    outDir,
+    liveRunGraphEventsPath: options.liveRunGraphEventsPath
+  });
+  await initCodexLiveRunGraphEvents(liveRunGraphEventsPath);
   const pidManifestPath = path.resolve(options.cwd ?? process.cwd(), options.pidManifestPath ?? path.join(outDir, 'pids.json'));
   await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: plan.runId, startedAt: Date.now() }, plan.runId);
   let run = createSwarmRun({ plan, status: 'running', startedAt: Date.now() });
   const startedEvent = { type: 'swarm.started', runId: run.id, at: run.startedAt, data: { jobCount: plan.jobs.length } };
   run = recordSwarmEvent(run, startedEvent);
+  await appendCodexLiveRunGraphEvent(liveRunGraphEventsPath, createCodexLiveRunStartedEvent({
+    runId: run.id,
+    outDir,
+    jobCount: plan.jobs.length,
+    generatedAt: run.startedAt
+  }));
   await appendFileSwarmEvent(eventStream, startedEvent);
-  const runOptions = { ...options, eventStream, pidManifestPath };
+  const runOptions = { ...options, eventStream, pidManifestPath, liveRunGraphEventsPath: liveRunGraphEventsPath ?? options.liveRunGraphEventsPath };
   const adaptiveObservations = await readAdaptiveFeedbackObservations(options);
   const results = await runScheduledJobPool(plan, {
     concurrency: Math.max(1, options.maxConcurrency ?? 1),
@@ -64,6 +83,12 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   for (const result of results) run = completeSwarmJob(run, result);
   const proof = createSwarmProof(run, { validation: plan.validation });
   const ok = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
+  await appendCodexLiveRunGraphEvent(liveRunGraphEventsPath, createCodexLiveRunFinishedEvent({
+    runId: run.id,
+    outDir,
+    ok,
+    summary: run.summary
+  }));
   await appendFileSwarmEvent(eventStream, { type: 'swarm.finished', runId: run.id, data: { ok, summary: run.summary } });
   await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({ ok, outDir, run, proof }, null, 2) + '\n');
   await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
@@ -73,7 +98,8 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     run,
     proof,
     eventStream,
-    pidManifestPath
+    pidManifestPath,
+    liveRunGraphEventsPath
   });
   const result = { ok, outDir, plan, run, proof };
   await options.onSwarmFinished?.({ result });

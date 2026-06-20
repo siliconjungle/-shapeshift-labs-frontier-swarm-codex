@@ -45,7 +45,7 @@ export async function appendFileSwarmEvent(stream: FrontierSwarmEventStream | un
 
 export async function writeSwarmCoordinatorSnapshot(
   file: string,
-  input: FrontierCodexSwarmRunResult & { eventStream?: FrontierSwarmEventStream; pidManifestPath?: string }
+  input: FrontierCodexSwarmRunResult & { eventStream?: FrontierSwarmEventStream; pidManifestPath?: string; liveRunGraphEventsPath?: string }
 ): Promise<void> {
   const processes = input.pidManifestPath ? await readCodexPidProcesses(input.pidManifestPath).catch(() => []) : [];
   const dashboard = createSwarmCoordinatorDashboard({
@@ -57,6 +57,7 @@ export async function writeSwarmCoordinatorSnapshot(
       outDir: input.outDir,
       eventStream: input.eventStream ?? null,
       pidManifestPath: input.pidManifestPath ?? null,
+      liveRunGraphEventsPath: input.liveRunGraphEventsPath ?? null,
       proof: input.proof
     }
   });
