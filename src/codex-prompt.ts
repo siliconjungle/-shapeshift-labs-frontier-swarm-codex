@@ -178,13 +178,25 @@ export function renderCodexPrompt(
     '## Evidence',
     '',
     `Write evidence under ${input.paths.evidenceDir}.`,
-    `If you are genuinely blocked on a product choice, ambiguous requirement, or unsafe assumption, write ${path.join(input.paths.evidenceDir, 'human-question.json')}. Use JSON with code/title/question/detail/requestedAnswer/options. Only ask when you cannot safely proceed; do not use this for ordinary coordinator review, patch porting, test failures, or missing context you can inspect yourself.`,
+    ...humanQuestionEvidenceInstructions(input.paths.evidenceDir),
     'Final response must include changed files, commands run, evidence paths, remaining gaps, and whether changed paths stayed inside allowed write globs.',
     '',
     'Raw task JSON:',
     '',
     JSON.stringify(job.task, null, 2)
   ].join('\n') + '\n';
+}
+
+function humanQuestionEvidenceInstructions(evidenceDir: string): string[] {
+  const questionPath = path.join(evidenceDir, 'human-question.json');
+  return [
+    'Human questions:',
+    `- Only write ${questionPath} when all of these are true: the task is blocked by a product choice, ambiguous requirement, unsafe assumption, or missing permission; you cannot resolve it from source refs, target refs, tests, docs, or local inspection; and continuing without the answer would create likely wrong work.`,
+    '- Do not ask for ordinary coordinator review, patch porting, stale patches, test failures, broad missing context, or implementation choices you can decide from the task and repository.',
+    '- If you can safely proceed with an assumption, record the assumption in evidence or the final message instead of asking a human.',
+    '- A human question must be short, answerable, and scoped to one decision. Include options when practical.',
+    '- Use this JSON shape: {"kind":"human-question","code":"Q-...","title":"...","question":"...","detail":"...","why":"...","blockingReason":"...","attemptedSelfResolution":["..."],"safeToProceedWithoutAnswer":false,"requestedAnswer":"Reply with Q-... and ...","options":[{"label":"...","detail":"..."}]}.'
+  ];
 }
 
 function resolveCodexModelFlag(job: FrontierSwarmJob, input: FrontierCodexSwarmRunOptions): string | undefined {

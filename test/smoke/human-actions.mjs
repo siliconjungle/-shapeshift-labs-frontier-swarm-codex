@@ -41,4 +41,31 @@ export async function testHumanActionArtifacts({ plan, tmp }) {
   assert.strictEqual(snapshot.humanActions.length, 1);
   assert.strictEqual(snapshot.humanActions[0].code, 'Q-RETRY');
   assert.strictEqual(snapshot.humanActions[0].requestedAnswer, 'Answer Q-RETRY with yes or no.');
+
+  const nonBlockingRunDir = path.join(tmp, 'human-action-nonblocking-run');
+  const nonBlockingResult = await runCodexSwarm(plan, {
+    outDir: nonBlockingRunDir,
+    cwd: tmp,
+    dryRun: false,
+    executor: async (input) => {
+      const questionPath = path.join(input.paths.evidenceDir, 'human-question.json');
+      await fs.mkdir(input.paths.evidenceDir, { recursive: true });
+      await fs.writeFile(questionPath, JSON.stringify({
+        code: 'Q-NONBLOCKING',
+        title: 'Record safe assumption',
+        question: 'Should the worker use the existing retry default?',
+        detail: 'This is answerable from repository defaults and should not interrupt the human.',
+        safeToProceedWithoutAnswer: true,
+        requestedAnswer: 'No answer needed.'
+      }, null, 2) + '\n');
+      await fs.writeFile(input.paths.lastMessagePath, 'recorded non-blocking question-shaped evidence\n');
+      return { exitCode: 0, changedPaths: [], lastMessage: 'recorded non-blocking question-shaped evidence' };
+    }
+  });
+  assert.strictEqual(nonBlockingResult.ok, true);
+  assert.strictEqual(nonBlockingResult.run.results[0].metadata.humanActions[0].status, 'dismissed');
+  assert.strictEqual(nonBlockingResult.run.results[0].metadata.humanActions[0].humanQuestionInvalidReason, 'safe-to-proceed-without-answer');
+  const nonBlockingCollection = await collectCodexSwarmRun({ run: nonBlockingRunDir, checkStale: false });
+  const nonBlockingSnapshot = await readCodexDashboardSnapshot({ collection: nonBlockingCollection.outDir });
+  assert.strictEqual(nonBlockingSnapshot.humanActions.length, 0);
 }

@@ -21,7 +21,10 @@ function testPromptWriteContract(plan, tmp, paths) {
   assert.ok(prompt.includes('Strict runs restore unauthorized source writes before verification and mark the job failed.'));
   assert.ok(prompt.includes('Cite real commands/evidence; never fake success.'));
   assert.ok(prompt.includes('human-question.json'));
-  assert.ok(prompt.includes('Only ask when you cannot safely proceed'));
+  assert.ok(prompt.includes('Only write'));
+  assert.ok(prompt.includes('when all of these are true'));
+  assert.ok(prompt.includes('safeToProceedWithoutAnswer'));
+  assert.ok(prompt.includes('If you can safely proceed with an assumption'));
 }
 
 async function testAdaptiveFeedbackRoutingSignals(plan, tmp) {

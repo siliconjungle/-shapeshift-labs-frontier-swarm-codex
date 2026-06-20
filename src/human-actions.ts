@@ -203,25 +203,45 @@ function normalizeHumanActionRecord(
     ...stringArray(record.evidencePaths),
     ...(context.evidencePaths ?? [])
   ]);
+  const question = stringValue(record.question) ?? stringValue(record.prompt);
+  const requestedAnswer = stringValue(record.requestedAnswer) ?? stringValue(record.answerFormat);
+  const safeToProceedWithoutAnswer = booleanValue(record.safeToProceedWithoutAnswer);
+  const invalidReason = humanQuestionInvalidReason(record, question, safeToProceedWithoutAnswer);
   return {
     kind: 'human-question',
     type: 'question',
-    status: stringValue(record.status) ?? 'open',
-    priority: stringValue(record.priority) ?? 'blocking',
     source: 'job',
     ...record,
     id: stringValue(record.id) ?? `human-action:${code}`,
     code,
+    status: invalidReason ? 'dismissed' : stringValue(record.status) ?? 'open',
+    priority: invalidReason ? 'info' : stringValue(record.priority) ?? 'blocking',
     title,
-    question: stringValue(record.question) ?? title,
-    detail: stringValue(record.detail) ?? stringValue(record.context) ?? stringValue(record.question) ?? title,
-    requestedAnswer: stringValue(record.requestedAnswer) ?? stringValue(record.answerFormat) ?? 'Answer with the code and your decision.',
+    question: question ?? title,
+    detail: stringValue(record.detail) ?? stringValue(record.context) ?? question ?? title,
+    requestedAnswer: requestedAnswer ?? 'Answer with the code and your decision.',
     askedBy: stringValue(record.askedBy) ?? context.jobId,
     jobId: stringValue(record.jobId) ?? context.jobId,
     ...(stringValue(record.taskId) ?? context.taskId ? { taskId: stringValue(record.taskId) ?? context.taskId } : {}),
     ...(stringValue(record.lane) ?? context.lane ? { lane: stringValue(record.lane) ?? context.lane } : {}),
+    ...(stringValue(record.blockingReason) ? { blockingReason: stringValue(record.blockingReason) } : {}),
+    ...(stringArray(record.attemptedSelfResolution).length ? { attemptedSelfResolution: stringArray(record.attemptedSelfResolution) } : {}),
+    ...(safeToProceedWithoutAnswer !== undefined ? { safeToProceedWithoutAnswer } : {}),
+    ...(invalidReason ? { humanQuestionValid: false, humanQuestionInvalidReason: invalidReason } : { humanQuestionValid: true }),
     evidencePaths
   };
+}
+
+function humanQuestionInvalidReason(
+  record: Record<string, unknown>,
+  question: string | undefined,
+  safeToProceedWithoutAnswer: boolean | undefined
+): string | undefined {
+  const status = stringValue(record.status)?.toLowerCase();
+  if (status && ['answered', 'resolved', 'dismissed', 'cancelled', 'canceled', 'closed'].includes(status)) return undefined;
+  if (safeToProceedWithoutAnswer === true) return 'safe-to-proceed-without-answer';
+  if (!question) return 'missing-question';
+  return undefined;
 }
 
 function shortQuestionCode(jobId: string, title: string, index: number): string {
@@ -235,6 +255,16 @@ function stringValue(value: unknown): string | undefined {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', 'yes', '1'].includes(normalized)) return true;
+    if (['false', 'no', '0'].includes(normalized)) return false;
+  }
+  return undefined;
 }
 
 function firstMatchingAnswer(action: Record<string, unknown>, answers: ReadonlyMap<string, Record<string, unknown>>): Record<string, unknown> | undefined {
