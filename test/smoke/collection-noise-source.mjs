@@ -8,7 +8,13 @@ export async function runCollectionSourceSmoke(root) {
   const collectBundleStaleness = await readOptional(path.join(root, 'src/collect-bundle-staleness.ts'));
   const collectBundleSources = [collectBundles, collectBundleReasons, collectBundleStaleness].join('\n');
   const contextBudgetSource = await readOptional(path.join(root, 'src/context-budget.ts'));
-  const collect = await fs.readFile(path.join(root, 'src/collect.ts'), 'utf8');
+  const collect = [
+    await fs.readFile(path.join(root, 'src/collect.ts'), 'utf8'),
+    await readOptional(path.join(root, 'src/collect-artifact-store.ts')) ?? '',
+    await readOptional(path.join(root, 'src/collect-finalize.ts')) ?? '',
+    await readOptional(path.join(root, 'src/collect-landed.ts')) ?? '',
+    await readOptional(path.join(root, 'src/collect-noise.ts')) ?? ''
+  ].join('\n');
   const collectDashboard = await readOptional(path.join(root, 'src/collect-dashboard.ts'));
   const collectDashboardQuality = await readOptional(path.join(root, 'src/collect-dashboard-quality.ts'));
   const collectDashboardSources = [collectDashboard, collectDashboardQuality].join('\n');
@@ -91,7 +97,7 @@ function assertCollectionSourceTokens(collect) {
   }
   assert.match(
     collect,
-    /const incompleteModes = uniqueArtifactStoreModes\(\[[\s\S]+artifactStoreIncompleteModes\(fullResult\.status\)[\s\S]+artifactStoreIncompleteModes\(compactResult\.status\)/,
+    /incompleteModes:\s*uniqueArtifactStoreModes\(\[[\s\S]*artifactStoreIncompleteModes\(fullResult\.status\)[\s\S]*artifactStoreIncompleteModes\(compactResult\.status\)/,
     'fallback artifact-store status should carry incomplete guard modes from full and compact workers'
   );
   assert.match(
