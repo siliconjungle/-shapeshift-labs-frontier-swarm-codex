@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '../..');
 const collectBundles = await readOptional(path.join(root, 'src/collect-bundles.ts'));
+const collectBundleReasons = await readOptional(path.join(root, 'src/collect-bundle-reasons.ts'));
+const collectBundleStaleness = await readOptional(path.join(root, 'src/collect-bundle-staleness.ts'));
+const collectBundleSources = [collectBundles, collectBundleReasons, collectBundleStaleness].join('\n');
 const contextBudgetSource = await readOptional(path.join(root, 'src/context-budget.ts'));
 const collect = await fs.readFile(path.join(root, 'src/collect.ts'), 'utf8');
 const collectDashboard = await readOptional(path.join(root, 'src/collect-dashboard.ts'));
@@ -17,7 +20,7 @@ const typesCollection = [
   await readOptional(path.join(root, 'src/types-collection-score.ts')) ?? ''
 ].join('\n');
 
-if (collectBundles) {
+if (collectBundleSources.trim()) {
   for (const token of [
     'export function collectFailureReasonClasses',
     'workspace.invalid-git-index',
@@ -38,7 +41,7 @@ if (collectBundles) {
     'ignoredWorkspaceNoiseOwnershipViolationsForReasons',
     'stale.cleared-by-freshness-check'
   ]) {
-    assert.match(collectBundles, new RegExp(escapeRegExp(token)), `missing reason class token: ${token}`);
+    assert.match(collectBundleSources, new RegExp(escapeRegExp(token)), `missing reason class token: ${token}`);
   }
 }
 
@@ -191,34 +194,34 @@ for (const token of [
   assert.match(typesCollection, new RegExp(escapeRegExp(token)), `collection quality type token missing: ${token}`);
 }
 
-if (collectBundles) {
+if (collectBundleSources.trim()) {
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /normalized\.includes\('\.tsbuildinfo'\)\) classes\.push\('generated\.tsbuildinfo-change'\)/,
     'tsbuildinfo paths should receive a generated change class'
   );
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /generatedWorkspaceSetupReason\(normalized\)[\s\S]+generated\.workspace-setup/,
     'generated setup evidence should receive a generated setup reason class'
   );
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /pathHasIgnoredSegment\(normalized,[\s\S]+node_modules[\s\S]+\)/,
     'ignored workspace noise paths should classify exact ignored segments'
   );
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /missingHeadBlobPath[\s\S]+ignoredWorkspaceNoisePath\(missingHeadBlobPath\)[\s\S]+patch\.missing-head-blob\.generated/,
     'missing HEAD blobs on generated paths should receive a generated missing-blob class'
   );
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /invalidGitIndexReason\(normalized\)[\s\S]+workspace\.invalid-git-index/,
     'invalid .git/index noise should receive an invalid index class'
   );
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /generatedMissingHeadBlob = reasonClasses\.includes\('patch\.missing-head-blob\.generated'\)/,
     'invalid index and generated missing-blob classes should be compacted as infrastructure noise'
   );
@@ -228,17 +231,17 @@ if (collectBundles) {
     'failed-evidence dashboard counts should be based on non-noise failure entries'
   );
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /ignoredWorkspaceNoiseOnlyFailure\(bundle\)[\s\S]+return 'needs-human-port'/,
     'ignored workspace noise-only failures should not be collected as failed evidence'
   );
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /nonActionableFailedEvidence\(bundle,[\s\S]+return 'needs-human-port'/,
     'failed worker output without a patch or source changes should not be collected as failed evidence'
   );
   assert.match(
-    collectBundles,
+    collectBundleSources,
     /generated-failed-evidence/,
     'generated failed evidence residue should be treated as non-actionable worker output'
   );
