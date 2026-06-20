@@ -22,21 +22,30 @@ export async function testContinuationRoutingCost({ tmp }, collectionDir) {
       errors: []
     }
   };
+  collection.tournamentAdaptiveFeedback.recommendations = [{
+    id: 'recommendation-runtime-fast',
+    action: 'increase',
+    target: 'model-routing',
+    key: 'runtime',
+    computeId: 'codex.fast',
+    score: 0.91,
+    reason: 'runtime follow-ups are cheap enough for fast compute',
+    metadata: { lane: 'runtime', workKind: 'runtime action' }
+  }];
+  collection.tournamentAdaptiveFeedback.summary = {
+    observationCount: collection.tournamentAdaptiveFeedback.observations.length,
+    recommendationCount: 1,
+    reduceSignals: 0,
+    increaseSignals: 1,
+    holdSignals: 0
+  };
   await fs.writeFile(path.join(costCollectionDir, 'collection.json'), JSON.stringify(collection, null, 2) + '\n');
   const continuation = await continueCodexSwarmLoop({
     collection: costCollectionDir,
     outDir: path.join(tmp, 'routing-cost-continuation'),
     routingPolicy: {
       id: 'routing-cost-policy',
-      defaultMode: 'fill',
-      signals: [{
-        mode: 'prefer',
-        lane: 'runtime',
-        workKind: 'runtime action',
-        computeId: 'codex.fast',
-        confidence: 'high',
-        reason: 'prefer cheaper compute for matching runtime action follow-ups'
-      }]
+      defaultMode: 'fill'
     },
     routingMode: 'fill',
     manifest: {
@@ -76,6 +85,16 @@ export async function testContinuationRoutingCost({ tmp }, collectionDir) {
   assert.strictEqual(continuation.summary.nextJobRouting.policyFeedbackMatchCount, 1);
   assert.strictEqual(continuation.summary.nextJobRouting.policyCostSignalCount, 1);
   assert.strictEqual(continuation.summary.nextJobRouting.policyPreferenceMatchCount, 1);
+  assert.strictEqual(continuation.summary.adaptiveRouting.recommendationCount, 1);
+  assert.strictEqual(continuation.summary.adaptiveRouting.signalCount, 1);
+  assert.strictEqual(continuation.summary.adaptiveRouting.preferCount, 1);
+  assert.strictEqual(continuation.summary.adaptiveRouting.skippedRecommendationCount, 0);
+  assert.strictEqual(continuation.summary.adaptiveRouting.computeSignalCount, 1);
+  assert.strictEqual(continuation.summary.adaptiveRouting.targetCounts['model-routing'], 1);
+  assert.strictEqual(continuation.nextRoutingPolicy.signals.length, 1);
+  assert.strictEqual(continuation.nextRoutingPolicy.signals[0].computeId, 'codex.fast');
+  assert.strictEqual(continuation.nextRoutingPolicy.signals[0].metadata.source, 'tournament-adaptive-feedback');
+  assert.strictEqual(continuation.nextRoutingPolicy.metadata.adaptiveRouting.signalCount, 1);
   assert.strictEqual(continuation.summary.nextJobRouting.selectedComputeCounts['codex.fast'], 1);
   assert.strictEqual(continuation.summary.nextJobRouting.fallbackComputeCounts['codex.deep'], 1);
   const routedJob = continuation.nextPlan.jobs.find((job) => job.taskId === 'runtime-next-action');

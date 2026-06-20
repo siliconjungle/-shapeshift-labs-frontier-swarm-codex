@@ -6,7 +6,6 @@ import {
   mergeSwarmBacklogs,
   type FrontierSwarmBacklog,
   type FrontierSwarmBacklogInput,
-  type FrontierSwarmJob,
   type FrontierSwarmModelRoutingFeedback,
   type FrontierSwarmModelRoutingFeedbackInput,
   type FrontierSwarmModelRoutingPolicy,
@@ -16,9 +15,11 @@ import {
 import { FRONTIER_SWARM_CODEX_CONTINUATION_KIND, FRONTIER_SWARM_CODEX_CONTINUATION_VERSION } from './constants.js';
 import { uniqueStrings } from './common.js';
 import { collectCodexSwarmRun } from './collect.js';
+import { createAdaptiveRoutingSignalsFromTournamentFeedback, dedupeRoutingSignals, summarizeAdaptiveRoutingSignals } from './continuation-adaptive-routing.js';
 import { readContinuationChildBacklogs, resolveContinuationChildBacklogNames } from './continuation-child-backlogs.js';
 import { createContinuationFeedback, createContinuationRoutingCostSummary, createContinuationTournamentSummary } from './continuation-feedback.js';
 import { createContinuationHumanActionState } from './continuation-human-actions.js';
+import { summarizeNextJobRouting } from './continuation-job-routing-summary.js';
 import { writeContinuationTaskSource } from './continuation-task-source.js';
 import { projectContinuationTerminalOutcomes } from './continuation-terminal-outcomes.js';
 import { coerceCodexSwarmTasksInput, createCodexSwarmPlan } from './index.js';
@@ -54,12 +55,21 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
   });
   const routingCostSummary = createContinuationRoutingCostSummary(feedback);
   const tournamentSummary = createContinuationTournamentSummary(collection);
+  const adaptiveRoutingSignals = createAdaptiveRoutingSignalsFromTournamentFeedback(collection);
+  const adaptiveRouting = summarizeAdaptiveRoutingSignals(collection, adaptiveRoutingSignals);
   const baseRoutingPolicy = await readContinuationRoutingPolicy(input, cwd);
   const baseRoutingFeedback = Array.isArray((baseRoutingPolicy as { feedback?: unknown[] } | undefined)?.feedback)
     ? (baseRoutingPolicy as { feedback: (FrontierSwarmModelRoutingFeedbackInput | FrontierSwarmModelRoutingFeedback)[] }).feedback
     : [];
+  const baseRoutingSignals = Array.isArray((baseRoutingPolicy as { signals?: unknown[] } | undefined)?.signals)
+    ? (baseRoutingPolicy as { signals: FrontierSwarmModelRoutingPolicy['signals'] }).signals
+    : [];
   const nextRoutingPolicy = createSwarmModelRoutingPolicy({
     ...(baseRoutingPolicy ?? {}),
+    signals: dedupeRoutingSignals([
+      ...baseRoutingSignals,
+      ...adaptiveRoutingSignals
+    ]),
     feedback: [
       ...baseRoutingFeedback,
       ...feedback
@@ -75,6 +85,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
       ...(collection?.runDir ? { collectionRunDir: collection.runDir } : {}),
       ...(collection?.generatedAt ? { collectionGeneratedAt: collection.generatedAt } : {}),
       ...(collection?.summary ? { collectionSummary: collection.summary } : {}),
+      adaptiveRouting,
       routingCostSummary,
       ...(tournamentSummary ? { tournamentSummary } : {})
     }
@@ -162,6 +173,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
         preferCount: nextRoutingPolicy.summary.preferCount,
         avoidCount: nextRoutingPolicy.summary.avoidCount
       },
+      adaptiveRouting,
       routingCost: routingCostSummary,
       nextJobCount: nextJobs.length,
       nextJobIds: nextJobs.map((job) => job.id),
@@ -247,50 +259,6 @@ function countByString(values: readonly string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const value of values) out[value] = (out[value] ?? 0) + 1;
   return out;
-}
-
-function summarizeNextJobRouting(jobs: readonly FrontierSwarmJob[]): FrontierCodexContinuationResult['summary']['nextJobRouting'] {
-  const routed = jobs
-    .map((job) => ({ job, route: readModelRouteMetadata(job) }))
-    .filter((entry): entry is { job: FrontierSwarmJob; route: Record<string, unknown> } => !!entry.route);
-  const changed = routed.filter((entry) => {
-    const fallback = stringValue(entry.route.fallbackComputeId);
-    const selected = stringValue(entry.route.selectedComputeId);
-    return !!fallback && !!selected && fallback !== selected;
-  });
-  return {
-    routedJobCount: routed.length,
-    changedComputeCount: changed.length,
-    policyFeedbackMatchCount: routed.reduce((sum, entry) => sum + numberValue(readRouteSummaryValue(entry.route, 'routingPolicyFeedbackCount')), 0),
-    policyCostSignalCount: routed.reduce((sum, entry) => sum + numberValue(readRouteSummaryValue(entry.route, 'routingPolicyCostSignalCount')), 0),
-    policyPreferenceMatchCount: routed.reduce((sum, entry) => sum + numberValue(readRouteSummaryValue(entry.route, 'routingPolicyPreferenceCount')), 0),
-    selectedComputeCounts: countByString(routed.map((entry) => stringValue(entry.route.selectedComputeId)).filter((entry): entry is string => !!entry)),
-    fallbackComputeCounts: countByString(routed.map((entry) => stringValue(entry.route.fallbackComputeId)).filter((entry): entry is string => !!entry)),
-    routedJobIds: routed.map((entry) => entry.job.id),
-    changedComputeJobIds: changed.map((entry) => entry.job.id)
-  };
-}
-
-function readModelRouteMetadata(job: FrontierSwarmJob): Record<string, unknown> | undefined {
-  const metadata = job.metadata;
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
-  const route = (metadata as Record<string, unknown>).modelRoute;
-  return route && typeof route === 'object' && !Array.isArray(route) ? route as Record<string, unknown> : undefined;
-}
-
-function readRouteSummaryValue(route: Record<string, unknown>, key: string): unknown {
-  const summary = route.summary;
-  return summary && typeof summary === 'object' && !Array.isArray(summary)
-    ? (summary as Record<string, unknown>)[key]
-    : undefined;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function numberValue(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function sanitizeContinuationBacklogForPlan(

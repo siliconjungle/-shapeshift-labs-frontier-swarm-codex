@@ -102,6 +102,17 @@ export interface FrontierCodexContinuationResult {
       preferCount: number;
       avoidCount: number;
     };
+    adaptiveRouting: {
+      recommendationCount: number;
+      signalCount: number;
+      skippedRecommendationCount: number;
+      preferCount: number;
+      avoidCount: number;
+      computeSignalCount: number;
+      modelSignalCount: number;
+      modelTierSignalCount: number;
+      targetCounts: Record<string, number>;
+    };
     routingCost: {
       feedbackCount: number;
       costSignalCount: number;
