@@ -4,12 +4,21 @@ import { isCleanSemanticEditOperationScript, isCleanSemanticEditProjection } fro
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 
 export type FrontierCodexSemanticCollectAdmissionStatus = 'not-applicable' | 'ready' | 'review' | 'rerun' | 'fail';
+export type FrontierCodexSemanticCollectAdmissionReasonCode =
+  | 'missing-sidecar'
+  | 'empty-sidecar'
+  | 'stale-source-hash'
+  | 'symbol-conflict'
+  | 'effect-conflict'
+  | 'lossy-import'
+  | 'tests-missing';
 
 export interface FrontierCodexSemanticCollectAdmissionDecision {
   status: FrontierCodexSemanticCollectAdmissionStatus;
   autoMergeCandidate: boolean;
   semanticGatePassed: boolean;
   reasons: string[];
+  reasonCodes: FrontierCodexSemanticCollectAdmissionReasonCode[];
 }
 
 export function classifyCodexSemanticCollectAdmission(
@@ -28,15 +37,20 @@ export function classifyCodexSemanticCollectAdmission(
     semanticImportSummaryFromBundle(bundle),
     input.semanticImportExpected ?? false
   );
+  const reasonCodes = semanticCollectAdmissionReasonCodes(bundle, quality, {
+    hasActionablePatch,
+    hasSourceChange,
+    wantsAutoMerge
+  });
   if ((input.staleAgainstHead ?? false) || bundle.staleAgainstHead) {
-    return semanticCollectAdmission('rerun', wantsAutoMerge, false, ['semantic collect admission stale against head']);
+    return semanticCollectAdmission('rerun', wantsAutoMerge, false, ['semantic collect admission stale against head'], reasonCodes);
   }
   const priorSemanticReviewReasons = bundle.reasons.filter(semanticCollectReviewReason);
   if (!wantsAutoMerge && priorSemanticReviewReasons.length > 0) {
-    return semanticCollectAdmission('review', false, false, priorSemanticReviewReasons);
+    return semanticCollectAdmission('review', false, false, priorSemanticReviewReasons, reasonCodes);
   }
   if (!wantsAutoMerge && !hasSourceChange && !quality.present) {
-    return semanticCollectAdmission('not-applicable', false, false, []);
+    return semanticCollectAdmission('not-applicable', false, false, [], reasonCodes);
   }
   const blockers = semanticCollectAdmissionBlockers(quality);
   const staleBlockers = blockers.filter((reason) => reason.includes(' stale'));
@@ -47,18 +61,20 @@ export function classifyCodexSemanticCollectAdmission(
     reason.includes(' is blocked') ||
     reason.includes(' rejected candidates')
   );
-  if (staleBlockers.length > 0) return semanticCollectAdmission('rerun', wantsAutoMerge, false, staleBlockers);
-  if (failBlockers.length > 0) return semanticCollectAdmission('fail', wantsAutoMerge, false, failBlockers);
+  const expectedBlockers = semanticExpectedEvidenceBlockers(quality);
+  if (staleBlockers.length > 0) return semanticCollectAdmission('rerun', wantsAutoMerge, false, staleBlockers, reasonCodes);
+  if (failBlockers.length > 0) return semanticCollectAdmission('fail', wantsAutoMerge, false, failBlockers, reasonCodes);
 
   if (wantsAutoMerge || hasActionablePatch && quality.semanticEditAdmission.autoMergeCandidate) {
     const reasons = semanticAutoMergeGateBlockers(quality);
     if (reasons.length > 0) {
-      return semanticCollectAdmission('review', wantsAutoMerge || quality.semanticEditAdmission.autoMergeCandidate, false, reasons);
+      return semanticCollectAdmission('review', wantsAutoMerge || quality.semanticEditAdmission.autoMergeCandidate, false, reasons, reasonCodes);
     }
-    return semanticCollectAdmission('ready', true, true, ['semantic auto-merge gate passed']);
+    return semanticCollectAdmission('ready', true, true, ['semantic auto-merge gate passed'], reasonCodes);
   }
-  if (blockers.length > 0) return semanticCollectAdmission('review', false, false, blockers);
-  return semanticCollectAdmission('not-applicable', false, false, []);
+  if (expectedBlockers.length > 0) return semanticCollectAdmission('review', false, false, expectedBlockers, reasonCodes);
+  if (blockers.length > 0) return semanticCollectAdmission('review', false, false, blockers, reasonCodes);
+  return semanticCollectAdmission('not-applicable', false, false, [], reasonCodes);
 }
 
 function semanticAutoMergeGateBlockers(
@@ -125,6 +141,82 @@ function semanticCollectAdmissionBlockers(
   return uniqueStrings(reasons);
 }
 
+function semanticExpectedEvidenceBlockers(
+  quality: ReturnType<typeof summarizeCodexSemanticImportQuality>
+): string[] {
+  if (!quality.expected || quality.expectedSatisfied) return [];
+  if (!quality.expectedMissingReasonCodes.length) return ['semantic import expected evidence was not satisfied'];
+  return [`semantic import expected evidence unsatisfied: ${quality.expectedMissingReasonCodes.join(',')}`];
+}
+
+function semanticCollectAdmissionReasonCodes(
+  bundle: FrontierSwarmMergeBundle,
+  quality: ReturnType<typeof summarizeCodexSemanticImportQuality>,
+  input: {
+    hasActionablePatch: boolean;
+    hasSourceChange: boolean;
+    wantsAutoMerge: boolean;
+  }
+): FrontierCodexSemanticCollectAdmissionReasonCode[] {
+  const reasons: FrontierCodexSemanticCollectAdmissionReasonCode[] = [];
+  const expectedOrGated = quality.expected || input.wantsAutoMerge || input.hasActionablePatch;
+  if (!quality.present && expectedOrGated) reasons.push('missing-sidecar');
+  if (quality.present && quality.empty) reasons.push('empty-sidecar');
+  if (quality.lossCount > 0 || quality.semanticErrorLosses > 0 || quality.semanticWarningLosses > 0 || hasReadinessLosses(quality)) {
+    reasons.push('lossy-import');
+  }
+  if (bundle.staleAgainstHead || quality.semanticEditScript.stale > 0 || quality.semanticEditReplay.stale > 0 || semanticReasonSignals(quality).some(isStaleSourceSignal)) {
+    reasons.push('stale-source-hash');
+  }
+  if (quality.semanticEditScript.conflicts > 0 || quality.semanticEditReplay.conflicts > 0 || semanticReasonSignals(quality).some(isSymbolConflictSignal)) {
+    reasons.push('symbol-conflict');
+  }
+  if (semanticReasonSignals(quality).some(isEffectConflictSignal)) reasons.push('effect-conflict');
+  if (input.hasSourceChange && bundle.commandsPassed.length + bundle.commandsFailed.length === 0) reasons.push('tests-missing');
+  return uniqueStrings(reasons) as FrontierCodexSemanticCollectAdmissionReasonCode[];
+}
+
+function hasReadinessLosses(quality: ReturnType<typeof summarizeCodexSemanticImportQuality>): boolean {
+  return Object.keys(quality.semanticReadiness).some((key) => key.toLowerCase().includes('loss'));
+}
+
+function semanticReasonSignals(quality: ReturnType<typeof summarizeCodexSemanticImportQuality>): string[] {
+  return uniqueStrings([
+    ...quality.expectedMissingReasonCodes,
+    ...quality.semanticLineageReasonCodes,
+    ...quality.semanticEditScript.reasonCodes,
+    ...quality.semanticEditProjection.reasonCodes,
+    ...quality.semanticEditReplay.reasonCodes,
+    ...quality.semanticEditAdmission.reasons
+  ]);
+}
+
+function normalizedReasonSignal(value: string): string {
+  return value.trim().replace(/_/g, '-').toLowerCase();
+}
+
+function isStaleSourceSignal(value: string): boolean {
+  const signal = normalizedReasonSignal(value);
+  return (signal.includes('stale') || signal.includes('head-') || signal.includes('current-')) &&
+    (signal.includes('hash') || signal.includes('anchor') || signal.includes('source') || signal.includes('base'));
+}
+
+function isSymbolConflictSignal(value: string): boolean {
+  const signal = normalizedReasonSignal(value);
+  if (signal.includes('effect')) return false;
+  return signal.includes('symbol-conflict') ||
+    signal.includes('symbol-anchor') ||
+    signal.includes('anchor-content-mismatch') ||
+    signal.includes('anchor-changed') ||
+    signal.includes('conflict');
+}
+
+function isEffectConflictSignal(value: string): boolean {
+  const signal = normalizedReasonSignal(value);
+  return signal.includes('effect-conflict') ||
+    (signal.includes('effect') && (signal.includes('conflict') || signal.includes('mismatch') || signal.includes('blocked')));
+}
+
 function semanticEditReplayClean(quality: ReturnType<typeof summarizeCodexSemanticImportQuality>): boolean {
   const replay = quality.semanticEditReplay;
   return replay.total > 0 &&
@@ -136,13 +228,15 @@ function semanticCollectAdmission(
   status: FrontierCodexSemanticCollectAdmissionStatus,
   autoMergeCandidate: boolean,
   semanticGatePassed: boolean,
-  reasons: string[]
+  reasons: string[],
+  reasonCodes: readonly FrontierCodexSemanticCollectAdmissionReasonCode[] = []
 ): FrontierCodexSemanticCollectAdmissionDecision {
   return {
     status,
     autoMergeCandidate,
     semanticGatePassed,
-    reasons: uniqueStrings(reasons)
+    reasons: uniqueStrings(reasons),
+    reasonCodes: uniqueStrings(reasonCodes) as FrontierCodexSemanticCollectAdmissionReasonCode[]
   };
 }
 

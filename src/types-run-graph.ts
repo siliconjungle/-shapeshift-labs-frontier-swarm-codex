@@ -33,6 +33,10 @@ export interface FrontierCodexRunGraphNode {
   label?: string;
   jobId?: string;
   taskId?: string;
+  lane?: string;
+  model?: string;
+  computeId?: string;
+  modelTier?: string;
   bucket?: FrontierCodexCollectBucket;
   status?: string;
   outcome?: string;
