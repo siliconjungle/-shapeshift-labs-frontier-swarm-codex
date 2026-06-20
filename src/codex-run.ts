@@ -266,7 +266,7 @@ export async function runCodexJob(
     ...(patchPath ? { patchPath } : {}),
     queueItemIds: [job.taskId],
     verification,
-    ...(codexDeferredFailure ? { mergeReadiness: 'discovery-only', mergeDisposition: 'discovery-only' } : {}),
+    ...(codexDeferredFailure ? { mergeReadiness: 'blocked', mergeDisposition: 'rerun-work' } : {}),
     ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {}),
     lastMessage: execution.lastMessage,
     error: strictOwnershipBlockMessage ?? execution.error,
@@ -300,6 +300,7 @@ export async function runCodexJob(
   }
   mergeBundle.reasons = uniqueStrings([
     ...mergeBundle.reasons,
+    ...(codexDeferredFailure ? [`codex-deferred:${codexDeferredFailure.reason}`] : []),
     ...(preExecWriteFence.applied ? ['preexec-write-fence'] : []),
     ...(workspacePatchQuarantine.quarantinedChangedPaths.length ? ['quarantined-disallowed-changes'] : []),
     ...(ownershipRestore.length ? ['restored-disallowed-changes'] : []),

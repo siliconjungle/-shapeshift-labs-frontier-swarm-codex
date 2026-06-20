@@ -107,6 +107,7 @@ export function classifyCodexCollectBucket(
   hasActionablePatch = Boolean(bundle.patchPath)
 ): FrontierCodexCollectBucket {
   if (staleAgainstHead) return 'stale-against-head';
+  if (codexDeferredFailureReason(bundle)) return 'rerun-work';
   const semanticAdmission = classifyCodexSemanticCollectAdmission(bundle, { staleAgainstHead, hasActionablePatch });
   if (bundle.changedPaths.length > 0 && hasActionablePatch && (bundle.disposition === 'rejected' || bundle.commandsFailed.length > 0 || bundle.status === 'failed')) {
     return 'rerun-work';
@@ -144,6 +145,7 @@ export function normalizeCollectedDisposition(
   patchExists = Boolean(bundle.patchPath)
 ): FrontierSwarmMergeBundle['disposition'] {
   if (staleAgainstHead) return 'stale-against-head';
+  if (codexDeferredFailureReason(bundle)) return 'rerun-work';
   if (nonActionableFailedEvidence(bundle, { staleAgainstHead, hasActionablePatch: patchExists })) return 'rejected';
   if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-port';
   if (bundle.disposition === 'stale-against-head') return 'needs-port';
@@ -164,4 +166,20 @@ function hardFailedBundle(bundle: FrontierSwarmMergeBundle): boolean {
     bundle.disposition === 'blocked' ||
     bundle.commandsFailed.length > 0 ||
     bundle.status === 'failed';
+}
+
+function codexDeferredFailureReason(bundle: FrontierSwarmMergeBundle): string | undefined {
+  const metadata = isObject(bundle.metadata) ? bundle.metadata : {};
+  const direct = isObject(metadata.codexDeferredFailure) ? metadata.codexDeferredFailure : {};
+  const nested = isObject(metadata.frontierSwarmCodex) && isObject(metadata.frontierSwarmCodex.codexDeferredFailure)
+    ? metadata.frontierSwarmCodex.codexDeferredFailure
+    : {};
+  const reason = typeof direct.reason === 'string' && direct.reason
+    ? direct.reason
+    : typeof nested.reason === 'string' && nested.reason
+    ? nested.reason
+    : undefined;
+  if (reason) return reason;
+  const reasonSignal = bundle.reasons.find((entry) => entry.startsWith('codex-deferred:'));
+  return reasonSignal?.slice('codex-deferred:'.length) || undefined;
 }

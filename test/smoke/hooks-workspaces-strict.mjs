@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { exists, fs, path, runCodexSwarm } from './context.mjs';
+import { collectCodexSwarmRun, exists, fs, path, runCodexSwarm } from './context.mjs';
 
 export async function testDeferredCodexFailure(plan, tmp) {
   const deferredResult = await runCodexSwarm(plan, {
@@ -19,14 +19,29 @@ export async function testDeferredCodexFailure(plan, tmp) {
   const result = deferredResult.run.results[0];
   assert.strictEqual(result.status, 'blocked');
   assert.strictEqual(result.exitCode, 1);
-  assert.strictEqual(result.mergeReadiness, 'discovery-only');
-  assert.strictEqual(result.mergeDisposition, 'discovery-only');
+  assert.strictEqual(result.mergeReadiness, 'blocked');
+  assert.strictEqual(result.mergeDisposition, 'rerun-work');
   assert.strictEqual(result.metadata.codexDeferredFailure.reason, 'usage-limit');
   const mergeBundlePath = result.evidencePaths.find((entry) => entry.endsWith('merge.json'));
   assert.ok(mergeBundlePath);
   const mergeBundle = JSON.parse(await fs.readFile(mergeBundlePath, 'utf8'));
-  assert.strictEqual(mergeBundle.disposition, 'discovery-only');
+  assert.strictEqual(mergeBundle.disposition, 'rerun-work');
   assert.strictEqual(mergeBundle.status, 'blocked');
+  assert.ok(mergeBundle.reasons.includes('codex-deferred:usage-limit'));
+  const collection = await collectCodexSwarmRun({
+    run: deferredResult.outDir,
+    outDir: path.join(tmp, 'deferred-failure-collected'),
+    cwd: tmp,
+    checkStale: false
+  });
+  assert.strictEqual(collection.summary['needs-human-port'], 0);
+  assert.strictEqual(collection.summary['rerun-work'], 1);
+  const decision = collection.queueOutcomeModel.latestDecisions.find((entry) => entry.jobId === result.jobId);
+  assert.ok(decision);
+  assert.strictEqual(decision.decision, 'rerun');
+  assert.strictEqual(decision.staleOrRerun, true);
+  assert.strictEqual(decision.coordinatorReview, false);
+  assert.strictEqual(decision.reviewDebt, false);
 }
 
 export async function testStrictAllowedWritePolicy(plan, tmp) {

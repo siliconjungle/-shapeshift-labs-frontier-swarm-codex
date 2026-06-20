@@ -40,6 +40,44 @@
       ".turbo",
       "out"
     ],
-    "allowedOversizedFiles": {}
+    "allowedOversizedFiles": {
+      "src/artifact-store.ts": {
+        "maxLines": 337,
+        "reason": "existing artifact-store implementation size baseline; split in a dedicated source-policy cleanup"
+      },
+      "src/codex-run.ts": {
+        "maxLines": 393,
+        "reason": "existing codex job runner size baseline; split in a dedicated source-policy cleanup"
+      },
+      "src/collect-run-graph.ts": {
+        "maxLines": 1492,
+        "maxChars": 56206,
+        "reason": "existing run graph collector size baseline; split in a dedicated source-policy cleanup"
+      },
+      "src/collect-workspace-only.ts": {
+        "maxLines": 454,
+        "reason": "existing workspace-only collector size baseline; split in a dedicated source-policy cleanup"
+      },
+      "src/dashboard.ts": {
+        "maxLines": 322,
+        "reason": "existing dashboard server size baseline; split in a dedicated source-policy cleanup"
+      },
+      "src/run-graph-live.ts": {
+        "maxLines": 437,
+        "reason": "existing live run graph size baseline; split in a dedicated source-policy cleanup"
+      },
+      "src/semantic-import.ts": {
+        "maxLines": 503,
+        "reason": "existing semantic import implementation size baseline; split in a dedicated source-policy cleanup"
+      },
+      "test/smoke.mjs": {
+        "maxLines": 614,
+        "reason": "existing smoke suite size baseline; split in a dedicated source-policy cleanup"
+      },
+      "test/smoke/swarm-run-collection.mjs": {
+        "maxLines": 332,
+        "reason": "existing swarm collection smoke fixture size baseline; split in a dedicated source-policy cleanup"
+      }
+    }
   }
 }
