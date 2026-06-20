@@ -1,106 +1,25 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {
-  checkSwarmOwnership,
-  completeSwarmJob,
-  createSwarmEventStream,
-  createSwarmMergeBundle,
-  createSwarmProof,
-  createSwarmRun,
-  recordSwarmEvent,
-  type FrontierSwarmJob,
-  type FrontierSwarmJobResultInput,
-  type FrontierSwarmLease,
-  type FrontierSwarmMergeBundle,
-  type FrontierSwarmPlan
-} from '@shapeshift-labs/frontier-swarm';
+import { checkSwarmOwnership, createSwarmMergeBundle, type FrontierSwarmJob, type FrontierSwarmJobResultInput, type FrontierSwarmLease, type FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
 import { isObject, uniqueStrings } from './common.js';
 import { createCodexSemanticImportSidecar } from './semantic-import.js';
 import { snapshotCodexSemanticImportBaseSources } from './semantic-import-snapshot.js';
 import { semanticImportEnabled } from './semantic-import-quality.js';
 import { writeCodexJobEvidenceSummary, writeCodexPatchIntent } from './codex-evidence.js';
-import { readAdaptiveFeedbackObservations } from './codex-adaptive-feedback.js';
 import { discoverCodexHandoffArtifacts } from './handoff-artifacts.js';
-import {
-  appendCodexPidManifest,
-  appendFileSwarmEvent,
-  initFileSwarmEventStream,
-  writeSwarmCoordinatorSnapshot
-} from './codex-events.js';
+import { appendFileSwarmEvent } from './codex-events.js';
 import { createEmptyCodexLogSummary, normalizeCompactLogOptions, spawnCodexExecutor } from './codex-executor.js';
 import { buildCodexArgs, createCodexResourceAllocation, renderCodexPrompt } from './codex-prompt.js';
 import { createCodexJobPaths } from './codex-job-paths.js';
 import { createCodexTournamentStrategyMetadata } from './codex-tournament-strategy.js';
 import { createCodexContextBudgetReport, finalizeCodexContextBudgetReport } from './context-budget.js';
-import { runCodexDependencyHealthPreflight } from './codex-run-health.js';
-import { runScheduledJobPool } from './codex-run-scheduler.js';
+import { createCodexRunMetadata } from './codex-run-metadata.js';
 import { createCodexWorkspacePlan, createSwarmWorkspaceProof, prepareCodexWorkspace } from './codex-workspace.js';
 import { readCodexHumanActionArtifacts } from './human-actions.js';
 import { applyWorkspacePreExecWriteFence, collectChangedPaths, emptyChangedPathCollection, filterWorkspaceChangedPaths, mergeWorkspaceChangedPathCollections, quarantineWorkspacePatchCandidatePaths, restoreWorkspaceChangedPaths, restoreWorkspacePreExecWriteFence, runVerification, shouldSnapshotWorkspaceChanges, snapshotWorkspaceFiles, writeCodexPatchFile } from './codex-workspace-changes.js';
-import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions, FrontierCodexSwarmRunResult } from './index.js';
-export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {
-  const outDir = path.resolve(options.cwd ?? process.cwd(), options.outDir);
-  await fs.mkdir(outDir, { recursive: true });
-  await fs.writeFile(path.join(outDir, 'swarm-plan.json'), JSON.stringify(plan, null, 2) + '\n');
-  await runCodexDependencyHealthPreflight(plan, options, outDir);
-  const eventStream = options.eventStream ?? createSwarmEventStream({
-    runId: plan.runId,
-    root: path.join(outDir, 'streams'),
-    lanes: Array.from(new Set(plan.jobs.map((job) => job.lane)))
-  });
-  await initFileSwarmEventStream(eventStream);
-  const pidManifestPath = path.resolve(options.cwd ?? process.cwd(), options.pidManifestPath ?? path.join(outDir, 'pids.json'));
-  await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: plan.runId, startedAt: Date.now() }, plan.runId);
-  let run = createSwarmRun({ plan, status: 'running', startedAt: Date.now() });
-  const startedEvent = { type: 'swarm.started', runId: run.id, at: run.startedAt, data: { jobCount: plan.jobs.length } };
-  run = recordSwarmEvent(run, startedEvent);
-  await appendFileSwarmEvent(eventStream, startedEvent);
-  const runOptions = { ...options, eventStream, pidManifestPath };
-  const adaptiveObservations = await readAdaptiveFeedbackObservations(options);
-  const results = await runScheduledJobPool(plan, {
-    concurrency: Math.max(1, options.maxConcurrency ?? 1),
-    adaptive: options.adaptiveConcurrency,
-    resourceScheduling: options.resourceScheduling,
-    observations: adaptiveObservations,
-    outDir,
-    eventStream
-  }, (job, lease) => runCodexJob(job, runOptions, outDir, lease));
-  for (const result of results) {
-    const job = plan.jobs.find((entry) => entry.id === result.jobId);
-    if (job) {
-      await options.onJobFinished?.({ job, result });
-      await appendFileSwarmEvent(eventStream, {
-        type: 'agent.finished',
-        runId: run.id,
-        jobId: job.id,
-        taskId: job.taskId,
-        lane: job.lane,
-        data: { status: result.status, mergeReadiness: result.mergeReadiness, changedPathCount: result.changedPaths?.length ?? 0 }
-      });
-    }
-  }
-  for (const result of results) run = completeSwarmJob(run, result);
-  const proof = createSwarmProof(run, { validation: plan.validation });
-  const ok = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
-  await appendFileSwarmEvent(eventStream, {
-    type: 'swarm.finished',
-    runId: run.id,
-    data: { ok, summary: run.summary }
-  });
-  await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({ ok, outDir, run, proof }, null, 2) + '\n');
-  await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
-    ok,
-    outDir,
-    plan,
-    run,
-    proof,
-    eventStream,
-    pidManifestPath
-  });
-  const result = { ok, outDir, plan, run, proof };
-  await options.onSwarmFinished?.({ result });
-  return result;
-}
+import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions } from './index.js';
+
+export { runCodexSwarm } from './codex-run-swarm.js';
 
 export async function runCodexJob(
   job: FrontierSwarmJob,
@@ -279,19 +198,36 @@ export async function runCodexJob(
   );
   const evidenceSummaryPath = path.join(paths.evidenceDir, 'evidence.json');
   const evidencePaths = uniqueStrings([
-    paths.evidenceDir,
-    evidenceSummaryPath,
-    paths.resourceAllocationPath,
-    paths.contextBudgetPath,
-    paths.workspaceProofPath,
-    paths.mergeBundlePath,
+    paths.evidenceDir, evidenceSummaryPath, paths.resourceAllocationPath, paths.contextBudgetPath,
+    paths.workspaceProofPath, paths.mergeBundlePath,
     ...(patchPath ? [patchPath] : []),
     ...(semanticImport ? [semanticImport.path] : []),
-    paths.patchIntentPath,
-    paths.logSummaryPath,
+    paths.patchIntentPath, paths.logSummaryPath,
     ...humanActions.paths,
     ...handoffArtifacts.map((artifact) => artifact.path)
   ]);
+  const strictOwnership = strictOwnershipBlocked ? {
+    blockReason: strictOwnershipBlockReason,
+    blockMessage: strictOwnershipBlockMessage ?? strictOwnershipBlockReason,
+    skippedReason: verificationSkippedReason,
+    skipReasons: verificationSkipReasons,
+    skippedCommands: verificationSkippedCommands
+  } : undefined;
+  const sharedMetadata = {
+    contextBudget,
+    logSummary,
+    tournamentStrategy,
+    workspacePatchQuarantine,
+    ownershipRestore,
+    preExecWriteFence,
+    codexDeferredFailure,
+    allowedWritePolicy: workspacePlan.allowedWritePolicy,
+    observedChangedPaths: collected.observedChangedPaths,
+    reportedChangedPaths: reportedChangedPaths.observedChangedPaths,
+    humanActions,
+    strictOwnership,
+    semanticImportSummary
+  };
   const result: FrontierSwarmJobResultInput = {
     jobId: job.id,
     status,
@@ -310,31 +246,7 @@ export async function runCodexJob(
     ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {}),
     lastMessage: execution.lastMessage,
     error: strictOwnershipBlockMessage ?? execution.error,
-    metadata: {
-      ...(lease ? { leaseId: lease.id, leaseToken: lease.token, fencingToken: lease.fencingToken } : {}),
-      resourceAllocation,
-      contextBudget,
-      logSummary,
-      tournamentStrategy,
-      workspacePatchQuarantine,
-      ownershipRestore,
-      preExecWriteFence,
-      ...(codexDeferredFailure ? { codexDeferredFailure } : {}),
-      allowedWritePolicy: workspacePlan.allowedWritePolicy,
-      observedChangedPaths: collected.observedChangedPaths,
-      reportedChangedPaths: reportedChangedPaths.observedChangedPaths,
-      ...(humanActions.actions.length ? { humanActions: humanActions.actions, humanActionArtifactPaths: humanActions.paths } : {}),
-      ...(strictOwnershipBlocked ? {
-        strictOwnershipBlockReason,
-        strictOwnershipBlockMessage,
-        verificationSkippedReason,
-        verificationSkipReasons,
-        verificationSkippedCommands,
-        verificationSkippedCommandCount: verificationSkippedCommands.length
-      } : {}),
-      ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {}),
-      codexHandoffArtifacts: handoffArtifacts
-    }
+    metadata: createCodexRunMetadata({ ...sharedMetadata, lease, resourceAllocation, codexHandoffArtifacts: handoffArtifacts })
   };
   const mergeBundle = createSwarmMergeBundle({
     runId: options.eventStream?.runId,
@@ -345,42 +257,15 @@ export async function runCodexJob(
     },
     ...(patchPath ? { patchPath } : {}),
     evidencePaths: uniqueStrings([
-      paths.evidenceDir,
-      evidenceSummaryPath,
-      paths.resourceAllocationPath,
-      paths.contextBudgetPath,
-      paths.workspaceProofPath,
-      paths.patchIntentPath,
-      paths.logSummaryPath,
+      paths.evidenceDir, evidenceSummaryPath, paths.resourceAllocationPath, paths.contextBudgetPath,
+      paths.workspaceProofPath, paths.patchIntentPath, paths.logSummaryPath,
       ...humanActions.paths,
       ...(semanticImport ? [semanticImport.path] : []),
       ...handoffArtifacts.map((artifact) => artifact.path)
     ]),
     queueItemIds: [job.taskId],
     ...(semanticImportSummary ? { semanticImport: semanticImportSummary as unknown as FrontierSwarmMergeBundle['semanticImport'] } : {}),
-    metadata: {
-      tournamentStrategy,
-      workspaceMode: workspacePlan.mode,
-      contextBudget,
-      logSummary,
-      workspacePatchQuarantine,
-      ownershipRestore,
-      preExecWriteFence,
-      ...(codexDeferredFailure ? { codexDeferredFailure } : {}),
-      allowedWritePolicy: workspacePlan.allowedWritePolicy,
-      observedChangedPaths: collected.observedChangedPaths,
-      reportedChangedPaths: reportedChangedPaths.observedChangedPaths,
-      ...(humanActions.actions.length ? { humanActions: humanActions.actions, humanActionArtifactPaths: humanActions.paths } : {}),
-      ...(strictOwnershipBlocked ? {
-        strictOwnershipBlockReason,
-        strictOwnershipBlockMessage,
-        verificationSkippedReason,
-        verificationSkipReasons,
-        verificationSkippedCommands,
-        verificationSkippedCommandCount: verificationSkippedCommands.length
-      } : {}),
-      ...(semanticImportSummary ? { semanticImport: semanticImportSummary } : {})
-    }
+    metadata: createCodexRunMetadata({ ...sharedMetadata, workspaceMode: workspacePlan.mode })
   });
   if (semanticImportSummary) {
     (mergeBundle as unknown as { semanticImport: FrontierCodexSemanticImportSidecar['summary'] }).semanticImport = semanticImportSummary;

@@ -7,6 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const commonSource = fs.readFileSync(path.join(root, 'src/common.ts'), 'utf8');
 const changesSource = fs.readFileSync(path.join(root, 'src/codex-workspace-changes.ts'), 'utf8');
 const runSource = fs.readFileSync(path.join(root, 'src/codex-run.ts'), 'utf8');
+const runMetadataSource = fs.readFileSync(path.join(root, 'src/codex-run-metadata.ts'), 'utf8');
 const cliArgsSource = fs.readFileSync(path.join(root, 'src/cli-args.ts'), 'utf8');
 const cliHelpSource = fs.readFileSync(path.join(root, 'src/cli-help.ts'), 'utf8');
 const workspaceSource = fs.readFileSync(path.join(root, 'src/codex-workspace.ts'), 'utf8');
@@ -61,7 +62,7 @@ for (const token of [
   'git_metadata',
   'tsbuildinfo'
 ]) {
-  assert.match(changesSource + runSource + workspaceSource + workspaceTypesSource + runTypesSource + cliArgsSource + cliHelpSource, new RegExp(escapeRegExp(token)), `missing workspace lockdown token: ${token}`);
+  assert.match(changesSource + runSource + runMetadataSource + workspaceSource + workspaceTypesSource + runTypesSource + cliArgsSource + cliHelpSource, new RegExp(escapeRegExp(token)), `missing workspace lockdown token: ${token}`);
 }
 
 for (const token of ['evidence handoff', 'target lane', 'target files', 'rationale', 'do not patch them']) {
