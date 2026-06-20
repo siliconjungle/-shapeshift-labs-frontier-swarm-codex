@@ -159,6 +159,7 @@ semanticEditAdmission.status satisfies string;
 semanticEditReplay?.acceptedClean satisfies number | undefined;
 costEstimate.estimatedCostUsd satisfies number;
 costEstimate.pricingModel satisfies string | undefined;
+costEstimate.costEstimateLongContext satisfies boolean;
 scorePromise.then((score) => {
   const proofFailures: number | undefined = score.entries[0]?.semanticEvidence.proofSpecFailedObligations;
   const paradigmRecords: number | undefined = score.entries[0]?.semanticEvidence.paradigmSemanticsRecords;

@@ -7,6 +7,10 @@ export interface FrontierCodexModelPricing {
   inputUsdPerMillion: number;
   cachedInputUsdPerMillion: number;
   outputUsdPerMillion: number;
+  longContextThresholdTokens?: number;
+  longContextInputUsdPerMillion?: number;
+  longContextCachedInputUsdPerMillion?: number;
+  longContextOutputUsdPerMillion?: number;
   source: string;
   updatedAt: string;
 }
@@ -40,15 +44,22 @@ export interface FrontierCodexModelCostEstimate {
   costEstimateInputOnly: boolean;
   costEstimateEstimatedInput: boolean;
   costEstimateMissingOutputTokens: boolean;
+  costEstimateLongContext: boolean;
   unknownPricingReason?: string;
 }
 
 const MILLION = 1_000_000;
+const LONG_CONTEXT_THRESHOLD_TOKENS = 272_000;
 
 const OPENAI_PRICING: Record<string, FrontierCodexModelPricing> = {
-  'gpt-5.5': openAiPricing('gpt-5.5', 5, 0.5, 30),
-  'gpt-5.4': openAiPricing('gpt-5.4', 2.5, 0.25, 15),
-  'gpt-5.4-mini': openAiPricing('gpt-5.4-mini', 0.75, 0.075, 4.5)
+  'gpt-5.5': openAiPricing('gpt-5.5', 5, 0.5, 30, { long: [10, 1, 45] }),
+  'gpt-5.5-pro': openAiPricing('gpt-5.5-pro', 30, 30, 180, { long: [60, 60, 270] }),
+  'gpt-5.4': openAiPricing('gpt-5.4', 2.5, 0.25, 15, { long: [5, 0.5, 22.5] }),
+  'gpt-5.4-mini': openAiPricing('gpt-5.4-mini', 0.75, 0.075, 4.5),
+  'gpt-5.4-nano': openAiPricing('gpt-5.4-nano', 0.2, 0.02, 1.25),
+  'gpt-5.4-pro': openAiPricing('gpt-5.4-pro', 30, 30, 180, { long: [60, 60, 270] }),
+  'gpt-5.3-codex': openAiPricing('gpt-5.3-codex', 1.75, 0.175, 14),
+  'chat-latest': openAiPricing('chat-latest', 5, 0.5, 30)
 };
 
 const MODEL_ALIASES: Record<string, string> = {
@@ -58,8 +69,11 @@ const MODEL_ALIASES: Record<string, string> = {
   'gpt-5-codex': 'gpt-5.4',
   'gpt-5-codex-mini': 'gpt-5.4-mini',
   'gpt-5-mini': 'gpt-5.4-mini',
+  'gpt-5-nano': 'gpt-5.4-nano',
+  'gpt-5-chat-latest': 'chat-latest',
   'gpt-5.1-codex': 'gpt-5.4',
-  'gpt-5.1-codex-mini': 'gpt-5.4-mini'
+  'gpt-5.1-codex-mini': 'gpt-5.4-mini',
+  'gpt-5.3-codex-spark': 'gpt-5.3-codex'
 };
 
 export function lookupCodexModelPricing(model: string | undefined): FrontierCodexModelPricing | undefined {
@@ -88,12 +102,14 @@ export function estimateCodexModelCost(input: FrontierCodexModelCostEstimateInpu
       costEstimateInputOnly: usage.outputTokens === 0,
       costEstimateEstimatedInput: usage.estimatedInput,
       costEstimateMissingOutputTokens: input.outputTokens === undefined,
+      costEstimateLongContext: false,
       unknownPricingReason: input.model ? 'unknown-model' : 'missing-model'
     };
   }
-  const cachedInputCost = (usage.cachedInputTokens / MILLION) * pricing.cachedInputUsdPerMillion;
-  const uncachedInputCost = (usage.uncachedInputTokens / MILLION) * pricing.inputUsdPerMillion;
-  const outputCost = (usage.outputTokens / MILLION) * pricing.outputUsdPerMillion;
+  const rate = activePricingRate(pricing, usage.billableInputTokens);
+  const cachedInputCost = (usage.cachedInputTokens / MILLION) * rate.cachedInputUsdPerMillion;
+  const uncachedInputCost = (usage.uncachedInputTokens / MILLION) * rate.inputUsdPerMillion;
+  const outputCost = (usage.outputTokens / MILLION) * rate.outputUsdPerMillion;
   const inputCost = cachedInputCost + uncachedInputCost;
   const totalCost = inputCost + outputCost;
   return {
@@ -115,19 +131,62 @@ export function estimateCodexModelCost(input: FrontierCodexModelCostEstimateInpu
     outputTokens: usage.outputTokens,
     costEstimateInputOnly: usage.outputTokens === 0,
     costEstimateEstimatedInput: usage.estimatedInput,
-    costEstimateMissingOutputTokens: input.outputTokens === undefined
+    costEstimateMissingOutputTokens: input.outputTokens === undefined,
+    costEstimateLongContext: rate.longContext
   };
 }
 
-function openAiPricing(model: string, inputUsdPerMillion: number, cachedInputUsdPerMillion: number, outputUsdPerMillion: number): FrontierCodexModelPricing {
+function openAiPricing(
+  model: string,
+  inputUsdPerMillion: number,
+  cachedInputUsdPerMillion: number,
+  outputUsdPerMillion: number,
+  options: { long?: [inputUsdPerMillion: number, cachedInputUsdPerMillion: number, outputUsdPerMillion: number] } = {}
+): FrontierCodexModelPricing {
+  const [longContextInputUsdPerMillion, longContextCachedInputUsdPerMillion, longContextOutputUsdPerMillion] = options.long ?? [];
   return {
     model,
     provider: 'openai',
     inputUsdPerMillion,
     cachedInputUsdPerMillion,
     outputUsdPerMillion,
+    ...(options.long ? {
+      longContextThresholdTokens: LONG_CONTEXT_THRESHOLD_TOKENS,
+      longContextInputUsdPerMillion,
+      longContextCachedInputUsdPerMillion,
+      longContextOutputUsdPerMillion
+    } : {}),
     source: FRONTIER_CODEX_MODEL_PRICING_SOURCE,
     updatedAt: FRONTIER_CODEX_MODEL_PRICING_UPDATED_AT
+  };
+}
+
+function activePricingRate(
+  pricing: FrontierCodexModelPricing,
+  billableInputTokens: number
+): {
+  inputUsdPerMillion: number;
+  cachedInputUsdPerMillion: number;
+  outputUsdPerMillion: number;
+  longContext: boolean;
+} {
+  const longContext = Boolean(
+    pricing.longContextThresholdTokens
+    && billableInputTokens > pricing.longContextThresholdTokens
+    && pricing.longContextInputUsdPerMillion !== undefined
+    && pricing.longContextCachedInputUsdPerMillion !== undefined
+    && pricing.longContextOutputUsdPerMillion !== undefined
+  );
+  return longContext ? {
+    inputUsdPerMillion: pricing.longContextInputUsdPerMillion ?? pricing.inputUsdPerMillion,
+    cachedInputUsdPerMillion: pricing.longContextCachedInputUsdPerMillion ?? pricing.cachedInputUsdPerMillion,
+    outputUsdPerMillion: pricing.longContextOutputUsdPerMillion ?? pricing.outputUsdPerMillion,
+    longContext: true
+  } : {
+    inputUsdPerMillion: pricing.inputUsdPerMillion,
+    cachedInputUsdPerMillion: pricing.cachedInputUsdPerMillion,
+    outputUsdPerMillion: pricing.outputUsdPerMillion,
+    longContext: false
   };
 }
 

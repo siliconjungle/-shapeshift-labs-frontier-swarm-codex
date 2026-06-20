@@ -30,6 +30,7 @@ import { testContinuationRoutingCost } from './smoke/continuation-routing-cost.m
 import { testDashboardUi } from './smoke/dashboard-ui.mjs';
 import { testHumanActionArtifacts } from './smoke/human-actions.mjs';
 import { testHumanActionAnswers } from './smoke/human-action-answers.mjs';
+import { testModelPricing } from './smoke/model-pricing.mjs';
 import './smoke/collection-noise.mjs';
 import './smoke/workspace-lockdown.mjs';
 
@@ -39,6 +40,7 @@ await testPlanningAndLinks(context);
 await testResourceAwareScheduling(context);
 await testCompactLogTruncation(context);
 await testContextBudget(context);
+testModelPricing();
 await testSemanticImportSelection(context);
 await testSemanticImportBaseLineage(context);
 await testSemanticEditProjectionSummary();

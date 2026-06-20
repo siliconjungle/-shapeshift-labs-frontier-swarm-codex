@@ -92,6 +92,7 @@ export interface FrontierCodexDashboardJob {
   costEstimateInputOnly: boolean;
   costEstimateEstimatedInput: boolean;
   costEstimateMissingOutputTokens: boolean;
+  costEstimateLongContext: boolean;
   unknownPricingReason?: string;
   semanticAdmissionStatus?: string;
   semanticAutoMergeCandidate: boolean;

@@ -58,6 +58,7 @@ export function dashboardCostFields(cost: ReturnType<typeof estimateCodexModelCo
   | 'costEstimateInputOnly'
   | 'costEstimateEstimatedInput'
   | 'costEstimateMissingOutputTokens'
+  | 'costEstimateLongContext'
   | 'unknownPricingReason'
 > {
   return {
@@ -76,6 +77,7 @@ export function dashboardCostFields(cost: ReturnType<typeof estimateCodexModelCo
     costEstimateInputOnly: cost.costEstimateInputOnly,
     costEstimateEstimatedInput: cost.costEstimateEstimatedInput,
     costEstimateMissingOutputTokens: cost.costEstimateMissingOutputTokens,
+    costEstimateLongContext: cost.costEstimateLongContext,
     ...(cost.unknownPricingReason ? { unknownPricingReason: cost.unknownPricingReason } : {})
   };
 }
