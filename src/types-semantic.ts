@@ -272,48 +272,5 @@ export interface FrontierCodexSemanticImportSidecar {
   };
 }
 
-export interface FrontierCodexSemanticImportQuality {
-  expected: boolean;
-  expectedSatisfied: boolean;
-  expectedMissingReasonCodes: string[];
-  present: boolean;
-  empty: boolean;
-  total: number;
-  candidates: number;
-  selected: number;
-  eligible: number;
-  imported: number;
-  errors: number;
-  symbols: number;
-  ownershipRegions: number;
-  patchHints: number;
-  semanticFacts: number;
-  semanticFactPredicates: string[];
-  semanticFactSummary: Record<string, number>;
-  dependencyRelations: number;
-  dependencyPredicates: string[];
-  dependencyEdges: string[];
-  dependencyEdgeHints: string[];
-  sourceMapMappings: number;
-  universalAstLayers: number;
-  universalAstLayerNames: string[];
-  proofSpecObligations: number;
-  proofSpecFailedObligations: number;
-  paradigmSemanticsRecords: number;
-  paradigmSemanticsGroups: number;
-  paradigmSemanticsLoweringRecords: number;
-  semanticLineageEvents: number;
-  semanticLineageMoved: number;
-  semanticLineageRenamed: number;
-  semanticLineageDeleted: number;
-  semanticLineageAmbiguous: number;
-  semanticLineageBlocked: number;
-  semanticLineageNeedsReview: number;
-  semanticLineageEventKinds: string[];
-  semanticLineageReasonCodes: string[];
-  semanticEditScript: FrontierCodexSemanticEditScriptSummary;
-  semanticEditProjection: FrontierCodexSemanticEditProjectionSummary;
-  semanticEditReplay: FrontierCodexSemanticEditReplaySummary;
-  semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision;
-  warnings: string[];
-}
+
+export type { FrontierCodexSemanticImportQuality } from './types-semantic-quality.js';

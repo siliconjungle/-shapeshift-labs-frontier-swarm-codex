@@ -4,6 +4,7 @@ export const COLLECTED_OUTPUT_SEGMENTS = [
   'collected',
   'patch-scores',
   'ready-to-apply',
+  'research-complete',
   'needs-human-port',
   'rerun-work',
   'failed-evidence',
@@ -14,6 +15,7 @@ export const COLLECTED_OUTPUT_SEGMENTS = [
 export function createEmptyCollectBuckets(): Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]> {
   return {
     'ready-to-apply': [],
+    'research-complete': [],
     'needs-human-port': [],
     'rerun-work': [],
     'failed-evidence': [],

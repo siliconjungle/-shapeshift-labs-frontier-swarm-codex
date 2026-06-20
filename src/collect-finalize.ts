@@ -25,6 +25,7 @@ export function createCodexCollectSummary(input: {
   const summary: FrontierCodexCollectResult['summary'] = {
     total: input.mergeRecordCount,
     'ready-to-apply': input.buckets['ready-to-apply'].length,
+    'research-complete': input.buckets['research-complete'].length,
     'needs-human-port': input.buckets['needs-human-port'].length,
     'rerun-work': input.buckets['rerun-work'].length,
     'failed-evidence': input.buckets['failed-evidence'].length,

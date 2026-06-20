@@ -56,7 +56,7 @@ export async function readCodexDashboardSnapshot(input: FrontierCodexDashboardSn
   const continuation = fullContinuationSource?.json;
   const artifactRoots = dashboardArtifactRoots(cwd, runSource?.dir, collectionSource?.dir, collection?.runDir, collection?.outDir);
   const jobs = await createDashboardJobs(run, collection, { cwd, artifactRoots, artifactBases: artifactRoots });
-  const semantic = createDashboardSemanticMetrics(collection);
+  const semantic = createDashboardSemanticMetrics(collection, jobs);
   return createDashboardSnapshot({
     cwd,
     ok: Boolean(run?.ok ?? collection?.ok ?? continuation?.ok ?? false),
@@ -83,12 +83,13 @@ function dashboardSnapshotFromCoordinatorDashboard(
     .map((job) => dashboardJobFromCoordinatorJob(job))
     .sort((left, right) => (left.lane ?? '').localeCompare(right.lane ?? '') || left.id.localeCompare(right.id));
   const summaryRecord = isObject(dashboard.summary) ? dashboard.summary : {};
-  const semantic = createDashboardSemanticMetricsFromSummary(summaryRecord);
+  const semantic = createDashboardSemanticMetricsFromSummary(summaryRecord, jobs);
   const summary = {
     ...createDashboardSummary(undefined, undefined, continuation, jobs),
     bucketCounts: {
       total: numberValue(summaryRecord.jobCount, jobs.length),
       'ready-to-apply': numberValue(summaryRecord.readyToApplyCount),
+      'research-complete': jobs.filter((job) => job.bucket === 'research-complete' || job.disposition === 'discovery-only' || job.disposition === 'evidence-only').length,
       'needs-human-port': numberValue(summaryRecord.needsHumanPortCount),
       'rerun-work': numberValue(summaryRecord.rerunWorkCount),
       'failed-evidence': numberValue(summaryRecord.failedEvidenceCount),

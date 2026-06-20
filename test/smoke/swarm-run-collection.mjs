@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import { collectCodexSwarmRun, createCodexCleanupPlan, createBrowserPlan, exists, execFileP, fs, path, queryCodexSwarmCollection, runCodexSwarm } from './context.mjs';
 import { testNoIndexCollection } from './swarm-run-no-index.mjs';
 import { testWorkspaceOnlyCollection } from './workspace-only-collection.mjs';
+import { testBrowserRun, testResearchCompleteCollection, testSafeCleanup } from './swarm-run-terminal.mjs';
 
 export async function testSwarmRunCollection({ plan, tmp }) {
   const result = await runCodexSwarm(plan, {
@@ -106,6 +107,7 @@ export async function testSwarmRunCollection({ plan, tmp }) {
 
   await testSemanticImportFallbackFromTaskRefs(plan, tmp);
   const collectionDir = await testCollectedRun(tmp);
+  await testResearchCompleteCollection(tmp);
   await testWorkspaceOnlyCollection(tmp);
   await testNoIndexCollection(tmp, mergeBundle);
   await testBrowserRun(tmp);
@@ -266,55 +268,4 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(cliQuery.jobs.length, 1);
   await testSafeCleanup(tmp, collection.outDir);
   return collection.outDir;
-}
-
-async function testSafeCleanup(tmp, collectionDir) {
-  const workspacePath = path.join(tmp, 'agent-worktrees', 'frontier-swarm-codex', 'cleanup-job');
-  await fs.mkdir(workspacePath, { recursive: true });
-  await fs.writeFile(path.join(workspacePath, 'scratch.txt'), 'temporary workspace\n');
-  const proofDir = path.join(tmp, 'run', 'jobs', 'cleanup-job');
-  await fs.mkdir(proofDir, { recursive: true });
-  await fs.writeFile(path.join(proofDir, 'workspace-proof.json'), JSON.stringify({
-    manifest: { mode: 'copy', path: workspacePath }
-  }, null, 2) + '\n');
-  const dryRun = await createCodexCleanupPlan({ run: path.join(tmp, 'run'), collection: collectionDir, keepActive: false });
-  assert.strictEqual(dryRun.dryRun, true);
-  assert.strictEqual(dryRun.indexed, true);
-  assert.strictEqual(dryRun.summary.candidateCount, 1);
-  assert.ok(await exists(workspacePath));
-  const cleanup = await createCodexCleanupPlan({ run: path.join(tmp, 'run'), collection: collectionDir, keepActive: false, dryRun: false });
-  assert.strictEqual(cleanup.summary.deletedCount, 1);
-  assert.strictEqual(await exists(workspacePath), false);
-  const cli = new URL('../../dist/cli.js', import.meta.url).pathname;
-  const cliCleanup = JSON.parse((await execFileP(process.execPath, [
-    cli,
-    'cleanup',
-    '--run',
-    path.join(tmp, 'run'),
-    '--collection',
-    collectionDir,
-    '--keep-active',
-    'false'
-  ])).stdout);
-  assert.strictEqual(cliCleanup.kind, 'frontier.swarm-codex.cleanup-plan');
-  assert.strictEqual(cliCleanup.summary.candidateCount, 0);
-  assert.ok(await exists(path.join(collectionDir, 'collected-and-indexed.json')));
-}
-async function testBrowserRun(tmp) {
-  const browserRun = await runCodexSwarm(createBrowserPlan(), {
-    outDir: path.join(tmp, 'browser-run'),
-    cwd: tmp,
-    dryRun: false,
-    executor: async (input) => {
-      assert.strictEqual(input.resourceAllocation.browser.port, '4177');
-      assert.strictEqual(input.env.PORT, '4177');
-      assert.ok(await exists(input.resourceAllocation.browser.profileDir));
-      await fs.writeFile(input.paths.lastMessagePath, 'browser done\n');
-      return { exitCode: 0, changedPaths: ['e2e.mjs'], lastMessage: 'browser done' };
-    }
-  });
-  assert.strictEqual(browserRun.ok, true);
-  const browserResourcePath = browserRun.run.results[0].evidencePaths.find((entry) => entry.endsWith('resource-allocation.json'));
-  const browserResourceEvidence = JSON.parse(await fs.readFile(browserResourcePath, 'utf8'));
-  assert.strictEqual(browserResourceEvidence.browser.port, '4177');
 }

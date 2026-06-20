@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import { createSmokeContext } from './smoke/context.mjs';
 import {
+  collectCodexSwarmRun,
   createCodexSwarmPlan,
   fs,
   path,
@@ -19,8 +20,14 @@ import { testSemanticEditProjectionSummary } from './smoke/semantic-edit-project
 import { testSemanticEditReplaySummary } from './smoke/semantic-edit-replay.mjs';
 import { testSemanticEditLockdown } from './smoke/semantic-edit-lockdown.mjs';
 import { testSemanticImportQuality } from './smoke/semantic-import-quality.mjs';
+import {
+  cleanEditScriptSemanticImportSummary,
+  editScriptSemanticImportSummary,
+  factSemanticImportSummary
+} from './smoke/semantic-import-quality-fixtures.mjs';
 import { testSemanticLineageCollection } from './smoke/semantic-lineage-collection.mjs';
 import { testSwarmRunCollection } from './smoke/swarm-run-collection.mjs';
+import { testSemanticAdmissionGates } from './smoke/semantic-admission-gates.mjs';
 import { testArtifactArchiveCompaction } from './smoke/artifact-archive.mjs';
 import { testTournamentCli } from './smoke/tournament-cli.mjs';
 import { testContextBudget } from './smoke/context-budget.mjs';
@@ -56,6 +63,7 @@ await testHumanActionAnswers(context);
 await testArtifactArchiveCompaction(context, collectionDir);
 await testTournamentCli(context);
 await testSemanticImportQuality(context, mergeBundle);
+await testSemanticAdmissionGates(context, mergeBundle);
 await testSemanticLineageCollection(context, mergeBundle);
 await testApplyAndScore(context, mergeBundle);
 await testHooksAndWorkspaces(context);

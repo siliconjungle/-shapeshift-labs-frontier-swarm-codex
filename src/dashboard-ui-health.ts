@@ -101,6 +101,7 @@ export function dashboardJobHealth(job: FrontierCodexDashboardJob): FrontierCode
   if (job.sourceOwnershipViolationCount > 0 || job.quarantinedChangedPathCount > 0) return 'failed';
   if (isDashboardContextBudgetWarningJob(job) || isDashboardNeedsPortJob(job) || isDashboardStaleJob(job)) return 'warning';
   if (job.semanticReadiness === 'blocked' || job.semanticReadiness === 'needs-port' || job.semanticReadiness === 'stale') return 'warning';
+  if (job.bucket === 'research-complete' || job.disposition === 'discovery-only' || job.disposition === 'evidence-only') return 'healthy';
   if (job.bucket === 'ready-to-apply' || job.disposition === 'ready-to-apply' || job.status === 'completed') return 'healthy';
   return 'unknown';
 }

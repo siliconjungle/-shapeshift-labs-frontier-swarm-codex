@@ -5,6 +5,8 @@ import {
   type FrontierSwarmMergeBundle
 } from '@shapeshift-labs/frontier-swarm';
 import { isObject, uniqueStrings } from './common.js';
+import { classifyCodexSemanticCollectAdmission } from './collect-semantic-admission.js';
+import { isCompletedResearchEvidenceBundle } from './collect-research-outcomes.js';
 import {
   ignoredWorkspaceNoiseOnlyFailure,
   nonActionableFailedEvidence,
@@ -12,7 +14,8 @@ import {
 } from './collect-bundle-reasons.js';
 import type { FrontierCodexPatchStaleness } from './collect-bundle-staleness.js';
 import type { FrontierCodexCollectBucket } from './index.js';
-
+export { classifyCodexSemanticCollectAdmission } from './collect-semantic-admission.js';
+export type { FrontierCodexSemanticCollectAdmissionDecision, FrontierCodexSemanticCollectAdmissionStatus } from './collect-semantic-admission.js';
 export {
   bundlePatchStaleness
 } from './collect-bundle-staleness.js';
@@ -84,7 +87,10 @@ export function normalizeCollectedMergeBundle(value: unknown, mergePath: string)
     ...(isObject(input.semanticImport) ? { semanticImport: input.semanticImport as unknown as FrontierSwarmMergeBundle['semanticImport'] } : {}),
     ...(isObject(input.metadata) ? { metadata: input.metadata as FrontierSwarmMergeBundle['metadata'] } : {})
   } as FrontierSwarmMergeBundle;
-  return bundle;
+  const semanticAdmission = classifyCodexSemanticCollectAdmission(bundle, { hasActionablePatch: Boolean(bundle.patchPath) });
+  return semanticAdmission.reasons.length
+    ? { ...bundle, reasons: uniqueStrings([...bundle.reasons, ...semanticAdmission.reasons]) }
+    : bundle;
 }
 
 export function mergeRecordScore(record: { mergePath: string; bundle: FrontierSwarmMergeBundle }): number {
@@ -101,6 +107,7 @@ export function classifyCodexCollectBucket(
   hasActionablePatch = Boolean(bundle.patchPath)
 ): FrontierCodexCollectBucket {
   if (staleAgainstHead) return 'stale-against-head';
+  const semanticAdmission = classifyCodexSemanticCollectAdmission(bundle, { staleAgainstHead, hasActionablePatch });
   if (bundle.changedPaths.length > 0 && hasActionablePatch && (bundle.disposition === 'rejected' || bundle.commandsFailed.length > 0 || bundle.status === 'failed')) {
     return 'rerun-work';
   }
@@ -110,7 +117,12 @@ export function classifyCodexCollectBucket(
     if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-human-port';
     return 'failed-evidence';
   }
+  if (semanticAdmission.status === 'rerun') return 'rerun-work';
+  if (semanticAdmission.status === 'fail') return 'failed-evidence';
+  if (semanticAdmission.status === 'review') return 'needs-human-port';
+  if (semanticAdmission.status === 'ready' && hasActionablePatch) return 'ready-to-apply';
   if (bundle.disposition === 'auto-mergeable' && bundle.autoMergeable) return 'ready-to-apply';
+  if (isCompletedResearchEvidenceBundle(bundle, { staleAgainstHead, hasActionablePatch })) return 'research-complete';
   return 'needs-human-port';
 }
 
@@ -135,9 +147,21 @@ export function normalizeCollectedDisposition(
   if (nonActionableFailedEvidence(bundle, { staleAgainstHead, hasActionablePatch: patchExists })) return 'needs-port';
   if (ignoredWorkspaceNoiseOnlyFailure(bundle)) return 'needs-port';
   if (bundle.disposition === 'stale-against-head') return 'needs-port';
+  const semanticAdmission = classifyCodexSemanticCollectAdmission(bundle, { staleAgainstHead, hasActionablePatch: patchExists });
+  if (semanticAdmission.status === 'ready' && patchExists && !hardFailedBundle(bundle)) return 'auto-mergeable';
+  if ((bundle.autoMergeable || bundle.disposition === 'auto-mergeable') && semanticAdmission.status !== 'ready') {
+    return semanticAdmission.status === 'fail' ? 'rejected' : 'needs-port';
+  }
   return bundle.disposition;
 }
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function hardFailedBundle(bundle: FrontierSwarmMergeBundle): boolean {
+  return bundle.disposition === 'rejected' ||
+    bundle.disposition === 'blocked' ||
+    bundle.commandsFailed.length > 0 ||
+    bundle.status === 'failed';
 }

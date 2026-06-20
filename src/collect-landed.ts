@@ -13,6 +13,7 @@ import type {
 
 const COLLECT_BUCKETS: readonly FrontierCodexCollectBucket[] = [
   'ready-to-apply',
+  'research-complete',
   'needs-human-port',
   'rerun-work',
   'failed-evidence',
@@ -168,6 +169,7 @@ function summarizeApplyLedger(ledger: FrontierCodexApplyResult, ledgerPath: stri
 function collectBucketJobIds(buckets: Record<FrontierCodexCollectBucket, FrontierCodexCollectedBundle[]>): Record<FrontierCodexCollectBucket, string[]> {
   return {
     'ready-to-apply': buckets['ready-to-apply'].map((entry) => entry.jobId),
+    'research-complete': buckets['research-complete'].map((entry) => entry.jobId),
     'needs-human-port': buckets['needs-human-port'].map((entry) => entry.jobId),
     'rerun-work': buckets['rerun-work'].map((entry) => entry.jobId),
     'failed-evidence': buckets['failed-evidence'].map((entry) => entry.jobId),
@@ -176,7 +178,7 @@ function collectBucketJobIds(buckets: Record<FrontierCodexCollectBucket, Frontie
 }
 
 function mapBucketJobIds(jobIds: Record<FrontierCodexCollectBucket, string[]>, include: (jobId: string, bucket: FrontierCodexCollectBucket) => boolean): Record<FrontierCodexCollectBucket, string[]> {
-  const out = { 'ready-to-apply': [], 'needs-human-port': [], 'rerun-work': [], 'failed-evidence': [], 'stale-against-head': [] } as Record<FrontierCodexCollectBucket, string[]>;
+  const out = { 'ready-to-apply': [], 'research-complete': [], 'needs-human-port': [], 'rerun-work': [], 'failed-evidence': [], 'stale-against-head': [] } as Record<FrontierCodexCollectBucket, string[]>;
   for (const bucket of COLLECT_BUCKETS) out[bucket] = jobIds[bucket].filter((jobId) => include(jobId, bucket));
   return out;
 }
@@ -184,6 +186,7 @@ function mapBucketJobIds(jobIds: Record<FrontierCodexCollectBucket, string[]>, i
 function countBucketJobIds(jobIds: Record<FrontierCodexCollectBucket, string[]>): Record<FrontierCodexCollectBucket, number> {
   return {
     'ready-to-apply': jobIds['ready-to-apply'].length,
+    'research-complete': jobIds['research-complete'].length,
     'needs-human-port': jobIds['needs-human-port'].length,
     'rerun-work': jobIds['rerun-work'].length,
     'failed-evidence': jobIds['failed-evidence'].length,

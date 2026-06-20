@@ -34,6 +34,7 @@ export function createCodexCompactDashboard(input: {
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
   const semanticEditProjections = mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection));
   const semanticEditReplays = mergeSemanticEditReplaySummaries(semanticQualities.map((entry) => entry.semanticEditReplay));
+  const semanticImportLossesBySeverity = mergeNumberRecords(semanticQualities.map((entry) => entry.lossesBySeverity));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
   const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
   const traceSummaries = input.dashboard.jobs
@@ -95,6 +96,8 @@ export function createCodexCompactDashboard(input: {
       eligibleCount: semanticQualities.reduce((sum, entry) => sum + entry.eligible, 0),
       importedCount: semanticQualities.reduce((sum, entry) => sum + entry.imported, 0),
       candidateCount: semanticQualities.reduce((sum, entry) => sum + entry.candidates, 0),
+      lossCount: semanticQualities.reduce((sum, entry) => sum + entry.lossCount, 0),
+      lossesBySeverity: semanticImportLossesBySeverity,
       presentCount: semanticQualities.filter((entry) => entry.present).length,
       emptyCount: semanticQualities.filter((entry) => entry.empty).length,
       weakCount: semanticQualities.filter((entry) => entry.present && entry.warnings.length > 0).length,
@@ -150,6 +153,16 @@ export function createCodexCompactDashboard(input: {
     },
     topJobs
   };
+}
+
+function mergeNumberRecords(records: readonly Record<string, number>[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      if (Number.isFinite(value)) out[key] = (out[key] ?? 0) + value;
+    }
+  }
+  return out;
 }
 
 function semanticEditScriptAdmissionSummary(

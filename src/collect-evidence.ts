@@ -12,9 +12,9 @@ import { semanticImportProofSpecSummary } from './semantic-import-proof.js';
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { semanticEditScriptFacets, semanticEditScriptTags } from './semantic-edit-admission.js';
 import { semanticEditReplayFacets } from './semantic-edit-replay-facets.js';
+import { classifyCodexSemanticCollectAdmission } from './collect-bundles.js';
 import { codexBundleTraceSummary } from './trace-summary.js';
 import { contextBudgetFromBundle } from './context-budget.js';
-
 
 export async function copyOrWriteCollectedEvidenceSummary(input: {
   file: string;
@@ -30,6 +30,11 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
   const traceSummary = codexBundleTraceSummary(input.bundle);
   const semanticImport = semanticImportSummaryFromBundle(input.bundle);
   const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, input.semanticImportExpected ?? false);
+  const semanticCollectAdmission = classifyCodexSemanticCollectAdmission(input.bundle, {
+    hasActionablePatch: Boolean(input.patchPath),
+    semanticImportExpected: input.semanticImportExpected ?? false,
+    semanticImportQuality
+  });
   const contextBudget = contextBudgetFromBundle(input.bundle);
   await fs.mkdir(path.dirname(input.file), { recursive: true });
   if (existing && await pathExists(existing)) {
@@ -38,6 +43,7 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
       await augmentCollectedEvidenceSummary(input.file, {
         semanticImport,
         semanticImportQuality,
+        semanticCollectAdmission,
         contextBudget,
         traceSummary: traceSummary.shardCount ? traceSummary : undefined
       });
@@ -81,18 +87,19 @@ export async function copyOrWriteCollectedEvidenceSummary(input: {
       staleReasons: input.staleReasons ?? [],
       autoMergeable: input.bundle.autoMergeable,
       staleAgainstHead: input.bundle.staleAgainstHead,
+      semanticCollectAdmission,
       reasons: input.bundle.reasons
     }
   };
   await fs.writeFile(input.file, JSON.stringify(evidence, null, 2) + '\n');
 }
 
-
 async function augmentCollectedEvidenceSummary(
   file: string,
   input: {
     semanticImport?: unknown;
     semanticImportQuality: ReturnType<typeof summarizeCodexSemanticImportQuality>;
+    semanticCollectAdmission: ReturnType<typeof classifyCodexSemanticCollectAdmission>;
     contextBudget?: FrontierCodexJobEvidenceSummary['contextBudget'];
     traceSummary?: FrontierCodexTraceSummary;
   }
@@ -110,6 +117,7 @@ async function augmentCollectedEvidenceSummary(
       semanticImportQuality: input.semanticImportQuality,
       semanticEditScript: input.semanticImportQuality.semanticEditScript,
       semanticEditAdmission: input.semanticImportQuality.semanticEditAdmission,
+      semanticCollectAdmission: input.semanticCollectAdmission,
       ...(input.contextBudget ? { contextBudget: input.contextBudget } : {})
     };
     await fs.writeFile(file, JSON.stringify(parsed, null, 2) + '\n');
@@ -117,7 +125,6 @@ async function augmentCollectedEvidenceSummary(
     // Keep collection best-effort when a worker evidence file is not JSON.
   }
 }
-
 
 export function createCollectedEvidenceEntries(
   bundle: FrontierSwarmMergeBundle,
@@ -127,6 +134,8 @@ export function createCollectedEvidenceEntries(
 ): FrontierSwarmEvidenceIndexEntryInput[] {
   const confidence = bucket === 'ready-to-apply'
     ? 0.95
+    : bucket === 'research-complete'
+      ? 0.85
     : bucket === 'needs-human-port'
       ? 0.7
       : bucket === 'rerun-work'
@@ -136,6 +145,11 @@ export function createCollectedEvidenceEntries(
           : 0.2;
   const semanticImport = semanticImportSummaryFromBundle(bundle);
   const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
+  const semanticCollectAdmission = classifyCodexSemanticCollectAdmission(bundle, {
+    hasActionablePatch: Boolean(bundle.patchPath),
+    semanticImportExpected,
+    semanticImportQuality
+  });
   const universalAstLayers = semanticImportUniversalAstLayerSummary(semanticImport);
   const traceSummary = codexBundleTraceSummary(bundle);
   const contextBudget = contextBudgetFromBundle(bundle);
@@ -162,6 +176,8 @@ export function createCollectedEvidenceEntries(
       ...(semanticImportQuality.semanticEditReplay.acceptedClean ? ['semantic-edit-replay-accepted-clean'] : []),
       ...(semanticImportQuality.semanticEditReplay.conflicts ? ['semantic-edit-replay-conflict'] : []),
       ...(semanticImportQuality.semanticEditReplay.stale ? ['semantic-edit-replay-stale'] : []),
+      `semantic-collect-admission-${semanticCollectAdmission.status}`,
+      ...(semanticCollectAdmission.semanticGatePassed ? ['semantic-collect-admission-gate-passed'] : []),
       ...(contextBudget?.warnings.length ? ['context-budget-warning'] : []),
       ...(contextBudget?.errors.length ? ['context-budget-failed'] : [])
     ]),
@@ -182,9 +198,26 @@ export function createCollectedEvidenceEntries(
       semanticEligible: semanticImportQuality.eligible,
       semanticImported: semanticImportQuality.imported,
       semanticErrors: semanticImportQuality.errors,
+      semanticLossCount: semanticImportQuality.lossCount,
+      semanticErrorLosses: semanticImportQuality.semanticErrorLosses,
+      semanticWarningLosses: semanticImportQuality.semanticWarningLosses,
       semanticSymbols: semanticImportQuality.symbols,
       semanticRegions: semanticImportQuality.ownershipRegions,
       semanticPatchHints: semanticImportQuality.patchHints,
+      semanticReadiness: Object.entries(semanticImportQuality.semanticReadiness).map(([key, value]) => `${key}:${value}`).join(','),
+      semanticSourceProjectionTotal: semanticImportQuality.sourceProjectionTotal,
+      semanticSourceProjectionPreserved: semanticImportQuality.sourceProjectionPreserved,
+      semanticSourceProjectionStubs: semanticImportQuality.sourceProjectionStubs,
+      semanticSourceProjectionReady: semanticImportQuality.sourceProjectionReady,
+      semanticSourceProjectionNeedsReview: semanticImportQuality.sourceProjectionNeedsReview,
+      semanticSourceProjectionBlocked: semanticImportQuality.sourceProjectionBlocked,
+      semanticNativeCompileTotal: semanticImportQuality.nativeCompileTotal,
+      semanticNativeCompileEmitted: semanticImportQuality.nativeCompileEmitted,
+      semanticNativeCompilePreserved: semanticImportQuality.nativeCompilePreserved,
+      semanticNativeCompileTargetStubs: semanticImportQuality.nativeCompileTargetStubs,
+      semanticNativeCompileReady: semanticImportQuality.nativeCompileReady,
+      semanticNativeCompileNeedsReview: semanticImportQuality.nativeCompileNeedsReview,
+      semanticNativeCompileBlocked: semanticImportQuality.nativeCompileBlocked,
       semanticFacts: semanticImportQuality.semanticFacts,
       semanticFactPredicates: semanticImportQuality.semanticFactPredicates.join(','),
       semanticWarnings: semanticImportQuality.warnings.join(','),
@@ -193,6 +226,9 @@ export function createCollectedEvidenceEntries(
       semanticEditAdmissionAutoMergeCandidate: semanticImportQuality.semanticEditAdmission.autoMergeCandidate,
       semanticEditAdmissionCleanEligible: semanticImportQuality.semanticEditAdmission.cleanEligible,
       semanticEditAdmissionReasons: semanticImportQuality.semanticEditAdmission.reasons.join(','),
+      semanticCollectAdmissionStatus: semanticCollectAdmission.status,
+      semanticCollectAdmissionGatePassed: semanticCollectAdmission.semanticGatePassed,
+      semanticCollectAdmissionReasons: semanticCollectAdmission.reasons.join(','),
       semanticDependencyRelations: semanticImportQuality.dependencyRelations,
       semanticDependencyPredicates: semanticImportQuality.dependencyPredicates.join(','),
       universalAstLayers: universalAstLayers.total,
@@ -202,6 +238,10 @@ export function createCollectedEvidenceEntries(
       paradigmSemanticsRecords: semanticImportParadigmSemanticsSummary(semanticImport).total,
       paradigmSemanticsGroups: semanticImportParadigmSemanticsSummary(semanticImport).groups.length,
       paradigmSemanticsLoweringRecords: semanticImportParadigmSemanticsSummary(semanticImport).loweringRecords,
+      semanticSliceAdmissionTotal: semanticImportQuality.semanticSliceAdmissionTotal,
+      semanticSliceAdmissionAdmitted: semanticImportQuality.semanticSliceAdmissionAdmitted,
+      semanticSliceAdmissionPrioritized: semanticImportQuality.semanticSliceAdmissionPrioritized,
+      semanticSliceAdmissionRejected: semanticImportQuality.semanticSliceAdmissionRejected,
       semanticLineageEvents: semanticImportQuality.semanticLineageEvents,
       semanticLineageMoved: semanticImportQuality.semanticLineageMoved,
       semanticLineageRenamed: semanticImportQuality.semanticLineageRenamed,

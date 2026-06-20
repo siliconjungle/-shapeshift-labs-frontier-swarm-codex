@@ -1,6 +1,6 @@
 import type { FrontierSwarmJobResultInput, FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
 import type { FrontierCodexSemanticImportOptions, FrontierCodexSemanticImportQuality, FrontierCodexSemanticImportSidecar } from './index.js';
-import { nonNegativeNumber, readStringArray, uniqueStrings } from './common.js';
+import { nonNegativeNumber, numberRecord, readStringArray, uniqueStrings } from './common.js';
 import { semanticImportFactSummary } from './semantic-import-facts.js';
 import { semanticImportUniversalAstLayerSummary } from './semantic-import-layers.js';
 import { semanticImportParadigmSemanticsSummary } from './semantic-import-paradigm.js';
@@ -11,8 +11,17 @@ import { summarizeSemanticEditProjection, emptySemanticEditProjectionSummary } f
 import { emptySemanticEditReplaySummary, summarizeSemanticEditReplay } from './semantic-edit-replay.js';
 import { classifySemanticEditScriptAdmission } from './semantic-edit-admission.js';
 
-type SemanticImportExpectedSatisfiedInput = { expected: boolean; present: boolean; empty: boolean; imported: number; symbols: number; ownershipRegions: number; patchHints: number; reasonCodes: readonly string[] };
-type SemanticImportExpectedMissingInput = { expected: boolean; present: boolean; empty: boolean; selected: number; imported: number; symbols: number; ownershipRegions: number; patchHints: number };
+import {
+  semanticImportCandidateCount,
+  semanticImportExpected,
+  semanticImportExpectedMissingReasonCodes,
+  semanticImportExpectedSatisfied,
+  semanticImportNativeCompileSummary,
+  semanticImportSliceAdmissionSummary,
+  semanticImportSourceProjectionSummary,
+  semanticLineageExpectedForBeforeSourceDiff,
+  semanticSelectionSummary
+} from './semantic-import-quality-helpers.js';
 
 export function summarizeCodexSemanticImportQuality(
   summary: FrontierSwarmMergeBundle['semanticImport'] | FrontierCodexSemanticImportSidecar['summary'] | FrontierSwarmJobResultInput['semanticImport'] | undefined,
@@ -24,9 +33,16 @@ export function summarizeCodexSemanticImportQuality(
   const eligible = nonNegativeNumber(summary?.eligible);
   const imported = nonNegativeNumber(summary?.imported);
   const errors = nonNegativeNumber(summary?.errors);
+  const lossCount = nonNegativeNumber((summary as { lossCount?: unknown } | undefined)?.lossCount);
+  const lossesBySeverity = numberRecord((summary as { lossesBySeverity?: unknown } | undefined)?.lossesBySeverity);
+  const semanticErrorLosses = nonNegativeNumber(lossesBySeverity.error);
+  const semanticWarningLosses = nonNegativeNumber(lossesBySeverity.warning);
   const symbols = nonNegativeNumber(summary?.semanticIndex?.symbols);
   const ownershipRegions = nonNegativeNumber(summary?.semanticSidecars?.ownershipRegions);
   const patchHints = nonNegativeNumber(summary?.semanticSidecars?.patchHints);
+  const semanticReadiness = numberRecord((summary as { readiness?: unknown } | undefined)?.readiness);
+  const sourceProjections = semanticImportSourceProjectionSummary(summary);
+  const nativeCompiles = semanticImportNativeCompileSummary(summary);
   const semanticFacts = semanticImportFactSummary(summary);
   const dependencyRelations = nonNegativeNumber((summary as { dependencies?: { total?: number } } | undefined)?.dependencies?.total);
   const dependencyPredicates = Array.isArray((summary as { dependencies?: { predicates?: unknown } } | undefined)?.dependencies?.predicates)
@@ -44,6 +60,7 @@ export function summarizeCodexSemanticImportQuality(
   const universalAstLayerNames = universalAstLayerSummary.names;
   const proofSpec = semanticImportProofSpecSummary(summary);
   const paradigmSemantics = semanticImportParadigmSemanticsSummary(summary);
+  const semanticSliceAdmissions = semanticImportSliceAdmissionSummary(summary);
   const semanticLineage = semanticImportLineageSummary(summary);
   const semanticEditScript = summarizeSemanticEditScript(summary) ?? summarizeSemanticEditScript({ semanticEditScripts: (summary as { semanticEditScripts?: unknown } | undefined)?.semanticEditScripts })!;
   const semanticEditProjection = summarizeSemanticEditProjection(summary) ?? emptySemanticEditProjectionSummary();
@@ -81,6 +98,13 @@ export function summarizeCodexSemanticImportQuality(
   if (present && candidates === 0) warnings.push('semantic import has no candidates');
   if (present && imported === 0) warnings.push('semantic import imported no files');
   if (present && errors > 0) warnings.push('semantic import has errors');
+  if (present && semanticErrorLosses > 0) warnings.push('semantic import has error losses');
+  if (present && semanticReadiness.blocked > 0) warnings.push('semantic import readiness is blocked');
+  if (present && semanticReadiness['needs-review'] > 0) warnings.push('semantic import readiness needs review');
+  if (present && sourceProjections.blocked > 0) warnings.push('semantic source projection is blocked');
+  if (present && sourceProjections.stubs > 0) warnings.push('semantic source projection uses stubs');
+  if (present && nativeCompiles.blocked > 0) warnings.push('semantic native compile is blocked');
+  if (present && nativeCompiles.targetStubs > 0) warnings.push('semantic native compile emitted target stubs');
   if (present && selected === 0 && selection.includeFiltered > 0) warnings.push('semantic import include filters selected no files');
   if (present && selected === 0 && selection.unsupportedLanguage > 0) warnings.push('semantic import candidates had unsupported languages');
   if (present && selected > 0 && symbols === 0) warnings.push('semantic import has no symbols');
@@ -90,6 +114,7 @@ export function summarizeCodexSemanticImportQuality(
   if (present && selected > 0 && symbols > 1 && dependencyRelations === 0) warnings.push('semantic import has no dependency relations');
   if (present && proofSpec.failed > 0) warnings.push('semantic import has failed proof obligations');
   if (present && proofSpec.stale > 0) warnings.push('semantic import has stale proof obligations');
+  if (present && semanticSliceAdmissions.rejected > 0) warnings.push('semantic slice admission rejected candidates');
   if (present && symbols > 0 && semanticLineageExpected && semanticLineage.inferredEvents === 0) {
     warnings.push('semantic import has symbols but no inferred semantic lineage for expected before-source diff');
   }
@@ -120,9 +145,27 @@ export function summarizeCodexSemanticImportQuality(
     eligible,
     imported,
     errors,
+    lossCount,
+    lossesBySeverity,
+    semanticErrorLosses,
+    semanticWarningLosses,
     symbols,
     ownershipRegions,
     patchHints,
+    semanticReadiness,
+    sourceProjectionTotal: sourceProjections.total,
+    sourceProjectionPreserved: sourceProjections.preserved,
+    sourceProjectionStubs: sourceProjections.stubs,
+    sourceProjectionReady: sourceProjections.ready,
+    sourceProjectionNeedsReview: sourceProjections.needsReview,
+    sourceProjectionBlocked: sourceProjections.blocked,
+    nativeCompileTotal: nativeCompiles.total,
+    nativeCompileEmitted: nativeCompiles.emitted,
+    nativeCompilePreserved: nativeCompiles.preserved,
+    nativeCompileTargetStubs: nativeCompiles.targetStubs,
+    nativeCompileReady: nativeCompiles.ready,
+    nativeCompileNeedsReview: nativeCompiles.needsReview,
+    nativeCompileBlocked: nativeCompiles.blocked,
     semanticFacts: semanticFacts.total,
     semanticFactPredicates: semanticFacts.predicates,
     semanticFactSummary: semanticFacts.byPredicate,
@@ -138,6 +181,10 @@ export function summarizeCodexSemanticImportQuality(
     paradigmSemanticsRecords: paradigmSemantics.total,
     paradigmSemanticsGroups: paradigmSemantics.groups.length,
     paradigmSemanticsLoweringRecords: paradigmSemantics.loweringRecords,
+    semanticSliceAdmissionTotal: semanticSliceAdmissions.total,
+    semanticSliceAdmissionAdmitted: semanticSliceAdmissions.admitted,
+    semanticSliceAdmissionPrioritized: semanticSliceAdmissions.prioritized,
+    semanticSliceAdmissionRejected: semanticSliceAdmissions.rejected,
     semanticLineageEvents: semanticLineage.inferredEvents,
     semanticLineageMoved: semanticLineage.moved,
     semanticLineageRenamed: semanticLineage.renamed,
@@ -152,116 +199,6 @@ export function summarizeCodexSemanticImportQuality(
     semanticEditReplay,
     semanticEditAdmission,
     warnings: uniqueStrings(warnings)
-  };
-}
-
-function semanticImportCandidateCount(summary: unknown): number {
-  const record = summaryRecord(summary);
-  return nonNegativeNumber((record?.selection as { candidates?: unknown } | undefined)?.candidates ?? record?.total);
-}
-
-function semanticImportExpected(summary: unknown, fallback: boolean): boolean {
-  if (fallback) return true;
-  const record = summaryRecord(summary);
-  if (!record) return false;
-  return record.semanticImportExpected === true ||
-    record.expected === true ||
-    (record.quality as { expected?: unknown } | undefined)?.expected === true ||
-    (record.admission as { expected?: unknown } | undefined)?.expected === true;
-}
-
-function semanticImportExpectedSatisfied(summary: unknown, input: SemanticImportExpectedSatisfiedInput): boolean {
-  if (!input.expected) return true;
-  const explicit = semanticImportExplicitExpectedSatisfied(summary);
-  if (explicit !== undefined) return explicit && input.reasonCodes.length === 0;
-  return input.present &&
-    !input.empty &&
-    input.imported > 0 &&
-    input.symbols > 0 &&
-    input.ownershipRegions > 0 &&
-    input.patchHints > 0 &&
-    input.reasonCodes.length === 0;
-}
-
-function semanticImportExpectedMissingReasonCodes(summary: unknown, input: SemanticImportExpectedMissingInput): string[] {
-  const record = summaryRecord(summary);
-  const explicitCodes = uniqueStrings([
-    ...readStringArray(record?.semanticImportExpectedMissingReasonCodes),
-    ...readStringArray((record?.quality as { expectedMissingReasonCodes?: unknown } | undefined)?.expectedMissingReasonCodes),
-    ...readStringArray((record?.admission as { expectedMissingReasonCodes?: unknown } | undefined)?.expectedMissingReasonCodes)
-  ]);
-  if (!input.expected) return explicitCodes;
-  const inferredCodes: string[] = [];
-  if (!input.present) inferredCodes.push('expected-semantic-import-missing');
-  if (input.present && input.selected === 0) inferredCodes.push('expected-semantic-import-missing');
-  if (input.present && input.selected > 0 && input.imported === 0) inferredCodes.push('missing-imports');
-  if (input.present && input.imported > 0 && input.symbols === 0) {
-    inferredCodes.push('expected-semantic-import-empty', 'empty-semantic-index');
-  }
-  if (input.present && input.imported > 0 && input.ownershipRegions === 0) inferredCodes.push('missing-ownership-regions');
-  if (input.present && input.imported > 0 && input.patchHints === 0) inferredCodes.push('missing-patch-hints');
-  if (input.empty && !inferredCodes.includes('expected-semantic-import-empty')) {
-    inferredCodes.push('expected-semantic-import-empty');
-  }
-  return uniqueStrings([...explicitCodes, ...inferredCodes]);
-}
-
-function semanticImportExplicitExpectedSatisfied(summary: unknown): boolean | undefined {
-  const record = summaryRecord(summary);
-  const candidates = [
-    record?.semanticImportExpectedSatisfied,
-    (record?.quality as { expectedSatisfied?: unknown } | undefined)?.expectedSatisfied,
-    (record?.admission as { expectedSatisfied?: unknown } | undefined)?.expectedSatisfied
-  ];
-  for (const value of candidates) {
-    if (typeof value === 'boolean') return value;
-  }
-  return undefined;
-}
-
-function semanticLineageExpectedForBeforeSourceDiff(summary: unknown, beforeSymbols: number): boolean {
-  if (beforeSymbols > 0) return true;
-  const record = summaryRecord(summary);
-  if (!record) return false;
-  const quality = record.quality as { semanticLineageExpected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
-  const admission = record.admission as { semanticLineageExpected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
-  const lineage = record.semanticLineage as { expected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
-  const inference = record.semanticLineageInference as { expected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
-  const lineageInference = record.lineageInference as { expected?: unknown; beforeSourceDiffExpected?: unknown } | undefined;
-  return [
-    record.semanticLineageExpected,
-    record.semanticLineageInferenceExpected,
-    record.beforeSourceDiffExpected,
-    record.beforeSourceExpected,
-    quality?.semanticLineageExpected,
-    quality?.beforeSourceDiffExpected,
-    admission?.semanticLineageExpected,
-    admission?.beforeSourceDiffExpected,
-    lineage?.expected,
-    lineage?.beforeSourceDiffExpected,
-    inference?.expected,
-    inference?.beforeSourceDiffExpected,
-    lineageInference?.expected,
-    lineageInference?.beforeSourceDiffExpected
-  ].some((value) => value === true);
-}
-
-function summaryRecord(summary: unknown): Record<string, unknown> | undefined {
-  return summary && typeof summary === 'object' && !Array.isArray(summary)
-    ? summary as Record<string, unknown>
-    : undefined;
-}
-
-function semanticSelectionSummary(summary: unknown): {
-  includeFiltered: number;
-  unsupportedLanguage: number;
-} {
-  const selection = summary && typeof summary === 'object'
-    ? (summary as { selection?: { includeFiltered?: unknown; unsupportedLanguage?: unknown } }).selection
-    : undefined;
-  return {
-    includeFiltered: nonNegativeNumber(selection?.includeFiltered),
-    unsupportedLanguage: nonNegativeNumber(selection?.unsupportedLanguage)
   };
 }
 

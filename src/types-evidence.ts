@@ -199,6 +199,8 @@ export interface FrontierCodexCompactDashboard {
     eligibleCount: number;
     importedCount: number;
     candidateCount: number;
+    lossCount: number;
+    lossesBySeverity: Record<string, number>;
     presentCount: number;
     emptyCount: number;
     weakCount: number;

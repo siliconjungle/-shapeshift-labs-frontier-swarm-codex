@@ -22,7 +22,7 @@ export async function applyCodexSwarmCollection(input: FrontierCodexApplyInput):
   }
   const bucket = input.bucket ?? 'ready-to-apply';
   const roots = bucket === 'all'
-    ? ['ready-to-apply', 'needs-human-port', 'rerun-work', 'failed-evidence', 'stale-against-head'].map((entry) => path.join(collectionDir, entry))
+    ? ['ready-to-apply', 'research-complete', 'needs-human-port', 'rerun-work', 'failed-evidence', 'stale-against-head'].map((entry) => path.join(collectionDir, entry))
     : [path.join(collectionDir, bucket)];
   const wanted = new Set(input.jobIds ?? []);
   const mergePaths = (await Promise.all(roots.map((root) => findFilesByName(root, 'merge.json')))).flat().sort();

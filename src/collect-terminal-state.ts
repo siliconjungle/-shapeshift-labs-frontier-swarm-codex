@@ -63,6 +63,8 @@ function createCodexCollectionQueueOutcomeDecisions(input: {
       if (landed.has(bundle.jobId)) {
         const outcome = committed.has(bundle.jobId) ? 'committed' : applied.has(bundle.jobId) ? 'applied' : 'checked';
         decisions.push({ ...base, decision: outcome, category: 'terminal', outcome, terminal: true, reasons: ['landed by apply ledger'] });
+      } else if (bucket === 'research-complete') {
+        decisions.push({ ...base, decision: 'research-complete', category: 'terminal', outcome: 'research-complete', terminal: true, reasons: uniqueStrings(['research-complete', 'discovery-only', ...bundle.reasons]) });
       } else if (bucket === 'ready-to-apply') {
         decisions.push({ ...base, decision: 'ready', category: 'continuation', outcome: 'ready', terminal: false, reasons: bundle.reasons });
       } else if (bucket === 'needs-human-port') {

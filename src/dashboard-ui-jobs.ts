@@ -140,6 +140,8 @@ export async function createDashboardJobs(
 function dashboardBucketFromCoordinatorJob(job: Record<string, unknown>): FrontierCodexCollectBucket | undefined {
   const disposition = stringValue(job.disposition);
   const status = stringValue(job.status);
+  const mergeReadiness = stringValue(job.mergeReadiness);
+  if (disposition === 'discovery-only' || disposition === 'evidence-only' || mergeReadiness === 'discovery-only' || mergeReadiness === 'evidence-only') return 'research-complete';
   if (disposition === 'needs-port' || disposition === 'needs-human-port') return 'needs-human-port';
   if (disposition === 'ready-to-apply' || disposition === 'auto-mergeable') return 'ready-to-apply';
   if (disposition === 'rerun-work' || disposition === 'ownership-rescope') return 'rerun-work';

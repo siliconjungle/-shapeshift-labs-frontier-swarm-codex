@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { cleanEditScriptSemanticImportSummary } from './semantic-import-quality-fixtures.mjs';
 
 export async function writeMerge(runDir, jobId, input) {
   const dir = path.join(runDir, jobId);
@@ -33,6 +34,9 @@ export async function writePatchMerge(runDir, jobId, input) {
   const dir = path.join(runDir, jobId);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, 'changes.patch'), input.patchText);
+  const semanticImport = input.semanticImport ?? (input.autoMergeable
+    ? cleanAutoMergeSemanticImportSummary(input.changedPath ?? 'tracked.txt')
+    : undefined);
   await writeMerge(runDir, jobId, {
     status: input.status ?? 'completed',
     disposition: input.disposition,
@@ -41,8 +45,42 @@ export async function writePatchMerge(runDir, jobId, input) {
     patchPath: 'changes.patch',
     traceShards: [],
     semanticPatchBundles: [],
+    ...(semanticImport ? { semanticImport, metadata: { semanticImport } } : {}),
     commandsFailed: input.commandsFailed ?? []
   });
+}
+
+function cleanAutoMergeSemanticImportSummary(file) {
+  const summary = cleanEditScriptSemanticImportSummary();
+  return {
+    ...summary,
+    lossCount: 0,
+    lossesBySeverity: {},
+    universalAstLayers: { total: 1, names: ['program'], ids: ['layer:program'], byName: { program: 1 }, empty: false },
+    proofSpec: { total: 1, obligations: 1, discharged: 1, failed: 0, stale: 0, open: 0, unknown: 0 },
+    sourceProjections: { total: 1, preserved: 1, stubs: 0, ready: 1, needsReview: 0, blocked: 0 },
+    nativeCompiles: { total: 1, emitted: 1, preserved: 1, targetStubs: 0, ready: 1, needsReview: 0, blocked: 0 },
+    semanticSliceAdmissions: { total: 1, admitted: 1, prioritized: 1, rejected: 0, averageScore: 1, byAction: { admit: 1 }, byRisk: { low: 1 } },
+    readiness: { ready: 1 },
+    semanticEditProjections: {
+      ...summary.semanticEditProjections,
+      total: 1,
+      autoMergeCandidates: 1,
+      appliedOperations: 1,
+      skippedOperations: 0,
+      sourcePaths: [file],
+      transformSourcePaths: [file],
+      transformTargetPaths: [file],
+      admission: { ...summary.semanticEditProjections.admission, 'auto-merge-candidate': 1 },
+      statusCounts: { projected: 1 },
+      empty: false
+    },
+    semanticEditReplays: {
+      ...summary.semanticEditReplays,
+      sourcePaths: [file],
+      empty: false
+    }
+  };
 }
 
 export function patchText(before, after) {

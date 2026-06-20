@@ -31,6 +31,7 @@ export function enrichCollectedCoordinatorDashboard(
   const semanticEditScripts = mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript));
   const semanticEditProjections = mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection));
   const semanticEditReplays = mergeSemanticEditReplaySummaries(semanticQualities.map((entry) => entry.semanticEditReplay));
+  const semanticImportLossesBySeverity = mergeNumberRecords(semanticQualities.map((entry) => entry.lossesBySeverity));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
   const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
   mutable.jobs = dashboard.jobs.map((job) => {
@@ -70,6 +71,8 @@ export function enrichCollectedCoordinatorDashboard(
     semanticImportSelectedCount: semanticQualities.reduce((sum, entry) => sum + entry.selected, 0),
     semanticImportEligibleCount: semanticQualities.reduce((sum, entry) => sum + entry.eligible, 0),
     semanticImportImportedCount: semanticQualities.reduce((sum, entry) => sum + entry.imported, 0),
+    semanticImportLossCount: semanticQualities.reduce((sum, entry) => sum + entry.lossCount, 0),
+    semanticImportLossesBySeverity,
     semanticImportWarningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
     semanticImportWarnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings)),
     semanticImportFactCount: semanticQualities.reduce((sum, entry) => sum + entry.semanticFacts, 0),
@@ -80,12 +83,20 @@ export function enrichCollectedCoordinatorDashboard(
     semanticLineageMoved: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageMoved, 0),
     semanticLineageRenamed: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageRenamed, 0),
     semanticLineageDeleted: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageDeleted, 0),
+    semanticLineageAmbiguous: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageAmbiguous, 0),
     semanticLineageBlocked: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageBlocked, 0),
+    semanticLineageNeedsReview: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageNeedsReview, 0),
+    semanticLineageReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.semanticLineageReasonCodes)),
+    semanticProofSpecFailedObligations: semanticQualities.reduce((sum, entry) => sum + entry.proofSpecFailedObligations, 0),
+    semanticParadigmSemanticsRecords: semanticQualities.reduce((sum, entry) => sum + entry.paradigmSemanticsRecords, 0),
     semanticEditScriptAutoMergeCandidates: semanticEditScripts.autoMergeCandidates,
     semanticEditScriptConflicts: semanticEditScripts.conflicts,
     semanticEditScriptStale: semanticEditScripts.stale,
+    semanticEditScriptBlocked: semanticEditScripts.blocked,
     semanticEditScriptNeedsPort: semanticEditScripts.needsPort,
     semanticEditScriptPortable: semanticEditScripts.portable,
+    semanticEditScriptReviewRequired: semanticEditScripts.reviewRequired,
+    semanticEditScriptReasonCodes: semanticEditScripts.reasonCodes,
     semanticEditProjectionProjected: semanticEditProjections.projected,
     semanticEditProjectionBlocked: semanticEditProjections.blocked,
     semanticEditProjectionEdits: semanticEditProjections.editCount,
@@ -96,12 +107,14 @@ export function enrichCollectedCoordinatorDashboard(
     semanticEditProjectionMatchesWorker: semanticEditProjections.projectedSourceMatchesWorker,
     semanticEditProjectionMismatchesWorker: semanticEditProjections.projectedSourceMismatchesWorker,
     semanticEditProjectionMatchUnknown: semanticEditProjections.projectedSourceMatchUnknown,
+    semanticEditProjectionReasonCodes: semanticEditProjections.reasonCodes,
     semanticEditReplayAcceptedClean: semanticEditReplays.acceptedClean,
     semanticEditReplayAlreadyApplied: semanticEditReplays.alreadyApplied,
     semanticEditReplayConflicts: semanticEditReplays.conflicts,
     semanticEditReplayStale: semanticEditReplays.stale,
     semanticEditReplayBlocked: semanticEditReplays.blocked,
     semanticEditReplayNeedsPort: semanticEditReplays.needsPort,
+    semanticEditReplayReasonCodes: semanticEditReplays.reasonCodes,
     semanticEditReplays,
     semanticEditAdmission,
     semanticEditScriptAdmission,
@@ -137,6 +150,8 @@ function semanticImportMetadata(
     expectedSatisfiedCount: semanticQualities.filter((entry) => entry.expected && entry.expectedSatisfied).length,
     expectedUnsatisfiedCount: semanticQualities.filter((entry) => entry.expected && !entry.expectedSatisfied).length,
     expectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes)),
+    lossCount: semanticQualities.reduce((sum, entry) => sum + entry.lossCount, 0),
+    lossesBySeverity: mergeNumberRecords(semanticQualities.map((entry) => entry.lossesBySeverity)),
     candidateCount: semanticQualities.reduce((sum, entry) => sum + entry.candidates, 0),
     selectedCount: semanticQualities.reduce((sum, entry) => sum + entry.selected, 0),
     eligibleCount: semanticQualities.reduce((sum, entry) => sum + entry.eligible, 0),
@@ -150,6 +165,7 @@ function semanticImportMetadata(
     semanticLineageRenamed: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageRenamed, 0),
     semanticLineageDeleted: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageDeleted, 0),
     semanticLineageBlocked: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageBlocked, 0),
+    semanticLineageNeedsReview: semanticQualities.reduce((sum, entry) => sum + entry.semanticLineageNeedsReview, 0),
     semanticEditScripts: { ...mergeSemanticEditScriptSummaries(semanticQualities.map((entry) => entry.semanticEditScript)) },
     semanticEditProjections: {
       ...mergeSemanticEditProjectionSummaries(semanticQualities.map((entry) => entry.semanticEditProjection))
@@ -163,6 +179,16 @@ function semanticImportMetadata(
     warningCount: semanticQualities.reduce((sum, entry) => sum + entry.warnings.length, 0),
     warnings: uniqueStrings(semanticQualities.flatMap((entry) => entry.warnings))
   };
+}
+
+function mergeNumberRecords(records: readonly Record<string, number>[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      if (Number.isFinite(value)) out[key] = (out[key] ?? 0) + value;
+    }
+  }
+  return out;
 }
 
 function semanticEditScriptAdmissionSummary(

@@ -33,6 +33,7 @@ export type * from './types-collection-score.js';
 
 export type FrontierCodexCollectBucket =
   | 'ready-to-apply'
+  | 'research-complete'
   | 'needs-human-port'
   | 'rerun-work'
   | 'failed-evidence'

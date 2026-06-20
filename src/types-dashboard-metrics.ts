@@ -113,6 +113,8 @@ export interface FrontierCodexDashboardSemanticImportMetrics {
   selectedCount: number;
   eligibleCount: number;
   importedCount: number;
+  lossCount: number;
+  lossSeverityCounts: Record<string, number>;
   warningCount: number;
   factCount: number;
   factPredicates: string[];
@@ -130,7 +132,9 @@ export interface FrontierCodexDashboardSemanticEditMetrics {
     autoMergeCandidateCount: number;
     conflictCount: number;
     staleCount: number;
+    blockedCount: number;
     needsPortCount: number;
+    reviewRequiredCount: number;
     portableCount: number;
   };
   projection: {
@@ -155,6 +159,8 @@ export interface FrontierCodexDashboardSemanticReplayMetrics {
   staleCount: number;
   blockedCount: number;
   needsPortCount: number;
+  evidenceOnlyCount: number;
+  reasonCodes: string[];
 }
 
 export interface FrontierCodexDashboardSemanticAdmissionMetrics {
@@ -166,6 +172,43 @@ export interface FrontierCodexDashboardSemanticAdmissionMetrics {
   cleanEligibleCandidateCount: number;
 }
 
+export type FrontierCodexDashboardSemanticGateStatus = 'pass' | 'review' | 'blocked' | 'unknown';
+
+export interface FrontierCodexDashboardSemanticHealthMetrics {
+  parser: {
+    lossCount: number;
+    lossSeverityCounts: Record<string, number>;
+    warningCount: number;
+    expectedMissingReasonCodes: string[];
+  };
+  ledger: {
+    totalCount: number;
+    landedCount: number;
+    skippedCount: number;
+    failedCount: number;
+  };
+  merge: {
+    autoMergeCandidateCount: number;
+    reviewRequiredCount: number;
+    conflictCount: number;
+    staleCount: number;
+    blockedCount: number;
+    needsPortCount: number;
+    reasonCodes: string[];
+  };
+  gates: {
+    status: FrontierCodexDashboardSemanticGateStatus;
+    passedCount: number;
+    warningCount: number;
+    failedCount: number;
+    reasonCodes: string[];
+  };
+  outcomes: {
+    openCoordinatorReviewCount: number;
+    synthesizedResearchCompleteCount: number;
+  };
+}
+
 export interface FrontierCodexDashboardSemanticMetrics {
   import: FrontierCodexDashboardSemanticImportMetrics;
   edit: FrontierCodexDashboardSemanticEditMetrics;
@@ -174,6 +217,7 @@ export interface FrontierCodexDashboardSemanticMetrics {
     jobs: FrontierCodexDashboardSemanticAdmissionMetrics;
     scripts: FrontierCodexDashboardSemanticAdmissionMetrics;
   };
+  health: FrontierCodexDashboardSemanticHealthMetrics;
 }
 
 export interface FrontierCodexDashboardTimeSeriesPoint {

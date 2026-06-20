@@ -190,7 +190,7 @@ export function routingContextArg(args: CliArgs) {
 export function bucketArg(value: CliValue | undefined) {
   const bucket = stringArg(value);
   if (bucket === undefined) return undefined;
-  if (bucket === 'all' || bucket === 'ready-to-apply' || bucket === 'needs-human-port' || bucket === 'rerun-work' || bucket === 'failed-evidence' || bucket === 'stale-against-head') return bucket;
+  if (bucket === 'all' || bucket === 'ready-to-apply' || bucket === 'research-complete' || bucket === 'needs-human-port' || bucket === 'rerun-work' || bucket === 'failed-evidence' || bucket === 'stale-against-head') return bucket;
   throw new Error(`unsupported --bucket ${bucket}`);
 }
 
