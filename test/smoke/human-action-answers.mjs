@@ -82,6 +82,26 @@ export async function testHumanActionAnswers({ tmp }) {
   assert.strictEqual(parsed.ok, true);
   assert.strictEqual(parsed.summary.humanActions.answerCount, 2);
   assert.strictEqual(parsed.summary.humanActions.openActionCount, 0);
+
+  const lifetimeAnswerDir = path.join(tmp, 'agent-runs', 'loom-ui-human-actions');
+  await fs.mkdir(lifetimeAnswerDir, { recursive: true });
+  await fs.writeFile(path.join(lifetimeAnswerDir, 'human-action-answers.jsonl'), JSON.stringify({
+    type: 'human-action.answer',
+    code: 'Q-RETRY',
+    answer: 'use the lifetime dashboard answer',
+    at: Date.parse('2026-06-16T00:01:00.000Z'),
+    source: 'frontier-loom-ui'
+  }) + '\n');
+  const lifetimeContinuation = await continueCodexSwarmLoop({
+    collection: collectionDir,
+    cwd: tmp,
+    outDir: path.join(tmp, 'human-answer-lifetime-continuation'),
+    manifest: manifestInput,
+    tasks: { items: [{ id: 'runtime-action', lane: 'runtime', targetRefs: ['src/runtime/action.ts'] }] },
+    routingMode: 'fill'
+  });
+  assert.ok(lifetimeContinuation.summary.humanActions.answerPaths.some((entry) => entry.endsWith('agent-runs/loom-ui-human-actions/human-action-answers.jsonl')));
+  assert.strictEqual(lifetimeContinuation.humanActions[0].answer, 'use the lifetime dashboard answer');
 }
 
 function createHumanQuestionCollection(collectionDir) {

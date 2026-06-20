@@ -26,7 +26,7 @@ export async function createContinuationHumanActionState(input: {
     answers: input.continuation.humanAnswers,
     answerPath: input.continuation.humanAnswersPath,
     answerPaths: input.continuation.humanAnswerPaths,
-    roots: [input.collection?.outDir, input.collection?.runDir]
+    roots: [input.collection?.outDir, input.collection?.runDir, path.join(input.cwd, 'agent-runs', 'loom-ui-human-actions')]
   });
   const resolved = resolveCodexHumanActions({
     actions: humanActionsFromDashboard(input.collection?.dashboard),
