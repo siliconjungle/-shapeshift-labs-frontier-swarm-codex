@@ -504,18 +504,15 @@ function createDashboardSummary(
       applyLedgerLandedCount: applyLedger.landed,
       applyLedger
     } : {}),
-    ...(continuation ? {
-      childBacklogEntryCount: continuation.summary.childBacklogEntryCount,
-      routingFeedbackCount: continuation.summary.totalRoutingFeedbackCount,
-      routingPreferenceCount: continuation.summary.routingPreferenceCount,
-      nextJobCount: continuation.summary.nextJobCount,
-      nextJobRoutedCount: continuation.summary.nextJobRouting.routedJobCount,
-      nextJobChangedComputeCount: continuation.summary.nextJobRouting.changedComputeCount,
-      nextJobRoutingFeedbackMatchCount: continuation.summary.nextJobRouting.policyFeedbackMatchCount,
-      nextJobRoutingCostSignalCount: continuation.summary.nextJobRouting.policyCostSignalCount
-    } : {}),
+    ...(continuation ? dashboardContinuationSummaryMetrics(continuation) : {}),
     ...(run && jobs.length === 0 ? { jobCount: run.run.jobs.length } : {})
   };
+}
+
+function dashboardContinuationSummaryMetrics(continuation: FrontierCodexContinuationResult): Record<string, number> {
+  const summary = continuation.summary;
+  const routing = summary.nextJobRouting;
+  return { childBacklogEntryCount: summary.childBacklogEntryCount, routingFeedbackCount: summary.totalRoutingFeedbackCount, routingPreferenceCount: summary.routingPreferenceCount, nextJobCount: summary.nextJobCount, nextJobRoutedCount: numberValue(routing?.routedJobCount), nextJobChangedComputeCount: numberValue(routing?.changedComputeCount), nextJobRoutingFeedbackMatchCount: numberValue(routing?.policyFeedbackMatchCount), nextJobRoutingCostSignalCount: numberValue(routing?.policyCostSignalCount) };
 }
 
 function createDashboardQualityMetrics(
