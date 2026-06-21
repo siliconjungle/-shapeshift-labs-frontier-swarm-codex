@@ -58,17 +58,54 @@
         "maxLines": 454,
         "reason": "existing workspace-only collector size baseline; split in a dedicated source-policy cleanup"
       },
+      "src/collect.ts": {
+        "maxLines": 364,
+        "reason": "kernel safe-merge admission routing baseline; split collector orchestration in a dedicated source-policy cleanup"
+      },
+      "src/collect-semantic-admission.ts": {
+        "maxLines": 559,
+        "maxChars": 28451,
+        "reason": "kernel safe-merge terminal admission baseline; split admission classifiers in a dedicated source-policy cleanup"
+      },
       "src/dashboard.ts": {
         "maxLines": 322,
         "reason": "existing dashboard server size baseline; split in a dedicated source-policy cleanup"
       },
       "src/run-graph-live.ts": {
-        "maxLines": 437,
-        "reason": "existing live run graph size baseline; split in a dedicated source-policy cleanup"
+        "maxLines": 923,
+        "maxChars": 32212,
+        "reason": "semantic-admission live graph integration baseline; split graph event adapters in a dedicated source-policy cleanup"
       },
       "src/semantic-import.ts": {
-        "maxLines": 503,
-        "reason": "existing semantic import implementation size baseline; split in a dedicated source-policy cleanup"
+        "maxLines": 576,
+        "maxChars": 27194,
+        "reason": "kernel safe-merge sidecar integration baseline; split semantic import emitters in a dedicated source-policy cleanup"
+      },
+      "src/query-semantic-edit.ts": {
+        "maxLines": 857,
+        "maxChars": 43910,
+        "reason": "kernel safe-merge query integration baseline; split semantic edit and kernel merge query helpers in a dedicated source-policy cleanup"
+      },
+      "src/semantic-import-sidecar.ts": {
+        "maxLines": 487,
+        "reason": "kernel safe-merge sidecar summary baseline; split sidecar summarizers in a dedicated source-policy cleanup"
+      },
+      "src/semantic-merge-admission.ts": {
+        "maxLines": 474,
+        "reason": "new kernel safe-merge summarizer module; split admission/apply normalizers in a dedicated source-policy cleanup"
+      },
+      "src/semantic-import-quality.ts": {
+        "maxLines": 751,
+        "maxChars": 39288,
+        "reason": "kernel safe-merge quality signal baseline; split quality summarizers in a dedicated source-policy cleanup"
+      },
+      "src/types-dashboard-metrics.ts": {
+        "maxLines": 332,
+        "reason": "kernel semantic merge dashboard metric type baseline; split metric groups in a dedicated source-policy cleanup"
+      },
+      "src/types-semantic.ts": {
+        "maxLines": 430,
+        "reason": "kernel safe-merge sidecar type baseline; split semantic import type groups in a dedicated source-policy cleanup"
       },
       "test/smoke.mjs": {
         "maxLines": 614,
@@ -77,6 +114,18 @@
       "test/smoke/swarm-run-collection.mjs": {
         "maxLines": 332,
         "reason": "existing swarm collection smoke fixture size baseline; split in a dedicated source-policy cleanup"
+      },
+      "test/smoke/semantic-admission-gates.mjs": {
+        "maxLines": 542,
+        "reason": "kernel safe-merge admission oracle baseline; split fixtures in a dedicated source-policy cleanup"
+      },
+      "test/smoke/semantic-import-quality.mjs": {
+        "maxLines": 411,
+        "reason": "kernel safe-merge query fixture baseline; split semantic import quality fixtures in a dedicated source-policy cleanup"
+      },
+      "test/smoke/semantic-import-quality-fixtures.mjs": {
+        "maxLines": 400,
+        "reason": "kernel safe-merge quality fixture baseline; split fixture builders in a dedicated source-policy cleanup"
       }
     }
   }

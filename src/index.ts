@@ -124,8 +124,28 @@ export {
   mergeSemanticEditScriptSummaries,
   summarizeSemanticEditScript
 } from './semantic-edit-script.js';
+export {
+  summarizeJsTsSafeMergeApply,
+  summarizeKernelSafeMergeRecord,
+  summarizeKernelSafeMergeRecords,
+  summarizeSemanticMergeAdmission
+} from './semantic-merge-admission.js';
 export { summarizeSemanticPatchBundleOverlaps } from './semantic-bundle-overlaps.js';
 
+export type {
+  FrontierCodexJsTsSafeMergeApplyClassification,
+  FrontierCodexJsTsSafeMergeApplyDecision,
+  FrontierCodexJsTsSafeMergeApplyStatus,
+  FrontierCodexJsTsSafeMergeApplySummary,
+  FrontierCodexSafeMergeRecordSummary,
+  FrontierCodexSemanticImportQuality,
+  FrontierCodexSemanticImportRecord,
+  FrontierCodexSemanticImportSidecar,
+  FrontierCodexSemanticMergeAdmissionClassification,
+  FrontierCodexSemanticMergeAdmissionConflictKeyKind,
+  FrontierCodexSemanticMergeAdmissionDecision,
+  FrontierCodexSemanticMergeAdmissionSummary
+} from './types-semantic.js';
 export type * from './types.js';
 export { createCodexSwarmPlan, coerceCodexSwarmManifestInput, coerceCodexSwarmTasksInput } from './plan.js';
 export { repairCodexWorkspacePackageLinks } from './workspace-link-repair.js';

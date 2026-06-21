@@ -2,7 +2,14 @@ import path from 'node:path';
 import { FRONTIER_SWARM_CODEX_QUERY_KIND, FRONTIER_SWARM_CODEX_QUERY_VERSION } from './constants.js';
 import { isObject, uniqueStrings } from './common.js';
 import { readCodexArtifactRecords } from './artifact-store.js';
-import { semanticEditAdmissionSummary, semanticEditProjectionSummary, semanticEditScriptAdmissionSummary } from './query-semantic-edit.js';
+import {
+  kernelSemanticMergeSummary,
+  safeMergeApplyDecisionSummary,
+  semanticEditAdmissionSummary,
+  semanticEditProjectionSummary,
+  semanticEditScriptAdmissionSummary,
+  semanticMergeAdmissionSummary
+} from './query-semantic-edit.js';
 import { semanticEditReplaySummary } from './query-semantic-edit-replay.js';
 import { semanticPatchBundleOverlapJobIds } from './semantic-bundle-overlaps.js';
 import { resolveCollectionDir, readJsonIfExists, writeMaybe, stringArg, numberArg, optionalBoolArg } from './query-io.js';
@@ -57,6 +64,9 @@ export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) 
       evidence: evidenceRows.length,
       touchedPaths: uniqueStrings(jobs.flatMap((job) => Array.isArray(job.changedPaths) ? job.changedPaths.filter((entry): entry is string => typeof entry === 'string') : [])),
       semanticEditAdmission: semanticEditAdmissionSummary(jobs),
+      kernelSemanticMerge: kernelSemanticMergeSummary(jobs),
+      semanticMergeAdmission: semanticMergeAdmissionSummary(jobs),
+      safeMergeApplyDecision: safeMergeApplyDecisionSummary(jobs),
       semanticEditProjection: semanticEditProjectionSummary(jobs),
       semanticEditReplay: semanticEditReplaySummary(jobs),
       semanticEditScriptAdmission: semanticEditScriptAdmissionSummary(jobs),
@@ -94,6 +104,9 @@ export async function handleCodexQueryCommand(args: CliArgs): Promise<void> {
     semanticEditStatus: stringArg(args.semanticEditStatus ?? args['semantic-edit-status']),
     semanticEditAdmission: stringArg(args.semanticEditAdmission ?? args['semantic-edit-admission']),
     semanticEditProjection: stringArg(args.semanticEditProjection ?? args['semantic-edit-projection']),
+    semanticMergeAdmission: stringArg(args.semanticMergeAdmission ?? args['semantic-merge-admission'] ?? args.kernelSafeMergeAdmission ?? args['kernel-safe-merge-admission'] ?? args.kernelSafeMergeStatus ?? args['kernel-safe-merge-status'] ?? args.safeMergeAdmission ?? args['safe-merge-admission']),
+    safeMergeApplyDecision: stringArg(args.safeMergeApplyDecision ?? args['safe-merge-apply-decision'] ?? args.jsTsSafeMergeApplyDecision ?? args['js-ts-safe-merge-apply-decision'] ?? args.semanticMergeDecision ?? args['semantic-merge-decision'] ?? args.semanticApplyDecision ?? args['semantic-apply-decision']),
+    semanticMergeDecision: stringArg(args.semanticMergeDecision ?? args['semantic-merge-decision'] ?? args.semanticApplyDecision ?? args['semantic-apply-decision']),
     semanticEditReplay: stringArg(args.semanticEditReplay ?? args['semantic-edit-replay']),
     semanticEditReplayStatus: stringArg(args.semanticEditReplayStatus ?? args['semantic-edit-replay-status']),
     semanticEditReplayAdmission: stringArg(args.semanticEditReplayAdmission ?? args['semantic-edit-replay-admission']),

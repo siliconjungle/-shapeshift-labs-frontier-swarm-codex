@@ -33,6 +33,8 @@ export type FrontierLangSemanticImportApi = {
   replaySemanticEditProjection?(input: Record<string, unknown>): any;
   inferSemanticLineageEvents?(input?: Record<string, unknown>, options?: Record<string, unknown>): any;
   createSemanticMergeCandidateFromImport(input: Record<string, unknown>): any;
+  classifySemanticMergeCandidate?(input: unknown, options?: Record<string, unknown>): any;
+  createJsTsSafeMergeApplyRecord?(input: Record<string, unknown>, options?: Record<string, unknown>): any;
   createSemanticImportSidecar?(importResult: unknown, options?: Record<string, unknown>): any;
   createSemanticSlice?(importResult: unknown, options?: Record<string, unknown>): any;
   createSemanticSliceAdmissionRecord?(slice: unknown, options?: Record<string, unknown>): any;
@@ -279,6 +281,8 @@ export async function loadFrontierLangForSemanticImport(): Promise<FrontierLangS
       ...(typeof api.replaySemanticEditProjection === 'function' ? { replaySemanticEditProjection: api.replaySemanticEditProjection } : {}),
       ...(typeof api.inferSemanticLineageEvents === 'function' ? { inferSemanticLineageEvents: api.inferSemanticLineageEvents } : {}),
       createSemanticMergeCandidateFromImport: api.createSemanticMergeCandidateFromImport,
+      ...(typeof api.classifySemanticMergeCandidate === 'function' ? { classifySemanticMergeCandidate: api.classifySemanticMergeCandidate } : {}),
+      ...(typeof api.createJsTsSafeMergeApplyRecord === 'function' ? { createJsTsSafeMergeApplyRecord: api.createJsTsSafeMergeApplyRecord } : {}),
       ...(typeof api.createSemanticImportSidecar === 'function' ? { createSemanticImportSidecar: api.createSemanticImportSidecar } : {}),
       ...(typeof api.createSemanticSlice === 'function' ? { createSemanticSlice: api.createSemanticSlice } : {}),
       ...(typeof api.createSemanticSliceAdmissionRecord === 'function' ? { createSemanticSliceAdmissionRecord: api.createSemanticSliceAdmissionRecord } : {}),

@@ -14,6 +14,7 @@ import {
   type FrontierSwarmPatchStatus
 } from '@shapeshift-labs/frontier-swarm';
 import type {
+  FrontierCodexCollectBucket,
   FrontierCodexCollectInput,
   FrontierCodexCollectResult
 } from './index.js';
@@ -29,6 +30,7 @@ import { createCodexCompactDashboard } from './dashboard.js';
 import {
   bundlePatchStaleness,
   classifyCodexCollectBucket,
+  classifyCodexSemanticCollectAdmission,
   collectFailureReasonClasses,
   mergeRecordScore,
   normalizeCollectedDisposition,
@@ -131,24 +133,43 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
         }
       : await bundlePatchStaleness(patchResolution.bundle, mergePath, cwd);
     const staleAgainstHead = normalizeCollectedStaleAgainstHead(patchResolution.bundle, staleness, input.checkStale !== false);
-    const disposition = normalizeCollectedDisposition(patchResolution.bundle, staleAgainstHead, patchHasContent);
-    const bucket = classifyCodexCollectBucket({
+    const semanticImport = semanticImportSummaryFromBundle(patchResolution.bundle);
+    const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
+    semanticImportQualities.set(patchResolution.bundle.jobId, semanticImportQuality);
+    const semanticAdmission = classifyCodexSemanticCollectAdmission({
+      ...patchResolution.bundle,
+      staleAgainstHead,
+      ...(patchExists && patchPath ? { patchPath } : {})
+    }, {
+      staleAgainstHead,
+      hasActionablePatch: patchHasContent,
+      semanticImportExpected,
+      semanticImportQuality
+    });
+    const disposition = collectDispositionForSemanticAdmission(
+      normalizeCollectedDisposition(patchResolution.bundle, staleAgainstHead, patchHasContent),
+      semanticAdmission,
+      patchHasContent
+    );
+    const classifiedBucket = classifyCodexCollectBucket({
       ...patchResolution.bundle,
       staleAgainstHead,
       disposition,
       ...(patchExists && patchPath ? { patchPath } : {})
     }, staleAgainstHead, patchHasContent);
+    const bucket = collectBucketForSemanticAdmission(classifiedBucket, semanticAdmission, patchHasContent);
     const generatedByCollector = recordGeneratedByCollector || patchResolution.generatedByCollector;
     if (generatedByCollector && patchHasContent) collectorGeneratedPatchCount += 1;
     const branchName = input.branchPrefix ? `${input.branchPrefix}/${slug(patchResolution.bundle.jobId)}` : patchResolution.bundle.branchName;
     const outputDir = path.join(outDir, bucket, slug(patchResolution.bundle.jobId));
     const collectedEvidencePath = path.join(outputDir, 'evidence.json');
-    const semanticImport = semanticImportSummaryFromBundle(patchResolution.bundle);
-    const semanticImportQuality = summarizeCodexSemanticImportQuality(semanticImport, semanticImportExpected);
-    semanticImportQualities.set(patchResolution.bundle.jobId, semanticImportQuality);
     const contextBudget = contextBudgetFromBundle(patchResolution.bundle);
     if (contextBudget) contextBudgets.set(patchResolution.bundle.jobId, contextBudget);
-    const collectReasons = normalizeCollectedReasons(patchResolution.bundle.reasons, staleness.reasons, staleness.patchStatus, staleAgainstHead, patchResolution.bundle);
+    const collectReasons = uniqueStrings([
+      ...normalizeCollectedReasons(patchResolution.bundle.reasons, staleness.reasons, staleness.patchStatus, staleAgainstHead, patchResolution.bundle),
+      ...semanticAdmission.reasons,
+      ...(semanticAdmissionIsNoChange(semanticAdmission) ? ['no-source-changes', 'non-actionable-worker-output'] : [])
+    ]);
     const collectReasonClasses = uniqueStrings([
       ...staleness.reasonClasses,
       ...collectFailureReasonClasses(collectReasons, staleness.patchStatus)
@@ -158,7 +179,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       ...(branchName ? { branchName } : {}),
       staleAgainstHead,
       disposition,
-      autoMergeable: bucket === 'ready-to-apply' && patchResolution.bundle.autoMergeable,
+      autoMergeable: bucket === 'ready-to-apply' && (patchResolution.bundle.autoMergeable || semanticAdmission.autoMergeCandidate),
       reasons: collectReasons,
       ...(semanticImport ? { semanticImport } : {}),
       metadata: {
@@ -310,4 +331,31 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     artifactStoreMode: input.artifactStoreMode,
     artifactStoreTimeoutMs: input.artifactStoreTimeoutMs
   });
+}
+
+function collectBucketForSemanticAdmission(bucket: FrontierCodexCollectBucket, admission: ReturnType<typeof classifyCodexSemanticCollectAdmission>, hasActionablePatch: boolean): FrontierCodexCollectBucket {
+  if (bucket === 'research-complete') return bucket;
+  if (admission.status === 'fail' || semanticAdmissionIsNoChange(admission)) return 'failed-evidence';
+  if (bucket === 'rerun-work' || bucket === 'failed-evidence' || bucket === 'stale-against-head') return bucket;
+  if (admission.status === 'ready' && hasActionablePatch) return 'ready-to-apply';
+  if (admission.status === 'rerun') return 'rerun-work';
+  if (admission.status === 'review') return 'needs-human-port';
+  return bucket;
+}
+
+function collectDispositionForSemanticAdmission(
+  disposition: FrontierSwarmMergeBundle['disposition'],
+  admission: ReturnType<typeof classifyCodexSemanticCollectAdmission>,
+  hasActionablePatch: boolean
+): FrontierSwarmMergeBundle['disposition'] {
+  if (disposition === 'rerun-work' || disposition === 'stale-against-head' || disposition === 'rejected') return disposition;
+  if (admission.status === 'ready' && hasActionablePatch) return 'auto-mergeable';
+  if (admission.status === 'review') return 'needs-port';
+  if (admission.status === 'fail' || semanticAdmissionIsNoChange(admission)) return 'rejected';
+  if (admission.status === 'rerun') return disposition === 'stale-against-head' ? disposition : 'rerun-work';
+  return disposition;
+}
+
+function semanticAdmissionIsNoChange(admission: ReturnType<typeof classifyCodexSemanticCollectAdmission>): boolean {
+  return admission.status === 'rejected-no-change' || admission.reasonCodes.includes('kernel-no-op');
 }

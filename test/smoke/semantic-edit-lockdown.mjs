@@ -6,6 +6,10 @@ import {
   semanticEditScriptCleanOperationCoverage,
   semanticEditScriptFromUnknown
 } from '../../dist/semantic-edit-admission.js';
+import {
+  summarizeJsTsSafeMergeApply,
+  summarizeSemanticMergeAdmission
+} from '../../dist/semantic-merge-admission.js';
 
 export async function testSemanticEditLockdown() {
   const portable = semanticEditScriptFromUnknown({
@@ -258,6 +262,41 @@ export async function testSemanticEditLockdown() {
     cleanEligible: false,
     reasons: ['semantic edit script auto-merge admission lacks full clean operation coverage after ownership, projection, and replay gates']
   });
+
+  const safeKernelAdmission = summarizeSemanticMergeAdmission({
+    kind: 'frontier.lang.semanticMergeAdmission',
+    classification: 'safe',
+    autoMergeable: true,
+    conflictKeys: ['symbol:step'],
+    evidence: [{ id: 'focused-test', status: 'passed' }]
+  });
+  assert.strictEqual(safeKernelAdmission.status, 'safe');
+  assert.strictEqual(safeKernelAdmission.safe, true);
+  assert.strictEqual(safeKernelAdmission.conflictKeys, 1);
+
+  const reviewKernelAdmission = summarizeSemanticMergeAdmission({
+    classification: 'review-required',
+    evidence: [{ id: 'unknown-proof', status: 'unknown' }]
+  });
+  assert.strictEqual(reviewKernelAdmission.status, 'review-required');
+  assert.strictEqual(reviewKernelAdmission.reviewRequired, true);
+
+  const blockedKernelAdmission = summarizeSemanticMergeAdmission({
+    classification: 'safe',
+    autoMergeable: true,
+    losses: [{ id: 'loss-parse', severity: 'error' }]
+  });
+  assert.strictEqual(blockedKernelAdmission.status, 'blocked');
+  assert.strictEqual(blockedKernelAdmission.blocked, true);
+
+  assert.strictEqual(summarizeJsTsSafeMergeApply({ status: 'safe-apply', edits: [{ status: 'applied' }] }).status, 'safe-apply');
+  assert.strictEqual(summarizeJsTsSafeMergeApply({ status: 'no-op' }).status, 'no-op');
+  assert.strictEqual(summarizeJsTsSafeMergeApply({ status: 'stale', edits: [{ status: 'stale' }] }).status, 'stale');
+  assert.strictEqual(summarizeJsTsSafeMergeApply({ status: 'review-required', summary: { edits: 1 } }).status, 'review-required');
+  assert.strictEqual(summarizeJsTsSafeMergeApply({
+    status: 'safe-apply',
+    evidence: [{ id: 'typecheck', kind: 'test', status: 'failed' }]
+  }).status, 'blocked-evidence');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

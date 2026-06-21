@@ -52,6 +52,8 @@ export function printHelp(): void {
     '  --focused-command <cmd> --global-command <cmd>',
     '  --q <text> --symbol <name> --path <substring> --bucket <name> --semantic --lineage --readiness <view>',
     '  --semantic-edit-status conflict|portable|stale --semantic-edit-admission auto-merge-candidate|needs-port',
+    '  --semantic-merge-admission safe|safe-with-losses|review-required|blocked',
+    '  --safe-merge-apply-decision safe|no-op|stale|review|blocked',
     '  --semantic-key <key> --semantic-identity-hash <hash> --source-identity-hash <hash>',
     '  --operation-content-hash <hash> --edit-content-hash <hash>',
     '  --max-age-hours <n|24h> --keep-failed --keep-active --compact-artifacts --collection <dir> --write',

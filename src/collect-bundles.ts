@@ -108,7 +108,6 @@ export function classifyCodexCollectBucket(
 ): FrontierCodexCollectBucket {
   if (staleAgainstHead) return 'stale-against-head';
   if (codexDeferredFailureReason(bundle)) return 'rerun-work';
-  const semanticAdmission = classifyCodexSemanticCollectAdmission(bundle, { staleAgainstHead, hasActionablePatch });
   if (bundle.changedPaths.length > 0 && hasActionablePatch && (bundle.disposition === 'rejected' || bundle.commandsFailed.length > 0 || bundle.status === 'failed')) {
     return 'rerun-work';
   }
@@ -119,6 +118,7 @@ export function classifyCodexCollectBucket(
     return 'failed-evidence';
   }
   if (isCompletedResearchEvidenceBundle(bundle, { staleAgainstHead, hasActionablePatch })) return 'research-complete';
+  const semanticAdmission = classifyCodexSemanticCollectAdmission(bundle, { staleAgainstHead, hasActionablePatch });
   if (semanticAdmission.status === 'rerun') return 'rerun-work';
   if (semanticAdmission.status === 'fail') return 'failed-evidence';
   if (semanticAdmission.status === 'review') return 'needs-human-port';

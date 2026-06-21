@@ -18,6 +18,19 @@ export const FRONTIER_SWARM_CODEX_LIVE_RUN_GRAPH_EVENTS_FILE = 'live-run-graph-e
 
 const liveRunGraphWriteQueues = new Map<string, Promise<void>>();
 
+type LiveSemanticAdmissionStatus = 'safe' | 'no-op' | 'stale' | 'review' | 'block';
+
+interface LiveSemanticAdmissionDecision {
+  key: string;
+  source: string;
+  label: string;
+  status: LiveSemanticAdmissionStatus;
+  action?: string;
+  reasonCodes: string[];
+  reasons: string[];
+  data: Record<string, unknown>;
+}
+
 export function resolveCodexLiveRunGraphEventsPath(input: {
   cwd?: string;
   outDir: string;
@@ -174,6 +187,7 @@ export function createCodexLiveJobResultEvents(input: {
   const generatedAt = input.generatedAt ?? input.result.finishedAt ?? Date.now();
   const events: FrontierCodexLiveRunGraphEvent[] = [];
   const jobNodeId = runGraphJobNodeId(input.job.id);
+  const candidateNodeId = `candidate:${input.job.id}`;
 
   const evidencePaths = uniqueStrings([
     ...(input.result.evidencePaths ?? []),
@@ -275,7 +289,11 @@ export function createCodexLiveJobResultEvents(input: {
     outcome: input.result.mergeDisposition ?? input.mergeBundle.disposition,
     generatedAt
   });
-  const candidateNodeId = `candidate:${input.job.id}`;
+  const semanticAdmission = createLiveSemanticAdmissionGraph(input, {
+    generatedAt,
+    jobNodeId,
+    candidateNodeId
+  });
   frame.nodes.push({
     id: candidateNodeId,
     kind: 'candidate',
@@ -291,7 +309,8 @@ export function createCodexLiveJobResultEvents(input: {
       riskLevel: input.mergeBundle.riskLevel,
       autoMergeable: input.mergeBundle.autoMergeable,
       changedPaths: input.mergeBundle.changedPaths,
-      ownershipViolations: input.mergeBundle.ownershipViolations
+      ownershipViolations: input.mergeBundle.ownershipViolations,
+      semanticAdmission: semanticAdmission?.summary
     }
   });
   frame.edges.push({
@@ -300,6 +319,15 @@ export function createCodexLiveJobResultEvents(input: {
     from: jobNodeId,
     to: candidateNodeId
   });
+  if (semanticAdmission) {
+    events.push(liveEvent(input, {
+      type: 'semantic-admission.result',
+      generatedAt,
+      nodes: semanticAdmission.nodes,
+      edges: semanticAdmission.edges,
+      data: semanticAdmission.summary
+    }));
+  }
   events.push(liveEvent(input, {
     type: 'job.finished',
     generatedAt,
@@ -316,6 +344,423 @@ export function createCodexLiveJobResultEvents(input: {
   }));
 
   return events;
+}
+
+function createLiveSemanticAdmissionGraph(
+  input: {
+    job: FrontierSwarmJob;
+    result: FrontierSwarmJobResultInput;
+    mergeBundle: FrontierSwarmMergeBundle;
+  },
+  graph: {
+    generatedAt: number;
+    jobNodeId: string;
+    candidateNodeId: string;
+  }
+): {
+  nodes: FrontierCodexRunGraphNode[];
+  edges: FrontierCodexRunGraphEdge[];
+  summary: Record<string, unknown>;
+} | undefined {
+  const decisions = createLiveSemanticAdmissionDecisions(input.result, input.mergeBundle);
+  if (decisions.length === 0) return undefined;
+  const nodes = decisions.map((decision) => ({
+    id: `semantic-admission:${input.job.id}:${stableCodexRunGraphPart(decision.key)}`,
+    kind: 'semantic-admission',
+    label: decision.label,
+    jobId: input.job.id,
+    taskId: input.job.taskId,
+    lane: input.job.lane,
+    status: decision.status,
+    outcome: decision.action,
+    generatedAt: graph.generatedAt,
+    refs: { job: graph.jobNodeId, candidate: graph.candidateNodeId },
+    data: decision.data
+  } satisfies FrontierCodexRunGraphNode));
+  const edges = nodes.flatMap((node, index) => {
+    const decision = decisions[index]!;
+    return [
+      {
+        id: `produces:${graph.jobNodeId}->${node.id}`,
+        kind: 'produces',
+        from: graph.jobNodeId,
+        to: node.id,
+        label: decision.source
+      },
+      {
+        id: `decides:${node.id}->${graph.candidateNodeId}`,
+        kind: 'decides',
+        from: node.id,
+        to: graph.candidateNodeId,
+        label: decision.status
+      }
+    ] satisfies FrontierCodexRunGraphEdge[];
+  });
+  return {
+    nodes,
+    edges,
+    summary: {
+      decisionCount: decisions.length,
+      statuses: countStrings(decisions.map((decision) => decision.status)),
+      sources: countStrings(decisions.map((decision) => decision.source)),
+      reasonCodes: uniqueStrings(decisions.flatMap((decision) => decision.reasonCodes)),
+      reasons: uniqueStrings(decisions.flatMap((decision) => decision.reasons))
+    }
+  };
+}
+
+function createLiveSemanticAdmissionDecisions(
+  result: FrontierSwarmJobResultInput,
+  mergeBundle: FrontierSwarmMergeBundle
+): LiveSemanticAdmissionDecision[] {
+  const metadata = recordValue(mergeBundle.metadata);
+  const resultMetadata = recordValue(result.metadata);
+  const semanticImport = semanticImportSummaryForLiveEvent(result, mergeBundle);
+  const decisions: LiveSemanticAdmissionDecision[] = [];
+  const aggregateReasonCodes = uniqueStrings([
+    ...semanticImportReasonCodes(semanticImport),
+    ...semanticAdmissionReasonCodesFromMetadata(metadata),
+    ...semanticAdmissionReasonCodesFromMetadata(resultMetadata)
+  ]);
+  const aggregateReasons = uniqueStrings([
+    ...mergeBundle.reasons,
+    ...stringValues(recordValue(metadata?.semanticEditAdmission)?.reasons),
+    ...stringValues(recordValue(resultMetadata?.semanticEditAdmission)?.reasons)
+  ]);
+
+  if (semanticImport || aggregateReasonCodes.length > 0 || aggregateReasons.some(isSemanticAdmissionReason)) {
+    const status = classifyLiveSemanticAdmissionStatus({
+      staleAgainstHead: mergeBundle.staleAgainstHead || mergeBundle.disposition === 'stale-against-head' || result.mergeDisposition === 'stale-against-head',
+      autoMergeable: mergeBundle.autoMergeable || mergeBundle.disposition === 'auto-mergeable' || result.mergeDisposition === 'auto-mergeable',
+      signals: [
+        mergeBundle.status,
+        mergeBundle.mergeReadiness,
+        mergeBundle.disposition,
+        result.status,
+        result.mergeReadiness,
+        result.mergeDisposition,
+        ...aggregateReasonCodes,
+        ...aggregateReasons,
+        ...semanticImportStatusSignals(semanticImport)
+      ]
+    });
+    decisions.push({
+      key: 'merge-admission',
+      source: 'merge-admission',
+      label: `semantic admission: ${status}`,
+      status,
+      action: status === 'safe' ? 'apply' : status === 'no-op' ? 'record' : status === 'stale' ? 'rerun' : status === 'block' ? 'block' : 'review',
+      reasonCodes: aggregateReasonCodes,
+      reasons: aggregateReasons,
+      data: {
+        source: 'merge-admission',
+        status,
+        mergeReadiness: result.mergeReadiness ?? mergeBundle.mergeReadiness,
+        disposition: result.mergeDisposition ?? mergeBundle.disposition,
+        autoMergeable: mergeBundle.autoMergeable,
+        staleAgainstHead: mergeBundle.staleAgainstHead,
+        semanticImportPresent: Boolean(semanticImport),
+        reasonCodes: aggregateReasonCodes,
+        reasons: aggregateReasons
+      }
+    });
+  }
+
+  for (const decision of semanticMetadataDecisions(metadata, 'metadata')) decisions.push(decision);
+  for (const decision of semanticMetadataDecisions(resultMetadata, 'result-metadata')) decisions.push(decision);
+  for (const decision of semanticEditSummaryDecisions(semanticImport)) decisions.push(decision);
+
+  const seen = new Set<string>();
+  return decisions.filter((decision) => {
+    const dedupeKey = `${decision.source}:${decision.key}`;
+    if (seen.has(dedupeKey)) return false;
+    seen.add(dedupeKey);
+    return true;
+  });
+}
+
+function semanticMetadataDecisions(
+  metadata: Record<string, unknown> | undefined,
+  sourcePrefix: string
+): LiveSemanticAdmissionDecision[] {
+  if (!metadata) return [];
+  const out: LiveSemanticAdmissionDecision[] = [];
+  for (const [key, label] of [
+    ['semanticAdmission', 'semantic admission'],
+    ['semanticMergeAdmission', 'semantic merge admission'],
+    ['semanticEditAdmission', 'semantic edit admission'],
+    ['safeMerge', 'safe merge'],
+    ['safeMergeDecision', 'safe merge decision'],
+    ['semanticSafeMerge', 'semantic safe merge']
+  ] as const) {
+    const record = recordValue(metadata[key]);
+    if (!record) continue;
+    const reasonCodes = semanticReasonCodesFromRecord(record);
+    const reasons = stringValues(record.reasons);
+    const status = classifyLiveSemanticAdmissionStatus({
+      signals: [
+        stringValue(record.status),
+        stringValue(record.decision),
+        stringValue(record.outcome),
+        stringValue(record.action),
+        ...reasonCodes,
+        ...reasons
+      ],
+      autoMergeable: record.autoMergeCandidate === true || record.cleanEligible === true || record.safe === true
+    });
+    out.push({
+      key,
+      source: `${sourcePrefix}:${key}`,
+      label: `${label}: ${status}`,
+      status,
+      action: stringValue(record.action) ?? stringValue(record.decision),
+      reasonCodes,
+      reasons,
+      data: {
+        source: `${sourcePrefix}:${key}`,
+        status,
+        action: stringValue(record.action),
+        decision: stringValue(record.decision),
+        outcome: stringValue(record.outcome),
+        reasonCodes,
+        reasons,
+        record
+      }
+    });
+  }
+  return out;
+}
+
+function semanticEditSummaryDecisions(
+  semanticImport: Record<string, unknown> | undefined
+): LiveSemanticAdmissionDecision[] {
+  if (!semanticImport) return [];
+  const sections: Array<[string, string, Record<string, unknown> | undefined]> = [
+    ['semantic-edit-script', 'semantic edit script', recordValue(semanticImport.semanticEditScripts)],
+    ['semantic-edit-projection', 'semantic edit projection', recordValue(semanticImport.semanticEditProjections) ?? recordValue(semanticImport.semanticEditProjection)],
+    ['semantic-edit-replay', 'semantic edit replay', recordValue(semanticImport.semanticEditReplays) ?? recordValue(semanticImport.semanticEditReplay)]
+  ];
+  return sections.flatMap(([key, label, section]) => {
+    if (!section || !semanticEditSectionHasAdmissionData(section)) return [];
+    const reasonCodes = semanticReasonCodesFromRecord(section);
+    const reasons = stringValues(section.reasons);
+    const admissionStatuses = semanticAdmissionStatuses(section);
+    const status = classifyLiveSemanticAdmissionStatus({
+      signals: [
+        stringValue(section.status),
+        ...stringValues(section.actions),
+        ...admissionStatuses,
+        ...reasonCodes,
+        ...reasons
+      ]
+    });
+    return [{
+      key,
+      source: key,
+      label: `${label}: ${status}`,
+      status,
+      action: firstString(stringValues(section.actions)) ?? actionForSemanticAdmissionStatus(status),
+      reasonCodes,
+      reasons,
+      data: {
+        source: key,
+        status,
+        action: firstString(stringValues(section.actions)) ?? actionForSemanticAdmissionStatus(status),
+        admissionStatuses,
+        reasonCodes,
+        reasons,
+        summary: section
+      }
+    }];
+  });
+}
+
+function semanticImportSummaryForLiveEvent(
+  result: FrontierSwarmJobResultInput,
+  mergeBundle: FrontierSwarmMergeBundle
+): Record<string, unknown> | undefined {
+  const metadata = recordValue(mergeBundle.metadata);
+  const resultMetadata = recordValue(result.metadata);
+  const candidates = [
+    recordValue(result.semanticImport),
+    recordValue(mergeBundle.semanticImport),
+    recordValue(resultMetadata?.semanticImport),
+    recordValue(resultMetadata?.semanticImportSummary),
+    recordValue(metadata?.semanticImport),
+    recordValue(metadata?.semanticImportSummary)
+  ].filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  return candidates.sort((left, right) => semanticImportRichness(right) - semanticImportRichness(left))[0];
+}
+
+function semanticImportRichness(summary: Record<string, unknown>): number {
+  const semanticIndex = recordValue(summary.semanticIndex);
+  const semanticSidecars = recordValue(summary.semanticSidecars);
+  const values: unknown[] = [
+    summary.total,
+    summary.selected,
+    summary.eligible,
+    summary.imported,
+    summary.sourceMapMappingCount,
+    semanticIndex?.symbols,
+    semanticSidecars?.ownershipRegions,
+    semanticSidecars?.patchHints
+  ];
+  return values.reduce<number>((sum, value) => sum + nonNegativeNumber(value), 0);
+}
+
+function semanticImportReasonCodes(summary: Record<string, unknown> | undefined): string[] {
+  if (!summary) return [];
+  return uniqueStrings([
+    ...semanticReasonCodesFromRecord(summary),
+    ...semanticReasonCodesFromRecord(recordValue(summary.semanticEditScripts)),
+    ...semanticReasonCodesFromRecord(recordValue(summary.semanticEditProjections)),
+    ...semanticReasonCodesFromRecord(recordValue(summary.semanticEditProjection)),
+    ...semanticReasonCodesFromRecord(recordValue(summary.semanticEditReplays)),
+    ...semanticReasonCodesFromRecord(recordValue(summary.semanticEditReplay)),
+    ...semanticReasonCodesFromRecord(recordValue(summary.semanticLineage)),
+    ...semanticReasonCodesFromRecord(recordValue(summary.semanticSliceAdmissions))
+  ]);
+}
+
+function semanticAdmissionReasonCodesFromMetadata(metadata: Record<string, unknown> | undefined): string[] {
+  if (!metadata) return [];
+  return uniqueStrings([
+    ...semanticReasonCodesFromRecord(recordValue(metadata.semanticAdmission)),
+    ...semanticReasonCodesFromRecord(recordValue(metadata.semanticMergeAdmission)),
+    ...semanticReasonCodesFromRecord(recordValue(metadata.semanticEditAdmission)),
+    ...semanticReasonCodesFromRecord(recordValue(metadata.safeMerge)),
+    ...semanticReasonCodesFromRecord(recordValue(metadata.safeMergeDecision)),
+    ...semanticReasonCodesFromRecord(recordValue(metadata.semanticSafeMerge))
+  ]);
+}
+
+function semanticImportStatusSignals(summary: Record<string, unknown> | undefined): string[] {
+  if (!summary) return [];
+  return uniqueStrings([
+    ...semanticAdmissionStatuses(recordValue(summary.semanticEditScripts)),
+    ...semanticAdmissionStatuses(recordValue(summary.semanticEditProjections)),
+    ...semanticAdmissionStatuses(recordValue(summary.semanticEditProjection)),
+    ...semanticAdmissionStatuses(recordValue(summary.semanticEditReplays)),
+    ...semanticAdmissionStatuses(recordValue(summary.semanticEditReplay)),
+    ...Object.keys(countRecord(summary.readiness)).filter((key) => countRecord(summary.readiness)[key]! > 0)
+  ]);
+}
+
+function semanticEditSectionHasAdmissionData(section: Record<string, unknown>): boolean {
+  return nonNegativeNumber(section.total) > 0 ||
+    nonNegativeNumber(section.operations) > 0 ||
+    nonNegativeNumber(section.acceptedClean) > 0 ||
+    semanticAdmissionStatuses(section).length > 0 ||
+    semanticReasonCodesFromRecord(section).length > 0;
+}
+
+function semanticAdmissionStatuses(section: Record<string, unknown> | undefined): string[] {
+  if (!section) return [];
+  const counters = [
+    countRecord(section.admission),
+    countRecord(section.statusCounts),
+    countRecord(section.byStatus)
+  ];
+  return uniqueStrings([
+    ...counters.flatMap((record) => Object.entries(record).filter(([, count]) => count > 0).map(([key]) => key)),
+    ...[
+      ['accepted-clean', section.acceptedClean],
+      ['already-applied', section.alreadyApplied],
+      ['auto-merge-candidate', section.autoMergeCandidates],
+      ['auto-apply-candidate', section.autoApplyCandidates],
+      ['portable', section.portable],
+      ['projected', section.projected],
+      ['conflict', section.conflicts],
+      ['stale', section.stale],
+      ['blocked', section.blocked],
+      ['needs-port', section.needsPort],
+      ['needs-review', section.reviewRequired],
+      ['evidence-only', section.evidenceOnly]
+    ].filter(([, value]) => nonNegativeNumber(value) > 0).map(([status]) => String(status))
+  ]);
+}
+
+function classifyLiveSemanticAdmissionStatus(input: {
+  signals: readonly (string | undefined)[];
+  staleAgainstHead?: boolean;
+  autoMergeable?: boolean;
+}): LiveSemanticAdmissionStatus {
+  const signals = uniqueStrings(input.signals.filter((signal): signal is string => Boolean(signal))).map(normalizedAdmissionSignal);
+  if (input.staleAgainstHead || signals.some((signal) => signal === 'stale' || signal === 'stale-against-head')) return 'stale';
+  if (signals.some((signal) =>
+    signal.includes('conflict') ||
+    signal === 'block' ||
+    signal === 'blocked' ||
+    signal === 'reject' ||
+    signal === 'rejected' ||
+    signal === 'failed' ||
+    signal === 'fail'
+  )) return 'block';
+  if (signals.some((signal) =>
+    signal === 'already-applied' ||
+    signal === 'alreadyapplied' ||
+    signal === 'no-op' ||
+    signal === 'noop' ||
+    signal === 'no-source-changes' ||
+    signal === 'discovery-only' ||
+    signal === 'record-only' ||
+    signal === 'record'
+  )) return 'no-op';
+  if (signals.some((signal) =>
+    signal === 'review' ||
+    signal === 'needs-review' ||
+    signal === 'needsreview' ||
+    signal === 'review-required' ||
+    signal === 'reviewrequired' ||
+    signal === 'needs-port' ||
+    signal === 'needsport' ||
+    signal === 'manual-review' ||
+    signal === 'human-review' ||
+    signal === 'prioritize' ||
+    signal === 'ambiguous' ||
+    signal === 'evidence-only'
+  )) return 'review';
+  if (input.autoMergeable || signals.some((signal) =>
+    signal === 'safe' ||
+    signal === 'ready' ||
+    signal === 'admit' ||
+    signal === 'apply' ||
+    signal === 'accepted-clean' ||
+    signal === 'auto-merge-candidate' ||
+    signal === 'auto-apply-candidate' ||
+    signal === 'portable' ||
+    signal === 'projected' ||
+    signal === 'verified-patch' ||
+    signal === 'auto-mergeable'
+  )) return 'safe';
+  return 'review';
+}
+
+function actionForSemanticAdmissionStatus(status: LiveSemanticAdmissionStatus): string {
+  if (status === 'safe') return 'apply';
+  if (status === 'no-op') return 'record';
+  if (status === 'stale') return 'rerun';
+  if (status === 'block') return 'block';
+  return 'review';
+}
+
+function semanticReasonCodesFromRecord(record: Record<string, unknown> | undefined): string[] {
+  if (!record) return [];
+  return uniqueStrings([
+    ...stringValues(record.reasonCodes),
+    ...stringValues(record.reasonCode),
+    ...stringValues(record.semanticImportExpectedMissingReasonCodes),
+    ...stringValues(record.expectedMissingReasonCodes)
+  ]);
+}
+
+function isSemanticAdmissionReason(reason: string): boolean {
+  return normalizedAdmissionSignal(reason).startsWith('semantic-') ||
+    normalizedAdmissionSignal(reason).startsWith('auto-merge-candidate-');
+}
+
+function normalizedAdmissionSignal(value: string): string {
+  return value.trim().replace(/_/g, '-').toLowerCase();
 }
 
 function liveEvent(
@@ -409,8 +854,49 @@ function runGraphEvidenceNodeId(jobId: string, evidencePath: string): string {
   return `evidence:${stableCodexRunGraphPart(`${jobId}:${evidencePath}`)}`;
 }
 
+function countStrings(values: readonly string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const value of values) counts[value] = (counts[value] ?? 0) + 1;
+  return counts;
+}
+
 function uniqueStrings(values: readonly string[]): string[] {
   return Array.from(new Set(values.filter((value) => value.length > 0)));
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function countRecord(value: unknown): Record<string, number> {
+  const record = recordValue(value);
+  if (!record) return {};
+  const out: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    const count = nonNegativeNumber(entry);
+    if (count > 0) out[key] = count;
+  }
+  return out;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function stringValues(value: unknown): string[] {
+  if (typeof value === 'string' && value.length > 0) return [value];
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+}
+
+function firstString(values: readonly string[]): string | undefined {
+  return values.find((value) => value.length > 0);
+}
+
+function nonNegativeNumber(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
 function stringRecordValue(record: unknown, key: string): string | undefined {

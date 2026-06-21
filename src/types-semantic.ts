@@ -6,6 +6,114 @@ import type { FrontierCodexSemanticEditReplaySummary } from './types-semantic-ed
 interface FrontierCodexSemanticImportBaseSource { path: string; source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string; }
 interface FrontierCodexSemanticImportHeadSource { path: string; source: 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string; }
 
+export interface FrontierCodexSafeMergeRecordSummary {
+  total: number;
+  classifications: string[];
+  byClassification: Record<string, number>;
+  decisions: string[];
+  byDecision: Record<string, number>;
+  noOp: number;
+  stale: number;
+  needsReview: number;
+  blocked: number;
+  conflicts: number;
+  conflictReasonCodes: string[];
+  conflictKeys: string[];
+  evidenceIds: string[];
+  autoApplyable: number;
+  autoApplyCandidates: number;
+  empty: boolean;
+}
+
+export type FrontierCodexSemanticMergeAdmissionClassification =
+  | 'safe'
+  | 'safe-with-losses'
+  | 'review-required'
+  | 'blocked';
+
+export type FrontierCodexSemanticMergeAdmissionDecision =
+  | 'auto-mergeable'
+  | 'no-op'
+  | 'stale'
+  | 'review-required'
+  | 'blocked'
+  | string;
+
+export type FrontierCodexSemanticMergeAdmissionConflictKeyKind =
+  | 'symbol'
+  | 'semantic-node'
+  | 'region'
+  | 'native-span'
+  | 'source-subtree'
+  | 'effect'
+  | 'generated-output'
+  | 'signature'
+  | 'custom'
+  | string;
+
+export interface FrontierCodexSemanticMergeAdmissionSummary extends FrontierCodexSafeMergeRecordSummary {
+  safe: number;
+  safeWithLosses: number;
+  reviewRequired: number;
+  autoMergeable: number;
+  reasonCodes: string[];
+  conflictKeyKinds: FrontierCodexSemanticMergeAdmissionConflictKeyKind[];
+  candidateIds: string[];
+}
+
+export type FrontierCodexJsTsSafeMergeApplyClassification =
+  | 'accepted-clean'
+  | 'already-applied'
+  | 'no-op'
+  | 'conflict'
+  | 'stale'
+  | 'needs-review'
+  | 'blocked'
+  | string;
+
+export type FrontierCodexJsTsSafeMergeApplyStatus =
+  | 'accepted-clean'
+  | 'already-applied'
+  | 'conflict'
+  | 'stale'
+  | 'blocked'
+  | 'needs-port'
+  | 'evidence-only'
+  | 'ready'
+  | 'needs-review'
+  | 'none'
+  | string;
+
+export type FrontierCodexJsTsSafeMergeApplyDecision =
+  | 'apply'
+  | 'skip'
+  | 'admit'
+  | 'review'
+  | 'human-review'
+  | 'rerun-semantic-import'
+  | 'block'
+  | 'none'
+  | string;
+
+export interface FrontierCodexJsTsSafeMergeApplySummary extends FrontierCodexSafeMergeRecordSummary {
+  acceptedClean: number;
+  alreadyApplied: number;
+  applied: number;
+  skipped: number;
+  scripts: number;
+  projections: number;
+  replays: number;
+  statuses: FrontierCodexJsTsSafeMergeApplyStatus[];
+  byStatus: Record<string, number>;
+  actions: FrontierCodexJsTsSafeMergeApplyDecision[];
+  byAction: Record<string, number>;
+  reasonCodes: string[];
+  sourcePaths: string[];
+  scriptIds: string[];
+  projectionIds: string[];
+  replayIds: string[];
+}
+
 export interface FrontierCodexSemanticImportOptions {
   enabled?: boolean;
   maxFiles?: number;
@@ -59,6 +167,8 @@ export interface FrontierCodexSemanticImportRecord {
   semanticEditScript?: FrontierCodexSemanticEditScriptSummary;
   semanticEditProjection?: FrontierCodexSemanticEditProjectionSummary;
   semanticEditReplay?: FrontierCodexSemanticEditReplaySummary;
+  semanticMergeAdmission?: unknown;
+  safeMergeApply?: unknown;
   nativeDiff?: {
     kind?: string;
     id?: string;
@@ -271,6 +381,32 @@ export interface FrontierCodexSemanticImportSidecar {
       averageScore: number;
       byAction: Record<string, number>;
       byRisk: Record<string, number>;
+    };
+    semanticMergeAdmissions: {
+      total: number;
+      safe: number;
+      safeWithLosses: number;
+      reviewRequired: number;
+      blocked: number;
+      autoMergeable: number;
+      errors: number;
+      conflictKeys: string[];
+      conflictKeyKinds: string[];
+      byClassification: Record<string, number>;
+    };
+    safeMergeApplies: {
+      total: number;
+      applied: number;
+      skipped: number;
+      blocked: number;
+      conflicts: number;
+      stale: number;
+      needsPort: number;
+      errors: number;
+      conflictKeys: string[];
+      byStatus: Record<string, number>;
+      byAction: Record<string, number>;
+      byReadiness: Record<string, number>;
     };
     readiness: Record<string, number>;
     semanticImportExpected: boolean;

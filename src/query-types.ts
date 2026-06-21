@@ -18,6 +18,9 @@ export interface FrontierCodexQueryInput {
   semanticEditStatus?: string;
   semanticEditAdmission?: string;
   semanticEditProjection?: string;
+  semanticMergeAdmission?: string;
+  safeMergeApplyDecision?: string;
+  semanticMergeDecision?: string;
   semanticEditReplay?: string;
   semanticEditReplayStatus?: string;
   semanticEditReplayAdmission?: string;

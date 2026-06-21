@@ -20,8 +20,12 @@ import {
   type FrontierCodexSwarmCliInput,
   type FrontierCodexCollectResult,
   type FrontierCodexApplyResult,
+  type FrontierCodexJsTsSafeMergeApplySummary,
   type FrontierCodexSemanticEditAdmissionDecision,
   type FrontierCodexSemanticEditReplaySummary,
+  type FrontierCodexSemanticImportRecord,
+  type FrontierCodexSemanticImportQuality,
+  type FrontierCodexSemanticMergeAdmissionSummary,
   type FrontierCodexPatchScoreResult,
   type FrontierCodexResourceAllocation,
   type FrontierCodexResourceSchedulingOptions,
@@ -118,6 +122,75 @@ const continuationPromise: Promise<FrontierCodexContinuationResult> = continueCo
 });
 const semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision = classifySemanticEditScriptAdmission(undefined);
 const semanticEditReplay: FrontierCodexSemanticEditReplaySummary | undefined = summarizeSemanticEditReplay(undefined);
+const semanticMergeAdmission: FrontierCodexSemanticMergeAdmissionSummary = {
+  total: 1,
+  classifications: ['safe'],
+  byClassification: { safe: 1 },
+  decisions: ['auto-mergeable'],
+  byDecision: { 'auto-mergeable': 1 },
+  noOp: 0,
+  stale: 0,
+  needsReview: 0,
+  blocked: 0,
+  conflicts: 0,
+  conflictReasonCodes: [],
+  conflictKeys: ['symbol:FrontierThing'],
+  evidenceIds: ['evidence:semantic-admission'],
+  autoApplyable: 1,
+  autoApplyCandidates: 1,
+  empty: false,
+  safe: 1,
+  safeWithLosses: 0,
+  reviewRequired: 0,
+  autoMergeable: 1,
+  reasonCodes: ['semantic-merge-safe'],
+  conflictKeyKinds: ['symbol'],
+  candidateIds: ['candidate:FrontierThing']
+};
+const jsTsSafeMergeApply: FrontierCodexJsTsSafeMergeApplySummary = {
+  total: 1,
+  classifications: ['accepted-clean'],
+  byClassification: { 'accepted-clean': 1 },
+  decisions: ['apply'],
+  byDecision: { apply: 1 },
+  noOp: 0,
+  stale: 0,
+  needsReview: 0,
+  blocked: 0,
+  conflicts: 0,
+  conflictReasonCodes: [],
+  conflictKeys: ['symbol:FrontierThing'],
+  evidenceIds: ['evidence:js-ts-safe-merge-apply'],
+  autoApplyable: 1,
+  autoApplyCandidates: 1,
+  empty: false,
+  acceptedClean: 1,
+  alreadyApplied: 0,
+  applied: 1,
+  skipped: 0,
+  scripts: 1,
+  projections: 1,
+  replays: 1,
+  statuses: ['accepted-clean'],
+  byStatus: { 'accepted-clean': 1 },
+  actions: ['apply'],
+  byAction: { apply: 1 },
+  reasonCodes: ['semantic-edit-replay-accepted-clean'],
+  sourcePaths: ['src/index.ts'],
+  scriptIds: ['script:1'],
+  projectionIds: ['projection:1'],
+  replayIds: ['replay:1']
+};
+const semanticImportRecord: FrontierCodexSemanticImportRecord = {
+  path: 'src/index.ts',
+  status: 'imported',
+  semanticMergeAdmission,
+  safeMergeApply: jsTsSafeMergeApply
+};
+const semanticImportQuality: Partial<FrontierCodexSemanticImportQuality> = {
+  semanticMergeAdmission,
+  jsTsSafeMergeApply
+};
 const costEstimate: FrontierCodexModelCostEstimate = estimateCodexModelCost({
   model: 'gpt-5.1-codex-mini',
   actualInputTokens: 1000,
@@ -159,6 +232,11 @@ continuationPromise.then((continuation) => {
 });
 semanticEditAdmission.status satisfies string;
 semanticEditReplay?.acceptedClean satisfies number | undefined;
+semanticMergeAdmission.byClassification.safe satisfies number | undefined;
+jsTsSafeMergeApply.acceptedClean satisfies number;
+const recordSemanticMergeAdmission = semanticImportRecord.semanticMergeAdmission as FrontierCodexSemanticMergeAdmissionSummary | undefined;
+recordSemanticMergeAdmission?.conflictKeys satisfies string[] | undefined;
+semanticImportQuality.jsTsSafeMergeApply?.autoApplyable satisfies number | undefined;
 costEstimate.estimatedCostUsd satisfies number;
 costEstimate.pricingModel satisfies string | undefined;
 costEstimate.costEstimateLongContext satisfies boolean;

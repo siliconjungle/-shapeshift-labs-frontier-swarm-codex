@@ -16,6 +16,8 @@ import {
   createSemanticImportSidecar,
   summarizeLangSemanticImportSidecar,
   summarizeSemanticIndex,
+  summarizeSafeMergeApplyRecord,
+  summarizeSemanticMergeAdmission,
   summarizeSemanticSlice,
   summarizeSemanticSliceAdmission
 } from './semantic-import-sidecar.js';
@@ -33,6 +35,7 @@ import { resolveSemanticImportWorkspacePath } from './semantic-import-path.js';
 type CodexSemanticImportSidecarInput = { job: FrontierSwarmJob; workspace: string; changedPaths: readonly string[]; evidenceDir: string; baseCwd?: string; baseSources?: SemanticImportBaseSourceSnapshot; options?: boolean | FrontierCodexSemanticImportOptions; semanticImportExpected?: boolean };
 type SemanticImportBaseSourceSummaryInput = { path: string; source: 'workspace-snapshot' | 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string };
 type SemanticImportHeadSourceSummaryInput = { path: string; source: 'coordinator-workspace' | 'git-head'; bytes: number; foundBy: string };
+type LoadedFrontierLangSemanticImportApi = Extract<Awaited<ReturnType<typeof loadFrontierLangForSemanticImport>>, { ok: true }>;
 
 const DEFAULT_SEMANTIC_IMPORT_SIDECAR_MAX_BYTES = 16 * 1024 * 1024;
 const DEFAULT_SEMANTIC_IMPORT_ARCHIVE_NAME = 'semantic-imports.full.json.gz';
@@ -102,6 +105,13 @@ export async function createCodexSemanticImportSidecar(input: CodexSemanticImpor
           beforeMetadata: semanticImportMetadata(input.job, 'before', baseSource.path),
           metadata: semanticImportMetadata(input.job, 'diff', resolved.path)
         });
+        const mergeCandidate = nativeDiff?.mergeCandidate;
+        const semanticMergeAdmission = createOptionalSemanticMergeAdmission(api, mergeCandidate, {
+          changeSet: nativeDiff,
+          evidence: nativeDiff?.evidence,
+          losses: nativeDiff?.losses,
+          metadata: semanticImportMetadata(input.job, 'semantic-merge-admission', resolved.path)
+        });
         records.push({
           path: resolved.path,
           ...(resolved.path !== file.path ? { requestedPath: file.path } : {}),
@@ -112,7 +122,8 @@ export async function createCodexSemanticImportSidecar(input: CodexSemanticImpor
           baseSource: summarizeSemanticImportBaseSource(baseSource),
           semanticLineage: summarizeSemanticLineageEvidence(nativeDiff),
           nativeDiff: summarizeNativeSourceChangeSet(nativeDiff),
-          mergeCandidate: summarizeSemanticMergeCandidate(nativeDiff?.mergeCandidate)
+          mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate),
+          semanticMergeAdmission: summarizeSemanticMergeAdmission(semanticMergeAdmission)
         });
         continue;
       }
@@ -221,6 +232,28 @@ export async function createCodexSemanticImportSidecar(input: CodexSemanticImpor
         : Array.isArray(importResult?.universalAst?.sourceMaps)
           ? importResult.universalAst.sourceMaps
           : [];
+      const semanticMergeAdmission = createOptionalSemanticMergeAdmission(api, mergeCandidate, {
+        evidence: importResult?.evidence,
+        losses: importResult?.losses,
+        sourceMaps,
+        nativeDiff,
+        metadata: semanticImportMetadata(input.job, 'semantic-merge-admission', resolved.path)
+      });
+      const safeMergeApply = createOptionalJsTsSafeMergeApply(api, {
+        language: file.language,
+        sourcePath: resolved.path,
+        sourceText,
+        ...(baseSource ? { baseSourceText: baseSource.sourceText, baseSourcePath: baseSource.path } : {}),
+        ...(headSource ? { headSourceText: headSource.sourceText, headSourcePath: headSource.path } : {}),
+        importResult,
+        nativeDiff,
+        mergeCandidate,
+        semanticMergeAdmission,
+        semanticEditScript,
+        semanticEditProjection,
+        semanticEditReplay,
+        metadata: semanticImportMetadata(input.job, 'safe-merge-apply', resolved.path)
+      });
       const dependencyEdges = summarizeSemanticDependencyEdges(sourceText);
       const dependencyEdgeHints = dependencyEdges.length > 0 ? [...dependencyEdges] : undefined;
       const semanticIndex = summarizeSemanticIndex(importResult?.semanticIndex);
@@ -264,6 +297,8 @@ export async function createCodexSemanticImportSidecar(input: CodexSemanticImpor
         sourceProjection: summarizeNativeSourceProjection(sourceProjection),
         nativeCompile: summarizeNativeSourceCompile(nativeCompile),
         mergeCandidate: summarizeSemanticMergeCandidate(mergeCandidate, dependencyEdgeHints),
+        semanticMergeAdmission: summarizeSemanticMergeAdmission(semanticMergeAdmission),
+        safeMergeApply: summarizeSafeMergeApplyRecord(safeMergeApply),
         semanticSlice: summarizeSemanticSlice(semanticSlice),
         semanticSliceAdmission: summarizeSemanticSliceAdmission(semanticSliceAdmission)
       });
@@ -328,6 +363,42 @@ function semanticImportSidecarMaxBytes(value: unknown): number {
   const parsed = Number(value ?? process.env.FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_SIDECAR_MAX_BYTES);
   if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
   return DEFAULT_SEMANTIC_IMPORT_SIDECAR_MAX_BYTES;
+}
+
+function createOptionalSemanticMergeAdmission(
+  api: LoadedFrontierLangSemanticImportApi,
+  mergeCandidate: unknown,
+  options: Record<string, unknown>
+): unknown {
+  if (!mergeCandidate || !api.classifySemanticMergeCandidate) return undefined;
+  try {
+    return api.classifySemanticMergeCandidate(mergeCandidate, options);
+  } catch (error) {
+    return semanticImportOptionalApiError('frontier.swarm-codex.semanticMergeAdmissionError', error);
+  }
+}
+
+function createOptionalJsTsSafeMergeApply(
+  api: LoadedFrontierLangSemanticImportApi,
+  input: Record<string, unknown>
+): unknown {
+  if (!api.createJsTsSafeMergeApplyRecord || !semanticImportLanguageSupportsJsTsSafeMerge(input.language)) return undefined;
+  try {
+    return api.createJsTsSafeMergeApplyRecord(input);
+  } catch (error) {
+    return semanticImportOptionalApiError('frontier.swarm-codex.safeMergeApplyError', error);
+  }
+}
+
+function semanticImportLanguageSupportsJsTsSafeMerge(language: unknown): boolean {
+  return language === 'javascript' || language === 'typescript';
+}
+
+function semanticImportOptionalApiError(kind: string, error: unknown): { kind: string; error: string } {
+  return {
+    kind,
+    error: error instanceof Error ? error.message : String(error)
+  };
 }
 
 function compactSemanticImportSidecar(
@@ -428,6 +499,8 @@ function compactSemanticImportRecord(record: FrontierCodexSemanticImportRecord):
     ...(record.sourceProjection ? { sourceProjection: record.sourceProjection } : {}),
     ...(record.nativeCompile ? { nativeCompile: record.nativeCompile } : {}),
     ...(record.mergeCandidate ? { mergeCandidate: record.mergeCandidate } : {}),
+    ...(record.semanticMergeAdmission ? { semanticMergeAdmission: record.semanticMergeAdmission } : {}),
+    ...(record.safeMergeApply ? { safeMergeApply: record.safeMergeApply } : {}),
     ...(record.semanticSliceAdmission ? { semanticSliceAdmission: record.semanticSliceAdmission } : {}),
     ...(record.error ? { error: record.error } : {})
   };

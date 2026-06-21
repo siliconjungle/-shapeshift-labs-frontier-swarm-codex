@@ -1,10 +1,15 @@
 import assert from 'node:assert';
 import { collectCodexSwarmRun, fs, path, queryCodexSwarmCollection } from './context.mjs';
 import {
+  acceptedSafeMergeSemanticImportSummary,
+  blockedSafeMergeSemanticImportSummary,
   cleanEditScriptSemanticImportSummary,
   editScriptSemanticImportSummary,
   emptyExpectedSemanticImportSummary,
   factSemanticImportSummary,
+  noopSafeMergeSemanticImportSummary,
+  reviewSafeMergeSemanticImportSummary,
+  staleSafeMergeSemanticImportSummary,
   zeroLineageSemanticImportSummary
 } from './semantic-import-quality-fixtures.mjs';
 import { assertSemanticImportQualitySidecars } from './semantic-import-quality-sidecars.mjs';
@@ -271,4 +276,71 @@ export async function testSemanticImportQuality({ tmp }, mergeBundle) {
     'semantic-edit-clean-worker'
   ]);
   assert.ok(transformHashQuery.evidence.some((entry) => entry.jobId === 'semantic-edit-clean-worker'));
+
+  await assertKernelSafeMergeQuality({ tmp }, mergeBundle);
+}
+
+async function assertKernelSafeMergeQuality({ tmp }, mergeBundle) {
+  const runDir = path.join(tmp, 'kernel-safe-merge-run');
+  const fixtures = [
+    ['kernel-safe-accepted-worker', acceptedSafeMergeSemanticImportSummary(), 'src/runtime/safe-accepted.ts'],
+    ['kernel-safe-review-worker', reviewSafeMergeSemanticImportSummary(), 'src/runtime/safe-review.ts'],
+    ['kernel-safe-blocked-worker', blockedSafeMergeSemanticImportSummary(), 'src/runtime/safe-blocked.ts'],
+    ['kernel-safe-noop-worker', noopSafeMergeSemanticImportSummary(), 'src/runtime/safe-noop.ts'],
+    ['kernel-safe-stale-worker', staleSafeMergeSemanticImportSummary(), 'src/runtime/safe-stale.ts']
+  ];
+  for (const [jobId, semanticImport, changedPath] of fixtures) {
+    const jobDir = path.join(runDir, jobId);
+    await fs.mkdir(jobDir, { recursive: true });
+    await fs.writeFile(path.join(jobDir, 'merge.json'), JSON.stringify({
+      ...mergeBundle,
+      id: `${jobId}-bundle`,
+      jobId,
+      taskId: `${jobId}-task`,
+      changedPaths: [changedPath],
+      evidencePaths: ['semantic-imports.json'],
+      patchPath: undefined,
+      semanticImport,
+      metadata: { semanticImport }
+    }, null, 2) + '\n');
+  }
+
+  const collection = await collectCodexSwarmRun({
+    run: runDir,
+    checkStale: false,
+    semanticImportExpected: true,
+    outDir: path.join(runDir, 'collected')
+  });
+  const qualityByJob = new Map(collection.compactDashboard.topJobs.map((entry) => [entry.jobId, entry.semanticImportQuality]));
+  const accepted = qualityByJob.get('kernel-safe-accepted-worker');
+  assert.strictEqual(accepted.semanticMergeAdmission.safe, 1);
+  assert.strictEqual(accepted.semanticMergeAdmission.autoMergeable, 1);
+  assert.strictEqual(accepted.jsTsSafeMergeApply.acceptedClean, 1);
+  assert.strictEqual(accepted.semanticEditAdmission.status, 'auto-merge-candidate');
+  assert.strictEqual(accepted.semanticEditAdmission.cleanEligible, true);
+  assert.ok(!accepted.warnings.includes('semantic safe-merge apply needs review'));
+  assert.ok(!accepted.warnings.includes('semantic safe-merge apply is blocked'));
+
+  const review = qualityByJob.get('kernel-safe-review-worker');
+  assert.strictEqual(review.semanticMergeAdmission.reviewRequired, 1);
+  assert.strictEqual(review.jsTsSafeMergeApply.needsReview, 1);
+  assert.strictEqual(review.semanticEditAdmission.status, 'review-required');
+  assert.ok(review.warnings.includes('semantic merge admission needs review'));
+  assert.ok(review.warnings.includes('semantic safe-merge apply needs review'));
+
+  const blocked = qualityByJob.get('kernel-safe-blocked-worker');
+  assert.strictEqual(blocked.semanticMergeAdmission.blocked, 1);
+  assert.strictEqual(blocked.jsTsSafeMergeApply.blocked, 1);
+  assert.strictEqual(blocked.semanticEditAdmission.status, 'blocked');
+  assert.ok(blocked.warnings.includes('semantic merge admission is blocked'));
+  assert.ok(blocked.warnings.includes('semantic safe-merge apply is blocked'));
+
+  const noop = qualityByJob.get('kernel-safe-noop-worker');
+  assert.strictEqual(noop.jsTsSafeMergeApply.noOp, 1);
+  assert.ok(noop.warnings.includes('semantic safe-merge apply is no-op'));
+
+  const stale = qualityByJob.get('kernel-safe-stale-worker');
+  assert.strictEqual(stale.jsTsSafeMergeApply.stale, 1);
+  assert.strictEqual(stale.semanticEditAdmission.status, 'stale');
+  assert.ok(stale.warnings.includes('semantic safe-merge apply is stale'));
 }

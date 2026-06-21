@@ -9,6 +9,7 @@ export type FrontierCodexDashboardQualityMetricSeriesId =
   | 'needs-port'
   | 'stale'
   | 'semantic-admissions'
+  | 'kernel-semantic-merge'
   | 'context-budget';
 
 export interface FrontierCodexDashboardQualityMetricPoint {
@@ -52,6 +53,14 @@ export interface FrontierCodexDashboardQualityMetrics {
     semanticAdmissionCleanEligibleCount: number;
     semanticAdmissionScriptAutoMergeCandidateCount: number;
     semanticAdmissionScriptCleanEligibleCandidateCount: number;
+    kernelSemanticMergeSafeCount?: number;
+    kernelSemanticMergeSafeWithLossesCount?: number;
+    kernelSemanticMergeNoOpCount?: number;
+    kernelSemanticMergeStaleCount?: number;
+    kernelSemanticMergeReviewRequiredCount?: number;
+    kernelSemanticMergeBlockedCount?: number;
+    kernelSemanticMergeBlockedEvidenceCount?: number;
+    kernelSemanticMergeAutoApplyableCount?: number;
     contextBudgetJobCount: number;
     contextBudgetWarningCount: number;
     contextBudgetFailedCount: number;
@@ -70,6 +79,7 @@ export interface FrontierCodexDashboardQualityMetrics {
     needsPort: FrontierCodexDashboardQualityMetricSeries;
     stale: FrontierCodexDashboardQualityMetricSeries;
     semanticAdmissions: FrontierCodexDashboardQualityMetricSeries;
+    kernelSemanticMerge?: FrontierCodexDashboardQualityMetricSeries;
     contextBudget: FrontierCodexDashboardQualityMetricSeries;
   };
 }
@@ -172,6 +182,22 @@ export interface FrontierCodexDashboardSemanticAdmissionMetrics {
   cleanEligibleCandidateCount: number;
 }
 
+export interface FrontierCodexDashboardKernelSemanticMergeMetrics {
+  ticketCount: number;
+  statusCounts: Record<string, number>;
+  statuses: string[];
+  safeCount: number;
+  safeWithLossesCount: number;
+  noOpCount: number;
+  staleCount: number;
+  reviewRequiredCount: number;
+  blockedCount: number;
+  blockedEvidenceCount: number;
+  autoApplyableCount: number;
+  reasonCodes: string[];
+  reasons: string[];
+}
+
 export type FrontierCodexDashboardSemanticGateStatus = 'pass' | 'review' | 'blocked' | 'unknown';
 
 export interface FrontierCodexDashboardSemanticHealthMetrics {
@@ -217,6 +243,7 @@ export interface FrontierCodexDashboardSemanticMetrics {
     jobs: FrontierCodexDashboardSemanticAdmissionMetrics;
     scripts: FrontierCodexDashboardSemanticAdmissionMetrics;
   };
+  kernelSemanticMerge?: FrontierCodexDashboardKernelSemanticMergeMetrics;
   health: FrontierCodexDashboardSemanticHealthMetrics;
 }
 

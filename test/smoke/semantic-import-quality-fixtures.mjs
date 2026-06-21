@@ -103,6 +103,95 @@ export function cleanEditScriptSemanticImportSummary() {
   };
 }
 
+export function acceptedSafeMergeSemanticImportSummary() {
+  return safeMergeSemanticImportSummary({
+    mergeAdmission: semanticMergeAdmissionSummary({
+      classification: 'safe',
+      decision: 'auto-mergeable',
+      safe: 1,
+      autoMergeable: 1,
+      autoApplyable: 1,
+      candidateId: 'candidate_safe'
+    }),
+    apply: safeMergeApplySummary({
+      classification: 'accepted-clean',
+      status: 'accepted-clean',
+      decision: 'apply',
+      action: 'apply',
+      acceptedClean: 1,
+      applied: 1,
+      autoApplyable: 1
+    })
+  });
+}
+
+export function reviewSafeMergeSemanticImportSummary() {
+  return safeMergeSemanticImportSummary({
+    mergeAdmission: semanticMergeAdmissionSummary({
+      classification: 'review-required',
+      decision: 'review-required',
+      reviewRequired: 1,
+      needsReview: 1,
+      reasonCodes: ['dynamic-effect-review-required'],
+      candidateId: 'candidate_review'
+    }),
+    apply: safeMergeApplySummary({
+      classification: 'needs-review',
+      status: 'needs-review',
+      decision: 'human-review',
+      action: 'human-review',
+      needsReview: 1,
+      reasonCodes: ['safe-merge-review-required']
+    })
+  });
+}
+
+export function blockedSafeMergeSemanticImportSummary() {
+  return safeMergeSemanticImportSummary({
+    mergeAdmission: semanticMergeAdmissionSummary({
+      classification: 'blocked',
+      decision: 'blocked',
+      blocked: 1,
+      reasonCodes: ['blocked-evidence'],
+      candidateId: 'candidate_blocked'
+    }),
+    apply: safeMergeApplySummary({
+      classification: 'blocked',
+      status: 'blocked',
+      decision: 'block',
+      action: 'block',
+      blocked: 1,
+      reasonCodes: ['safe-merge-apply-blocked']
+    })
+  });
+}
+
+export function noopSafeMergeSemanticImportSummary() {
+  return safeMergeSemanticImportSummary({
+    apply: safeMergeApplySummary({
+      classification: 'no-op',
+      status: 'none',
+      decision: 'no-op',
+      action: 'none',
+      noOp: 1,
+      skipped: 1
+    })
+  });
+}
+
+export function staleSafeMergeSemanticImportSummary() {
+  return safeMergeSemanticImportSummary({
+    apply: safeMergeApplySummary({
+      classification: 'stale',
+      status: 'stale',
+      decision: 'rerun-semantic-import',
+      action: 'rerun-semantic-import',
+      stale: 1,
+      reasonCodes: ['current-source-hash-mismatch']
+    })
+  });
+}
+
 function emptySemanticLineage() {
   return {
     total: 0,
@@ -123,6 +212,86 @@ function emptySemanticLineage() {
     reasonCodes: [],
     reviewRequired: false,
     empty: false
+  };
+}
+
+function safeMergeSemanticImportSummary({ mergeAdmission, apply }) {
+  return {
+    ...factSemanticImportSummary(),
+    ...(mergeAdmission ? { semanticMergeAdmissions: mergeAdmission } : {}),
+    ...(apply ? { jsTsSafeMergeApply: apply } : {})
+  };
+}
+
+function semanticMergeAdmissionSummary(overrides) {
+  const classification = overrides.classification;
+  const decision = overrides.decision;
+  const conflictKeys = overrides.conflictKeys ?? ['symbol:src/runtime/safe.ts#run'];
+  return {
+    total: 1,
+    classifications: [classification],
+    byClassification: { [classification]: 1 },
+    decisions: [decision],
+    byDecision: { [decision]: 1 },
+    noOp: overrides.noOp ?? 0,
+    stale: overrides.stale ?? 0,
+    needsReview: overrides.needsReview ?? 0,
+    blocked: overrides.blocked ?? 0,
+    conflicts: overrides.conflicts ?? 0,
+    conflictReasonCodes: overrides.conflictReasonCodes ?? [],
+    conflictKeys,
+    evidenceIds: [`evidence_${classification}`],
+    autoApplyable: overrides.autoApplyable ?? 0,
+    autoApplyCandidates: overrides.autoApplyCandidates ?? overrides.autoApplyable ?? 0,
+    empty: false,
+    safe: overrides.safe ?? 0,
+    safeWithLosses: overrides.safeWithLosses ?? 0,
+    reviewRequired: overrides.reviewRequired ?? 0,
+    autoMergeable: overrides.autoMergeable ?? 0,
+    reasonCodes: overrides.reasonCodes ?? [],
+    conflictKeyKinds: ['symbol'],
+    candidateIds: [overrides.candidateId]
+  };
+}
+
+function safeMergeApplySummary(overrides) {
+  const classification = overrides.classification;
+  const status = overrides.status;
+  const decision = overrides.decision;
+  const action = overrides.action;
+  return {
+    total: 1,
+    classifications: [classification],
+    byClassification: { [classification]: 1 },
+    decisions: [decision],
+    byDecision: { [decision]: 1 },
+    noOp: overrides.noOp ?? 0,
+    stale: overrides.stale ?? 0,
+    needsReview: overrides.needsReview ?? 0,
+    blocked: overrides.blocked ?? 0,
+    conflicts: overrides.conflicts ?? 0,
+    conflictReasonCodes: overrides.conflictReasonCodes ?? [],
+    conflictKeys: overrides.conflictKeys ?? [],
+    evidenceIds: [`evidence_apply_${classification}`],
+    autoApplyable: overrides.autoApplyable ?? 0,
+    autoApplyCandidates: overrides.autoApplyCandidates ?? overrides.autoApplyable ?? 0,
+    empty: false,
+    acceptedClean: overrides.acceptedClean ?? 0,
+    alreadyApplied: overrides.alreadyApplied ?? 0,
+    applied: overrides.applied ?? 0,
+    skipped: overrides.skipped ?? 0,
+    scripts: 1,
+    projections: 1,
+    replays: 1,
+    statuses: [status],
+    byStatus: { [status]: 1 },
+    actions: [action],
+    byAction: { [action]: 1 },
+    reasonCodes: overrides.reasonCodes ?? [],
+    sourcePaths: ['src/runtime/safe.ts'],
+    scriptIds: ['safe_merge_script'],
+    projectionIds: ['safe_merge_projection'],
+    replayIds: ['safe_merge_replay']
   };
 }
 

@@ -86,6 +86,7 @@ export function ignoredWorkspaceNoisePath(file: string): boolean {
   return normalized.endsWith('.tsbuildinfo')
     || pathHasIgnoredSegment(normalized, [
       '.git',
+      '.loom',
       '.cache',
       '.turbo',
       '.next',

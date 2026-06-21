@@ -94,6 +94,7 @@ const WORKSPACE_NOISE_SEGMENT_REASONS: Array<{ segment: string; reasonCode: Fron
   { segment: 'build', reasonCode: 'build_output' },
   { segment: 'coverage', reasonCode: 'coverage' },
   { segment: '.frontier-framework', reasonCode: 'frontier_framework' },
+  { segment: '.loom', reasonCode: 'generated_setup' },
   { segment: 'agent-runs', reasonCode: 'agent_runs' },
   { segment: 'target', reasonCode: 'build_output' }
 ];

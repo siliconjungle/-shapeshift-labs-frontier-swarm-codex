@@ -2,6 +2,54 @@ import type { FrontierCodexSemanticEditAdmissionDecision, FrontierCodexSemanticE
 import type { FrontierCodexSemanticEditProjectionSummary } from './types-semantic-edit-projection.js';
 import type { FrontierCodexSemanticEditReplaySummary } from './types-semantic-edit-replay.js';
 
+export interface FrontierCodexSafeMergeRecordSummary {
+  total: number;
+  classifications: string[];
+  byClassification: Record<string, number>;
+  decisions: string[];
+  byDecision: Record<string, number>;
+  noOp: number;
+  stale: number;
+  needsReview: number;
+  blocked: number;
+  conflicts: number;
+  conflictReasonCodes: string[];
+  conflictKeys: string[];
+  evidenceIds: string[];
+  autoApplyable: number;
+  autoApplyCandidates: number;
+  empty: boolean;
+}
+
+export interface FrontierCodexSemanticMergeAdmissionSummary extends FrontierCodexSafeMergeRecordSummary {
+  safe: number;
+  safeWithLosses: number;
+  reviewRequired: number;
+  autoMergeable: number;
+  reasonCodes: string[];
+  conflictKeyKinds: string[];
+  candidateIds: string[];
+}
+
+export interface FrontierCodexJsTsSafeMergeApplySummary extends FrontierCodexSafeMergeRecordSummary {
+  acceptedClean: number;
+  alreadyApplied: number;
+  applied: number;
+  skipped: number;
+  scripts: number;
+  projections: number;
+  replays: number;
+  statuses: string[];
+  byStatus: Record<string, number>;
+  actions: string[];
+  byAction: Record<string, number>;
+  reasonCodes: string[];
+  sourcePaths: string[];
+  scriptIds: string[];
+  projectionIds: string[];
+  replayIds: string[];
+}
+
 export interface FrontierCodexSemanticImportQuality {
   expected: boolean;
   expectedSatisfied: boolean;
@@ -67,5 +115,7 @@ export interface FrontierCodexSemanticImportQuality {
   semanticEditProjection: FrontierCodexSemanticEditProjectionSummary;
   semanticEditReplay: FrontierCodexSemanticEditReplaySummary;
   semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision;
+  semanticMergeAdmission: FrontierCodexSemanticMergeAdmissionSummary;
+  jsTsSafeMergeApply: FrontierCodexJsTsSafeMergeApplySummary;
   warnings: string[];
 }

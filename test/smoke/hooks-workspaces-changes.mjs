@@ -20,6 +20,8 @@ export async function testChangedPathDiscovery(plan, tmp) {
       await fs.writeFile(path.join(input.workspacePath, 'loom.json'), '{}\n');
       await fs.writeFile(path.join(input.workspacePath, '.loomignore'), '.loom\n');
       await fs.writeFile(path.join(input.workspacePath, '.gitignore'), '.loom\n');
+      await fs.mkdir(path.join(input.workspacePath, '.loom'), { recursive: true });
+      await fs.writeFile(path.join(input.workspacePath, '.loom/index.json'), '{}\n');
       await fs.mkdir(path.join(input.workspacePath, 'agent-runs/noisy'), { recursive: true });
       await fs.writeFile(path.join(input.workspacePath, 'agent-runs/noisy/evidence.json'), '{}\n');
       await fs.mkdir(path.join(input.workspacePath, 'packages/frontier-swarm/dist'), { recursive: true });
@@ -46,6 +48,7 @@ export async function testChangedPathDiscovery(plan, tmp) {
   const changedWorkspaceProof = JSON.parse(await fs.readFile(changedWorkspaceProofPath, 'utf8'));
   assert.deepStrictEqual(changedWorkspaceProof.ignoredChangedPaths, [
     '.gitignore',
+    '.loom',
     '.loomignore',
     'agent-runs',
     'loom.json',
@@ -55,7 +58,7 @@ export async function testChangedPathDiscovery(plan, tmp) {
   assert.deepStrictEqual(changedWorkspaceProof.summary.ignoredChangedPathReasonCounts, {
     agent_runs: 1,
     build_output: 1,
-    generated_setup: 3,
+    generated_setup: 4,
     node_modules: 1
   });
   for (const noisyPath of [

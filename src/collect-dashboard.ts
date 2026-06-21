@@ -10,6 +10,11 @@ import { mergeSemanticEditScriptSummaries } from './semantic-edit-script.js';
 import { mergeSemanticEditProjectionSummaries } from './semantic-edit-projection.js';
 import { mergeSemanticEditReplaySummaries } from './semantic-edit-replay.js';
 import { humanActionsFromMergeBundles } from './human-actions.js';
+import {
+  kernelSemanticMergeFromBundle,
+  kernelSemanticMergeFromJob,
+  kernelSemanticMergeSummaryFromDetails
+} from './query-semantic-edit.js';
 
 export function enrichCollectedCoordinatorDashboard(
   dashboard: FrontierSwarmCoordinatorDashboard,
@@ -22,6 +27,7 @@ export function enrichCollectedCoordinatorDashboard(
     jobs: Array<FrontierSwarmCoordinatorDashboard['jobs'][number] & {
       semanticImportQuality?: ReturnType<typeof summarizeCodexSemanticImportQuality>;
       semanticEditAdmission?: ReturnType<typeof summarizeCodexSemanticImportQuality>['semanticEditAdmission'];
+      kernelSemanticMerge?: ReturnType<typeof kernelSemanticMergeFromBundle>;
       contextBudget?: FrontierCodexContextBudgetReport;
     }>;
     summary: FrontierSwarmCoordinatorDashboard['summary'] & Record<string, unknown>;
@@ -34,14 +40,27 @@ export function enrichCollectedCoordinatorDashboard(
   const semanticImportLossesBySeverity = mergeNumberRecords(semanticQualities.map((entry) => entry.lossesBySeverity));
   const semanticEditAdmission = semanticEditAdmissionSummary(semanticQualities);
   const semanticEditScriptAdmission = semanticEditScriptAdmissionSummary(semanticEditScripts);
+  const bundlesByJobId = new Map(bundles.map((bundle) => [bundle.jobId, bundle]));
+  const kernelSemanticMergeByJobId = new Map(dashboard.jobs.map((job) => {
+    const bundle = bundlesByJobId.get(job.jobId);
+    return [
+      job.jobId,
+      bundle
+        ? kernelSemanticMergeFromBundle(bundle)
+        : kernelSemanticMergeFromJob(job as unknown as Record<string, unknown>)
+    ] as const;
+  }));
+  const kernelSemanticMerge = kernelSemanticMergeSummaryFromDetails(Array.from(kernelSemanticMergeByJobId.values()));
   mutable.jobs = dashboard.jobs.map((job) => {
     const quality = qualities.get(job.jobId) ?? summarizeCodexSemanticImportQuality(undefined, semanticImportExpected);
     const { contextBudget: _contextBudget, ...jobWithoutOpaqueBudget } = job;
+    const kernelMerge = kernelSemanticMergeByJobId.get(job.jobId);
     return {
       ...jobWithoutOpaqueBudget,
       ...(primaryEvidencePathForJob(job) ? { primaryEvidencePath: primaryEvidencePathForJob(job) } : {}),
       semanticImportQuality: quality,
       semanticEditAdmission: quality.semanticEditAdmission,
+      ...(kernelMerge && kernelMerge.ticketCount > 0 ? { kernelSemanticMerge: kernelMerge } : {}),
       ...(contextBudgets.get(job.jobId) ? { contextBudget: contextBudgets.get(job.jobId) } : {})
     };
   });
@@ -118,6 +137,17 @@ export function enrichCollectedCoordinatorDashboard(
     semanticEditReplays,
     semanticEditAdmission,
     semanticEditScriptAdmission,
+    kernelSemanticMerge,
+    kernelSemanticMergeSafe: kernelSemanticMerge.safeCount,
+    kernelSemanticMergeSafeWithLosses: kernelSemanticMerge.safeWithLossesCount,
+    kernelSemanticMergeNoOp: kernelSemanticMerge.noOpCount,
+    kernelSemanticMergeStale: kernelSemanticMerge.staleCount,
+    kernelSemanticMergeReviewRequired: kernelSemanticMerge.reviewRequiredCount,
+    kernelSemanticMergeBlocked: kernelSemanticMerge.blockedCount,
+    kernelSemanticMergeBlockedEvidence: kernelSemanticMerge.blockedEvidenceCount,
+    kernelSemanticMergeAutoApplyable: kernelSemanticMerge.autoApplyableCount,
+    kernelSemanticMergeReasonCodes: kernelSemanticMerge.reasonCodes,
+    kernelSemanticMergeReasons: kernelSemanticMerge.reasons,
     semanticImportExpectedMissingReasonCodes: uniqueStrings(semanticQualities.flatMap((entry) => entry.expectedMissingReasonCodes))
   };
   mutable.metadata = {

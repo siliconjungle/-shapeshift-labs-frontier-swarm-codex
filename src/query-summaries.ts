@@ -1,5 +1,11 @@
 import { nonNegativeNumber, readStringArray, uniqueStrings } from './common.js';
-import { semanticEditAdmissionSummary, semanticEditProjectionSummary, semanticEditScriptAdmissionSummary } from './query-semantic-edit.js';
+import {
+  safeMergeApplyDecisionSummary,
+  semanticEditAdmissionSummary,
+  semanticEditProjectionSummary,
+  semanticEditScriptAdmissionSummary,
+  semanticMergeAdmissionSummary
+} from './query-semantic-edit.js';
 import { semanticEditReplaySummary } from './query-semantic-edit-replay.js';
 import { queryLandedSummary } from './query-landed.js';
 import {
@@ -205,7 +211,9 @@ export function queryableCounts(
       editAdmission: semanticEditAdmissionSummary(jobs),
       editProjection: semanticEditProjectionSummary(jobs),
       editReplay: semanticEditReplaySummary(jobs),
-      editScriptAdmission: semanticEditScriptAdmissionSummary(jobs)
+      editScriptAdmission: semanticEditScriptAdmissionSummary(jobs),
+      mergeAdmission: semanticMergeAdmissionSummary(jobs),
+      safeMergeApplyDecision: safeMergeApplyDecisionSummary(jobs)
     },
     cleanup: queryCleanupSummary(jobs, evidenceRows),
     ownership: queryOwnershipSummary(jobs, evidenceRows)

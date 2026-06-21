@@ -96,6 +96,7 @@ export type FrontierCodexLiveRunGraphEventType =
   | 'job.finished'
   | 'evidence.discovered'
   | 'gate.result'
+  | 'semantic-admission.result'
   | 'terminal.outcome'
   | string;
 

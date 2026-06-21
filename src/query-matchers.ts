@@ -5,8 +5,11 @@ import {
   jobSemanticEditProjection,
   jobSemanticEditScript,
   matchesEvidenceSemanticEdit,
+  matchesEvidenceSemanticSafeMerge,
   matchesSemanticEdit,
-  matchesSemanticEditProjection
+  matchesSemanticEditProjection,
+  matchesSemanticSafeMergeArtifact,
+  matchesSemanticSafeMergeJob
 } from './query-semantic-edit.js';
 import {
   evidenceSemanticEditReplay,
@@ -54,6 +57,7 @@ export function matchesJob(
     && (input.lineage === undefined || jobHasLineage(job) === input.lineage)
     && matchesSemanticEdit(jobSemanticEditScript(job), input, haystack, jobSemanticEditAdmission(job))
     && matchesSemanticEditProjection(jobSemanticEditProjection(job), input, haystack)
+    && matchesSemanticSafeMergeJob(job, input, haystack)
     && matchesSemanticEditReplay(jobSemanticEditReplay(job), input, haystack)
     && (input.readiness === undefined || matchesReadiness(job, input.readiness))
     && (input.health === undefined || matchesHealth(job, input.health))
@@ -80,6 +84,7 @@ export function matchesArtifact(record: FrontierCodexArtifactRecord, input: Fron
     && (input.ownership === undefined || metricTextMatches(haystack, input.ownership))
     && matchesSemanticEdit(artifactSemanticEditScript(record), input, haystack, artifactSemanticEditAdmission(record))
     && matchesSemanticEditProjection(artifactSemanticEditProjection(record), input, haystack)
+    && matchesSemanticSafeMergeArtifact(record, input, haystack)
     && matchesSemanticEditReplay(artifactSemanticEditReplay(record), input, haystack);
 }
 
@@ -100,6 +105,7 @@ export function matchesEvidence(entry: Record<string, unknown>, input: FrontierC
     && (input.ownership === undefined || matchesEvidenceOwnership(entry, input.ownership))
     && (input.semanticReadiness === undefined || matchesEvidenceSemanticReadiness(entry, input.semanticReadiness))
     && matchesEvidenceSemanticEdit(entry, input, haystack)
+    && matchesEvidenceSemanticSafeMerge(entry, input, haystack)
     && matchesSemanticEditReplay(evidenceSemanticEditReplay(entry), input, haystack);
 }
 
