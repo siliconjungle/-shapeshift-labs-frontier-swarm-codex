@@ -46,6 +46,7 @@ import { testModelPricing } from './smoke/model-pricing.mjs';
 import { testRunEventsCurrentFormat } from './smoke/run-events-current-format.mjs';
 import { testRunSync } from './smoke/run-sync.mjs';
 import { testDistributedPilot } from './smoke/distributed-pilot.mjs';
+import { testDistributedRun } from './smoke/distributed-run.mjs';
 import './smoke/collection-noise.mjs';
 import './smoke/workspace-lockdown.mjs';
 
@@ -56,6 +57,7 @@ await testResourceAwareScheduling(context);
 await testRunEventsCurrentFormat(context);
 await testRunSync(context);
 await testDistributedPilot(context);
+await testDistributedRun(context);
 await testLiveRoutingController(context);
 await testCompactLogTruncation(context);
 await testContextBudget(context);

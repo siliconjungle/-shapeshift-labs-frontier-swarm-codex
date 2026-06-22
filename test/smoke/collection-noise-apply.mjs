@@ -32,10 +32,11 @@ export async function runCollectionApplySmoke(root) {
   const appliedLedger = await applyCodexSwarmCollection({
     collection: applyCollection.outDir,
     cwd: applyRepo,
-    dryRun: false,
-    allowDirty: false,
-    jobIds: ['ready-job']
-  });
+	    dryRun: false,
+	    allowDirty: false,
+	    admission: 'off',
+	    jobIds: ['ready-job']
+	  });
   assert.strictEqual(appliedLedger.ok, true);
   assert.strictEqual(appliedLedger.summary.total, 1);
   assert.strictEqual(appliedLedger.summary.applied, 1);
@@ -51,10 +52,11 @@ export async function runCollectionApplySmoke(root) {
     collection: applyCollection.outDir,
     cwd: commitRepo,
     dryRun: false,
-    allowDirty: false,
-    commit: true,
-    jobIds: ['commit-ready-job']
-  });
+	    allowDirty: false,
+	    commit: true,
+	    admission: 'off',
+	    jobIds: ['commit-ready-job']
+	  });
   assert.strictEqual(committedLedger.ok, true);
   assert.strictEqual(committedLedger.summary.total, 1);
   assert.strictEqual(committedLedger.summary.applied, 0);

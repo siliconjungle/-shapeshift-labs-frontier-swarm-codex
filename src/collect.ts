@@ -67,7 +67,11 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const runDir = await resolveRunDirectory(input.run);
   const outDir = path.resolve(cwd, input.outDir ?? path.join(runDir, 'collected'));
-  const runSync = await syncCodexRunEventPeers({ cwd, run: runDir, outDir: runDir, peers: input.runSyncPeers, direction: input.runSyncDirection, runSyncEvidencePath: input.runSyncEvidencePath, runSyncHistoryPath: input.runSyncHistoryPath });
+  const runSync = await syncCodexRunEventPeers({
+    cwd, run: runDir, outDir: runDir,
+    runEventsPath: input.runEventsPath, runDashboardPath: input.runDashboardPath,
+    peers: input.runSyncPeers, direction: input.runSyncDirection,
+    runSyncEvidencePath: input.runSyncEvidencePath, runSyncHistoryPath: input.runSyncHistoryPath });
   const buckets = createEmptyCollectBuckets();
   const collectedBundles: FrontierSwarmMergeBundle[] = [];
   const evidenceEntries: FrontierSwarmEvidenceIndexEntryInput[] = [];

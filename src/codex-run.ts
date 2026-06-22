@@ -19,6 +19,10 @@ import { readCodexHumanActionArtifacts } from './human-actions.js';
 import { applyWorkspacePreExecWriteFence, collectChangedPaths, emptyChangedPathCollection, filterWorkspaceChangedPaths, mergeWorkspaceChangedPathCollections, quarantineWorkspacePatchCandidatePaths, restoreWorkspaceChangedPaths, restoreWorkspacePreExecWriteFence, shouldSnapshotWorkspaceChanges, snapshotWorkspaceFiles, writeCodexPatchFile } from './codex-workspace-changes.js';
 import { appendCodexJobResultTimelineEvents } from './codex-run-timeline.js';
 import { runCodexJobVerification } from './codex-verification.js';
+import {
+  appendCodexDistributedWorkerRunEvents,
+  createCodexDistributedWorkerRunRecord
+} from './distributed-run.js';
 import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions } from './index.js';
 
 export { runCodexSwarm } from './codex-run-swarm.js';
@@ -31,6 +35,7 @@ export async function runCodexJob(
 ): Promise<FrontierSwarmJobResultInput> {
   const paths = await createCodexJobPaths(outDir, job, options);
   const workspace = await prepareCodexWorkspace(job, options);
+  const distributedRun = createCodexDistributedWorkerRunRecord({ options, workspacePath: workspace, job });
   const workspacePlan = createCodexWorkspacePlan(job, options);
   const resourceAllocation = createCodexResourceAllocation(job, {
     cwd: options.cwd ?? process.cwd(),
@@ -238,7 +243,8 @@ export async function runCodexJob(
     humanActions,
     strictOwnership,
     semanticImportSummary,
-    verificationGateEvidence: verificationEvidence?.metadata
+    verificationGateEvidence: verificationEvidence?.metadata,
+    distributedRun
   };
   const result: FrontierSwarmJobResultInput = {
     jobId: job.id,
@@ -326,7 +332,8 @@ export async function runCodexJob(
     semanticImportExpected,
     handoffArtifacts
   });
-  await appendCodexJobResultTimelineEvents({ options, outDir, job, result, mergeBundle });
+  const timelineEvents = await appendCodexJobResultTimelineEvents({ options, outDir, job, result, mergeBundle });
+  await appendCodexDistributedWorkerRunEvents({ record: distributedRun, events: timelineEvents });
   return result;
 }
 

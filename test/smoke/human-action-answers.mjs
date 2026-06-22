@@ -6,6 +6,7 @@ import {
   fs,
   manifestInput,
   path,
+  readCodexRunEvents,
   renderCodexPrompt
 } from './context.mjs';
 
@@ -60,6 +61,23 @@ export async function testHumanActionAnswers({ tmp }) {
   assert.strictEqual(continuation.humanActions[0].status, 'answered');
   assert.strictEqual(continuation.humanActions[0].answer, 'yes, retry after ten minutes');
   assert.ok(await fileExists(continuation.humanActionStatePath));
+
+  const distributedContinuation = await continueCodexSwarmLoop({
+    collection: collectionDir,
+    outDir: path.join(tmp, 'human-answer-distributed-continuation'),
+    humanAnswers: [{ code: 'Q-RETRY', answer: 'distributed yes' }],
+    distributedRun: true,
+    manifest: manifestInput,
+    tasks: { items: [{ id: 'runtime-action', lane: 'runtime', targetRefs: ['src/runtime/action.ts'] }] },
+    routingMode: 'fill'
+  });
+  assert.ok(distributedContinuation.distributedRun);
+  assert.ok(distributedContinuation.runEventsPath.endsWith(path.join('.frontier-run', collection.dashboard.plan.runId, 'run-events.jsonl')));
+  assert.strictEqual(distributedContinuation.summary.paths.distributedRunDir, distributedContinuation.distributedRun.paths.runDir);
+  const continuationEvents = await readCodexRunEvents(distributedContinuation.runEventsPath);
+  assert.ok(continuationEvents.some((event) => event.payload?.node?.kind === 'human-question' && event.payload.node.status === 'answered' && event.payload.node.answer === 'distributed yes'));
+  assert.ok(continuationEvents.some((event) => event.payload?.decision?.decision === 'human-question' && event.payload.decision.metadata?.answer === 'distributed yes'));
+  assert.ok(continuationEvents.some((event) => event.payload?.decision?.metadata?.source === 'frontier-swarm-codex.continuation' && event.payload.decision.metadata.nextJobCount === 1));
 
   const cli = new URL('../../dist/cli.js', import.meta.url).pathname;
   const cliAnswerPath = path.join(tmp, 'human-answer-cli.json');

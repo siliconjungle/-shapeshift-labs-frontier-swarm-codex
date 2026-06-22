@@ -7,7 +7,7 @@ import { handleCodexTournamentCommand } from './tournament-query.js';
 import { handleCodexQueryCommand } from './query.js';
 import { handleCodexCleanupCommand } from './cleanup.js';
 import { collectResultForCli } from './cli-output.js';
-import { pathOrFalseArg, runSyncOptionsArg } from './cli-run-events-args.js';
+import { distributedRunOptionsArg, pathOrFalseArg, runEventOptionsArg, runSyncOptionsArg } from './cli-run-events-args.js';
 import {
   boolArg,
   bucketArg,
@@ -124,10 +124,11 @@ try {
       run,
       outDir: stringArg(args.outDir ?? args.out),
       cwd: stringArg(args.cwd),
-      checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
-      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
-      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
-      runSyncPeers: runSyncOptions.runSyncPeers,
+	      checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
+	      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
+	      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
+	      ...runEventOptionsArg(args),
+	      runSyncPeers: runSyncOptions.runSyncPeers,
       runSyncDirection: runSyncOptions.runSyncDirection,
       runSyncEvidencePath: runSyncOptions.runSyncEvidencePath,
       runSyncHistoryPath: runSyncOptions.runSyncHistoryPath
@@ -138,20 +139,22 @@ try {
     const run = stringArg(args.run);
     const collection = stringArg(args.collection);
     if (!run && !collection) throw new Error(`${command} requires --run <run-dir|swarm-results.json> or --collection <collection-dir|collection.json>`);
-    const runSyncOptions = runSyncOptionsArg(args);
-    const result = await continueCodexSwarmLoop({
-      run,
-      collection,
-      outDir: stringArg(args.outDir ?? args.out),
-      collectionOutDir: stringArg(args.collectionOutDir ?? args['collection-out-dir']),
-      checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
-      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
-      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
-      runSyncPeers: runSyncOptions.runSyncPeers,
-      runSyncDirection: runSyncOptions.runSyncDirection,
-      runSyncEvidencePath: runSyncOptions.runSyncEvidencePath,
-      runSyncHistoryPath: runSyncOptions.runSyncHistoryPath,
-      backlogPath: stringArg(args.backlog),
+	    const runSyncOptions = runSyncOptionsArg(args);
+	    const result = await continueCodexSwarmLoop({
+	      run,
+	      collection,
+	      outDir: stringArg(args.outDir ?? args.out),
+	      collectionOutDir: stringArg(args.collectionOutDir ?? args['collection-out-dir']),
+	      checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
+	      semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
+	      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
+	      ...runEventOptionsArg(args),
+	      runSyncPeers: runSyncOptions.runSyncPeers,
+	      runSyncDirection: runSyncOptions.runSyncDirection,
+	      runSyncEvidencePath: runSyncOptions.runSyncEvidencePath,
+	      runSyncHistoryPath: runSyncOptions.runSyncHistoryPath,
+	      ...distributedRunOptionsArg(args),
+	      backlogPath: stringArg(args.backlog),
       routingPolicyPath: stringArg(args.routingPolicy ?? args['routing-policy']),
       humanAnswersPath: stringArg(args.humanAnswers ?? args['human-answers'] ?? args.humanActionAnswers ?? args['human-action-answers']),
       manifestPath: stringArg(args.manifest),
@@ -197,7 +200,10 @@ try {
       allowDirty: boolArg(args.allowDirty ?? args['allow-dirty'], false),
       commit: boolArg(args.commit, false),
       branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
-      limit: numberArg(args.limit, undefined)
+      limit: numberArg(args.limit, undefined),
+      admission: applyAdmissionArg(args.admission ?? args['apply-admission']),
+      leaseStatePath: pathOrFalseArg(args.leaseState ?? args['lease-state']),
+      leaseTtlMs: numberArg(args.leaseTtlMs ?? args['lease-ttl-ms'], undefined)
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
@@ -244,4 +250,10 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
+}
+
+function applyAdmissionArg(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  if (value === 'strict' || value === 'warn' || value === 'off') return value;
+  throw new Error(`unsupported --apply-admission ${value}; expected strict, warn, or off`);
 }

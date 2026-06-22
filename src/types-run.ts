@@ -28,6 +28,7 @@ import type { FrontierCodexWorkspacePlan } from './types-workspace.js';
 import type { FrontierCodexDependencyHealthOptions } from './types-dependency-health.js';
 import type { FrontierCodexLiveRoutingOptions } from './types-live-routing.js';
 import type { FrontierCodexRunSyncOptions, FrontierCodexRunSyncResult } from './run-sync.js';
+import type { FrontierCodexDistributedRunOptions, FrontierCodexDistributedRunResult } from './types-distributed-run.js';
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
 export type FrontierCodexSwarmWorkspaceMode = 'current' | 'git-worktree' | 'snapshot' | 'copy';
@@ -131,11 +132,7 @@ export interface FrontierCodexContextBudgetOptions {
   maxWorkspaceIncludes?: number;
 }
 
-export interface FrontierCodexAdaptiveFeedbackRoutingKey {
-  taskKind?: string;
-  lane?: string;
-  modelTier?: string;
-}
+export interface FrontierCodexAdaptiveFeedbackRoutingKey { taskKind?: string; lane?: string; modelTier?: string }
 
 export interface FrontierCodexAdaptiveFeedbackObservationMetadata {
   routingKey?: FrontierCodexAdaptiveFeedbackRoutingKey;
@@ -277,6 +274,7 @@ export interface FrontierCodexSwarmRunOptions {
   profile?: string;
   ephemeral?: boolean;
   dryRun?: boolean;
+  distributedRun?: boolean | FrontierCodexDistributedRunOptions;
   runVerification?: boolean;
   collectGitStatus?: boolean;
   jobTimeoutMs?: number;
@@ -303,6 +301,7 @@ export interface FrontierCodexSwarmRunResult {
   runEventsPath?: string;
   runDashboardPath?: string;
   runSyncEvidencePath?: string; runSyncHistoryPath?: string; runSync?: FrontierCodexRunSyncResult;
+  distributedRun?: FrontierCodexDistributedRunResult;
   queueStatePath?: string; queueEventsPath?: string; queueSummaryPath?: string; modelTelemetryPath?: string; modelTelemetrySummaryPath?: string; humanActionEventsPath?: string; humanActionStatePath?: string; liveRoutingPolicyPath?: string; liveRoutingControllerPath?: string; liveRoutingHistoryPath?: string; liveRoutingController?: FrontierSwarmRoutingController;
 }
 

@@ -12,10 +12,6 @@ import type {
   FrontierSwarmQueueOverlay
 } from '@shapeshift-labs/frontier-swarm';
 import type {
-  FRONTIER_SWARM_GIT_APPLY_LEDGER_KIND,
-  FRONTIER_SWARM_GIT_APPLY_LEDGER_VERSION
-} from '@shapeshift-labs/frontier-swarm-git';
-import type {
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND,
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION,
   FRONTIER_SWARM_CODEX_CLEANUP_PLAN_KIND,
@@ -27,11 +23,12 @@ import type {
   FrontierCodexCollectQualitySignals,
   FrontierCodexCollectionNoiseBreakdown
 } from './types-collection-quality.js';
+import type { FrontierCodexApplyLedgerSummary } from './types-apply.js';
 import type { FrontierCodexCompactDashboard } from './types-evidence.js';
 import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
-import type { FrontierCodexApplySemanticLeaseEvidence } from './types-apply-lease.js';
 import type { FrontierCodexRunSyncOptions, FrontierCodexRunSyncResult } from './run-sync.js';
 
+export type * from './types-apply.js';
 export type * from './types-collection-quality.js';
 export type * from './types-collection-score.js';
 
@@ -50,6 +47,8 @@ export interface FrontierCodexCollectInput {
   checkStale?: boolean;
   semanticImportExpected?: boolean;
   branchPrefix?: string;
+  runEventsPath?: string | false;
+  runDashboardPath?: string | false;
   runSyncPeers?: readonly string[]; runSyncDirection?: FrontierCodexRunSyncOptions['direction']; runSyncEvidencePath?: string | false; runSyncHistoryPath?: string | false;
   artifactStoreMode?: FrontierCodexArtifactStoreMode;
   artifactStoreTimeoutMs?: number;
@@ -106,33 +105,6 @@ export type FrontierCodexCollectSummary = Record<FrontierCodexCollectBucket, num
   applyLedger?: FrontierCodexApplyLedgerSummary;
   landedHealth?: FrontierCodexLandedHealthSummary;
 };
-
-export interface FrontierCodexApplyLedgerLandedEntry {
-  jobId: string;
-  status: Extract<FrontierCodexApplyStatus, 'applied' | 'committed'>;
-  bundlePath: string;
-  patchPath?: string;
-  branchName?: string;
-  commit?: string;
-}
-
-export interface FrontierCodexApplyLedgerSummary {
-  path: string;
-  generatedAt?: number;
-  dryRun?: boolean;
-  total: number;
-  checked: number;
-  applied: number;
-  committed: number;
-  skipped: number;
-  failed: number;
-  landed: number;
-  appliedJobIds: string[];
-  committedJobIds: string[];
-  landedJobIds: string[];
-  failedJobIds: string[];
-  landedEntries: FrontierCodexApplyLedgerLandedEntry[];
-}
 
 export interface FrontierCodexLandedHealthSummary {
   successfulOutputCount: number;
@@ -258,61 +230,4 @@ export interface FrontierCodexCleanupPlan {
   candidates: Array<{ path: string; reason: string; bytes: number; active: boolean; failed: boolean; kind?: 'workspace' | 'artifact-source'; deleted?: boolean }>;
   blockedReasons: string[];
   summary: { candidateCount: number; deletedCount: number; reclaimableBytes: number; workspaceCount?: number; artifactSourceCount?: number };
-}
-
-export type FrontierCodexApplyStatus = 'checked' | 'applied' | 'committed' | 'skipped' | 'failed';
-
-export interface FrontierCodexApplyInput {
-  collection?: string;
-  run?: string;
-  outDir?: string;
-  cwd?: string;
-  bucket?: FrontierCodexCollectBucket | 'all';
-  jobIds?: readonly string[];
-  dryRun?: boolean;
-  allowDirty?: boolean;
-  commit?: boolean;
-  branchPrefix?: string;
-  limit?: number;
-}
-
-export interface FrontierCodexApplyEntry {
-  jobId: string;
-  status: FrontierCodexApplyStatus;
-  bundlePath: string;
-  patchPath?: string;
-  branchName?: string;
-  commit?: string;
-  dryRun: boolean;
-  commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
-  semanticLease?: FrontierCodexApplySemanticLeaseEvidence;
-  error?: string;
-}
-
-export interface FrontierCodexApplyResult {
-  kind: typeof FRONTIER_SWARM_GIT_APPLY_LEDGER_KIND;
-  version: typeof FRONTIER_SWARM_GIT_APPLY_LEDGER_VERSION;
-  ok: boolean;
-  cwd: string;
-  collectionDir: string;
-  outDir: string;
-  generatedAt: number;
-  dryRun: boolean;
-  entries: FrontierCodexApplyEntry[];
-  gateExecutionsPath?: string;
-  gateSummaryPath?: string;
-  runEventsPath?: string;
-  runDashboardPath?: string;
-  evidence?: {
-    gateExecutionCount: number;
-    runEventCount: number;
-  };
-  summary: {
-    total: number;
-    checked: number;
-    applied: number;
-    committed: number;
-    skipped: number;
-    failed: number;
-  };
 }

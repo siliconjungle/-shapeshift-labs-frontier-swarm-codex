@@ -37,32 +37,40 @@ import {
   writeCodexRunDashboard
 } from './run-events.js';
 import { syncCodexRunEventPeers } from './run-sync.js';
+import {
+  applyCodexDistributedRunDefaults,
+  distributedWorkerRunRecordsFromResults,
+  refreshCodexDistributedWorkerDashboards
+} from './distributed-run.js';
+import { writeCodexDistributedRunProof } from './distributed-run-proof.js';
 import type { FrontierCodexSwarmRunOptions, FrontierCodexSwarmRunResult } from './index.js';
 
 export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {
   const outDir = path.resolve(options.cwd ?? process.cwd(), options.outDir);
+  const distributed = applyCodexDistributedRunDefaults(plan, options, outDir);
+  const runInputOptions = distributed.options;
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'swarm-plan.json'), JSON.stringify(plan, null, 2) + '\n');
-  await runCodexDependencyHealthPreflight(plan, options, outDir);
-  const eventStream = options.eventStream ?? createSwarmEventStream({
+  await runCodexDependencyHealthPreflight(plan, runInputOptions, outDir);
+  const eventStream = runInputOptions.eventStream ?? createSwarmEventStream({
     runId: plan.runId,
     root: path.join(outDir, 'streams'),
     lanes: Array.from(new Set(plan.jobs.map((job) => job.lane)))
   });
   await initFileSwarmEventStream(eventStream);
   const runEventsPath = resolveCodexRunEventsPath({
-    cwd: options.cwd,
+    cwd: runInputOptions.cwd,
     outDir,
-    runEventsPath: options.runEventsPath
+    runEventsPath: runInputOptions.runEventsPath
   });
   await initCodexRunEvents(runEventsPath);
   const runDashboardPath = resolveCodexRunDashboardPath({
-    cwd: options.cwd,
+    cwd: runInputOptions.cwd,
     outDir,
-    runEventsPath: options.runEventsPath,
-    runDashboardPath: options.runDashboardPath
+    runEventsPath: runInputOptions.runEventsPath,
+    runDashboardPath: runInputOptions.runDashboardPath
   });
-  const pidManifestPath = path.resolve(options.cwd ?? process.cwd(), options.pidManifestPath ?? path.join(outDir, 'pids.json'));
+  const pidManifestPath = path.resolve(runInputOptions.cwd ?? process.cwd(), runInputOptions.pidManifestPath ?? path.join(outDir, 'pids.json'));
   await appendCodexPidManifest(pidManifestPath, { pid: process.pid, role: 'parent', runId: plan.runId, startedAt: Date.now() }, plan.runId);
   let run = createSwarmRun({ plan, status: 'running', startedAt: Date.now() });
   const startedEvent = { type: 'swarm.started', runId: run.id, at: run.startedAt, data: { jobCount: plan.jobs.length } };
@@ -74,11 +82,11 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   }));
   await appendFileSwarmEvent(eventStream, startedEvent);
   const runOptions = {
-    ...options,
+    ...runInputOptions,
     eventStream,
     pidManifestPath,
-    runEventsPath: runEventsPath ?? options.runEventsPath,
-    runDashboardPath: runDashboardPath ?? options.runDashboardPath
+    runEventsPath: runEventsPath ?? runInputOptions.runEventsPath,
+    runDashboardPath: runDashboardPath ?? runInputOptions.runDashboardPath
   };
   const queueRuntime = await createCodexQueueRuntime(plan, runOptions, outDir);
   const runtimeProjectionPaths = resolveCodexRuntimeProjectionPaths(runOptions, outDir);
@@ -98,11 +106,11 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
       result
     });
   };
-  const adaptiveObservations = await readAdaptiveFeedbackObservations(options);
+  const adaptiveObservations = await readAdaptiveFeedbackObservations(runInputOptions);
   const results = await runScheduledJobPool(plan, {
-    concurrency: Math.max(1, options.maxConcurrency ?? 1),
-    adaptive: options.adaptiveConcurrency,
-    resourceScheduling: options.resourceScheduling,
+    concurrency: Math.max(1, runInputOptions.maxConcurrency ?? 1),
+    adaptive: runInputOptions.adaptiveConcurrency,
+    resourceScheduling: runInputOptions.resourceScheduling,
     observations: adaptiveObservations,
     outDir,
     eventStream,
@@ -120,7 +128,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   for (const result of results) {
     const job = effectivePlan.jobs.find((entry) => entry.id === result.jobId);
     if (job) {
-      await options.onJobFinished?.({ job, result });
+      await runInputOptions.onJobFinished?.({ job, result });
       await appendFileSwarmEvent(eventStream, {
         type: 'agent.finished',
         runId: run.id,
@@ -139,18 +147,27 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   const proof = createSwarmProof(run, { validation: plan.validation });
   const ok = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
   await appendFileSwarmEvent(eventStream, { type: 'swarm.finished', runId: run.id, data: { ok, summary: run.summary } });
+  const distributedWorkerRecords = distributedWorkerRunRecordsFromResults(results);
+  const runSyncPeers = distributed.distributedRun.enabled
+    ? uniqueRunSyncPeers([
+      ...(runInputOptions.runSyncPeers ?? []),
+      ...distributed.distributedRun.peers,
+      ...distributedWorkerRecords.map((record) => record.runDir)
+    ])
+    : runInputOptions.runSyncPeers;
   const runSync = await syncCodexRunEventPeers({
-    cwd: options.cwd,
+    cwd: runInputOptions.cwd,
     run: outDir,
     outDir,
-    runEventsPath: runEventsPath ?? options.runEventsPath,
-    runDashboardPath: runDashboardPath ?? options.runDashboardPath,
-    peers: options.runSyncPeers,
-    direction: options.runSyncDirection,
-    runSyncEvidencePath: options.runSyncEvidencePath,
-    runSyncHistoryPath: options.runSyncHistoryPath,
+    runEventsPath: runEventsPath ?? runInputOptions.runEventsPath,
+    runDashboardPath: runDashboardPath ?? runInputOptions.runDashboardPath,
+    peers: runSyncPeers,
+    direction: distributed.distributedRun.enabled ? distributed.distributedRun.syncDirection : runInputOptions.runSyncDirection,
+    runSyncEvidencePath: runInputOptions.runSyncEvidencePath,
+    runSyncHistoryPath: runInputOptions.runSyncHistoryPath,
     runId: run.id
   });
+  if (distributed.distributedRun.enabled) await refreshCodexDistributedWorkerDashboards(distributedWorkerRecords);
   if (!runSync) {
     const runEvents = runEventsPath ? await readCodexRunEvents(runEventsPath) : [];
     await writeCodexRunDashboard(runDashboardPath, runEvents, { runId: run.id });
@@ -161,6 +178,26 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     plan,
     generatedAt: Date.now()
   });
+  const distributedProof = distributed.distributedRun.enabled && distributed.paths
+    ? await writeCodexDistributedRunProof({
+      plan: effectivePlan,
+      paths: distributed.paths,
+      options: distributed.distributedRun,
+      workerRunRecords: distributedWorkerRecords,
+      ...(runSync ? { runSync } : {}),
+      ...(queueSummary ? { queueSummary } : {}),
+      ...(runtimeProjectionFinal.modelTelemetrySummary ? { modelTelemetrySummary: runtimeProjectionFinal.modelTelemetrySummary } : {}),
+      ...(runtimeProjectionFinal.humanActionState ? { humanActionState: runtimeProjectionFinal.humanActionState } : {}),
+      liveRoutingPaths
+    })
+    : undefined;
+  const distributedRunResult = distributed.distributedRun.enabled && distributed.paths ? {
+    enabled: true as const,
+    options: distributed.distributedRun,
+    paths: distributed.paths,
+    workerRunRecords: distributedWorkerRecords,
+    ...(distributedProof ? { proof: distributedProof, proofPath: distributed.paths.proofPath } : {})
+  } : undefined;
   await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({
     ok,
     outDir,
@@ -172,6 +209,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     ...(runSync?.runSyncEvidencePath ? { runSyncEvidencePath: runSync.runSyncEvidencePath } : {}),
     ...(runSync?.runSyncHistoryPath ? { runSyncHistoryPath: runSync.runSyncHistoryPath } : {}),
     ...(runSync ? { runSync } : {}),
+    ...(distributedRunResult ? { distributedRun: distributedRunResult } : {}),
     ...(queueRuntime ? queueRuntime.paths : {}),
     ...(queueSummary ? { queueSummary } : {}),
     ...runtimeProjectionPaths,
@@ -179,7 +217,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     ...(latestLiveRoutingController ? { liveRoutingController: latestLiveRoutingController } : {}),
     ...runtimeProjectionFinal
   }, null, 2) + '\n');
-  await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
+  await writeSwarmCoordinatorSnapshot(runInputOptions.coordinatorSnapshotPath ? path.resolve(runInputOptions.cwd ?? process.cwd(), runInputOptions.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
     ok,
     outDir,
     plan: effectivePlan,
@@ -192,6 +230,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     ...(runSync?.runSyncEvidencePath ? { runSyncEvidencePath: runSync.runSyncEvidencePath } : {}),
     ...(runSync?.runSyncHistoryPath ? { runSyncHistoryPath: runSync.runSyncHistoryPath } : {}),
     ...(runSync ? { runSync } : {}),
+    ...(distributedRunResult ? { distributedRun: distributedRunResult } : {}),
     ...(queueRuntime ? queueRuntime.paths : {}),
     ...runtimeProjectionPaths,
     ...liveRoutingPaths
@@ -207,11 +246,16 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     ...(runSync?.runSyncEvidencePath ? { runSyncEvidencePath: runSync.runSyncEvidencePath } : {}),
     ...(runSync?.runSyncHistoryPath ? { runSyncHistoryPath: runSync.runSyncHistoryPath } : {}),
     ...(runSync ? { runSync } : {}),
+    ...(distributedRunResult ? { distributedRun: distributedRunResult } : {}),
     ...(queueRuntime ? queueRuntime.paths : {}),
     ...runtimeProjectionPaths,
     ...liveRoutingPaths,
     ...(latestLiveRoutingController ? { liveRoutingController: latestLiveRoutingController } : {})
   };
-  await options.onSwarmFinished?.({ result });
+  await runInputOptions.onSwarmFinished?.({ result });
   return result;
+}
+
+function uniqueRunSyncPeers(peers: readonly string[]): string[] {
+  return Array.from(new Set(peers.map((peer) => peer.trim()).filter(Boolean)));
 }

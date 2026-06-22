@@ -116,6 +116,33 @@ export type {
   FrontierCodexRunSyncSummary
 } from './run-sync.js';
 export {
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_RUN_KIND,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_RUN_PROOF_FILE,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_RUN_ROOT,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_RUN_VERSION,
+  applyCodexDistributedRunDefaults,
+  appendCodexDistributedWorkerRunEvents,
+  createCodexDistributedWorkerRunRecord,
+  distributedWorkerRunRecordsFromResults,
+  normalizeCodexDistributedRunOptions,
+  refreshCodexDistributedWorkerDashboards,
+  resolveCodexDistributedRunArtifactPaths,
+  resolveCodexDistributedRunDir
+} from './distributed-run.js';
+export { writeCodexDistributedRunProof } from './distributed-run-proof.js';
+export type {
+  FrontierCodexDistributedRunArtifactPaths,
+  FrontierCodexDistributedRunOptions,
+  FrontierCodexDistributedRunProof,
+  FrontierCodexDistributedRunProofWorker,
+  FrontierCodexDistributedRunResolvedOptions,
+  FrontierCodexDistributedRunResolvedTransport,
+  FrontierCodexDistributedRunResult,
+  FrontierCodexDistributedRunTransportKind,
+  FrontierCodexDistributedRunTransportOptions,
+  FrontierCodexDistributedWorkerRunRecord
+} from './types-distributed-run.js';
+export {
   FRONTIER_SWARM_CODEX_QUEUE_EVENTS_FILE,
   FRONTIER_SWARM_CODEX_QUEUE_RUNTIME_KIND,
   FRONTIER_SWARM_CODEX_QUEUE_RUNTIME_VERSION,

@@ -14,6 +14,11 @@ import type {
   FRONTIER_SWARM_CODEX_CONTINUATION_VERSION
 } from './constants.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
+import type {
+  FrontierCodexDistributedRunOptions,
+  FrontierCodexDistributedRunResolvedOptions,
+  FrontierCodexDistributedRunArtifactPaths
+} from './types-distributed-run.js';
 
 export interface FrontierCodexContinuationInput {
   run?: string;
@@ -24,10 +29,13 @@ export interface FrontierCodexContinuationInput {
   checkStale?: boolean;
   semanticImportExpected?: boolean;
   branchPrefix?: string;
+  runEventsPath?: string | false;
+  runDashboardPath?: string | false;
   runSyncPeers?: readonly string[];
   runSyncDirection?: FrontierRunSyncDirection;
   runSyncEvidencePath?: string | false;
   runSyncHistoryPath?: string | false;
+  distributedRun?: boolean | FrontierCodexDistributedRunOptions;
   backlog?: FrontierSwarmBacklog | FrontierSwarmBacklogInput | unknown;
   backlogPath?: string;
   routingPolicy?: FrontierSwarmModelRoutingPolicyInput | FrontierSwarmModelRoutingPolicy | unknown;
@@ -60,6 +68,13 @@ export interface FrontierCodexContinuationResult {
   backlogPath: string;
   routingPolicyPath: string;
   humanActionStatePath: string;
+  runEventsPath?: string;
+  runDashboardPath?: string;
+  distributedRun?: {
+    enabled: true;
+    options: FrontierCodexDistributedRunResolvedOptions;
+    paths: FrontierCodexDistributedRunArtifactPaths;
+  };
   nextTasksPath?: string;
   nextPlanPath?: string;
   childBacklogNames: string[];
@@ -164,6 +179,9 @@ export interface FrontierCodexContinuationResult {
       backlogPath: string;
       routingPolicyPath: string;
       humanActionStatePath: string;
+      runEventsPath?: string;
+      runDashboardPath?: string;
+      distributedRunDir?: string;
       nextTasksPath?: string;
       nextPlanPath?: string;
       childBacklogPaths: string[];

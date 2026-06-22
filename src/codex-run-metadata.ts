@@ -24,6 +24,7 @@ export interface CodexRunMetadataInput {
   semanticImportSummary?: unknown;
   verificationGateEvidence?: unknown;
   codexHandoffArtifacts?: unknown;
+  distributedRun?: unknown;
 }
 
 export function createCodexRunMetadata(input: CodexRunMetadataInput): Record<string, unknown> {
@@ -53,6 +54,7 @@ export function createCodexRunMetadata(input: CodexRunMetadataInput): Record<str
     } : {}),
     ...(input.semanticImportSummary ? { semanticImport: input.semanticImportSummary } : {}),
     ...(input.verificationGateEvidence ? { verificationGateEvidence: input.verificationGateEvidence } : {}),
-    ...(input.codexHandoffArtifacts ? { codexHandoffArtifacts: input.codexHandoffArtifacts } : {})
+    ...(input.codexHandoffArtifacts ? { codexHandoffArtifacts: input.codexHandoffArtifacts } : {}),
+    ...(input.distributedRun ? { distributedRun: input.distributedRun } : {})
   };
 }

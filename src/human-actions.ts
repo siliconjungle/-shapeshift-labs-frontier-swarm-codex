@@ -64,11 +64,10 @@ export async function readCodexHumanActionAnswerArtifacts(input: {
 }): Promise<FrontierCodexHumanActionAnswerReadResult> {
   const answers: Record<string, unknown>[] = [];
   const paths: string[] = [];
-  answers.push(...normalizeHumanActionAnswers(input.answers, { generatedAt: input.generatedAt }));
   const candidates = uniqueStrings([
-    input.answerPath,
+    ...(input.roots ?? []).flatMap((root) => root ? HUMAN_ANSWER_FILES.map((name) => path.join(root, name)) : []),
     ...(input.answerPaths ?? []),
-    ...(input.roots ?? []).flatMap((root) => root ? HUMAN_ANSWER_FILES.map((name) => path.join(root, name)) : [])
+    input.answerPath
   ].filter((entry): entry is string => !!entry));
   for (const candidate of candidates) {
     const file = path.resolve(input.cwd, candidate);
@@ -77,6 +76,7 @@ export async function readCodexHumanActionAnswerArtifacts(input: {
     paths.push(file);
     answers.push(...normalizeHumanActionAnswers(parsed, { generatedAt: input.generatedAt, file }));
   }
+  answers.push(...normalizeHumanActionAnswers(input.answers, { generatedAt: input.generatedAt }));
   return { paths: uniqueStrings(paths), answers };
 }
 

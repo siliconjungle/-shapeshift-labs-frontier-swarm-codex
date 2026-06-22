@@ -172,12 +172,35 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(dashboard.metadata.runSource.runEventsPath, runEventsPath);
   assert.strictEqual(dashboard.metadata.runSource.runDashboardPath, runDashboardPath);
   assert.strictEqual(verificationGateEvidence.kind, 'frontier-swarm-codex.verification-gate-evidence');
-  assert.strictEqual(verificationGateEvidence.gateExecutionCount, 1);
-  assert.strictEqual(verificationGateEvidence.gateExecutionsPath, gateExecutionsPath);
-  assert.strictEqual(verificationGateEvidence.gateSummaryPath, gateSummaryPath);
-  assert.ok(result.run.results[0].evidencePaths.includes(gateExecutionsPath));
-  assert.ok(result.run.results[0].evidencePaths.includes(gateSummaryPath));
-}
+	  assert.strictEqual(verificationGateEvidence.gateExecutionCount, 1);
+	  assert.strictEqual(verificationGateEvidence.gateExecutionsPath, gateExecutionsPath);
+	  assert.strictEqual(verificationGateEvidence.gateSummaryPath, gateSummaryPath);
+	  assert.ok(result.run.results[0].evidencePaths.includes(gateExecutionsPath));
+	  assert.ok(result.run.results[0].evidencePaths.includes(gateSummaryPath));
+
+  await fs.rm(result.queueEventsPath, { force: true });
+  let staleManifestExecutorCalled = false;
+  const replay = await runCodexSwarm(plan, {
+    outDir,
+    cwd: tmp,
+    maxConcurrency: 1,
+    dependencyHealth: false,
+    executor: async () => {
+      staleManifestExecutorCalled = true;
+      throw new Error('stale manifest resurrected a terminal queue job');
+    }
+  });
+  assert.strictEqual(replay.ok, true);
+  assert.strictEqual(staleManifestExecutorCalled, false);
+  assert.strictEqual(replay.run.results.length, 1);
+  assert.strictEqual(replay.run.results[0].jobId, jobId);
+  assert.strictEqual(replay.run.results[0].metadata.queueOutcome, 'completed');
+  assert.strictEqual(await exists(replay.queueEventsPath), true);
+  const replayQueueSummary = JSON.parse(await fs.readFile(replay.queueSummaryPath, 'utf8'));
+  assert.strictEqual(replayQueueSummary.terminalOutcomeCount, 1);
+  assert.deepStrictEqual(replayQueueSummary.terminalSwarmJobIds, [jobId]);
+  assert.ok(replayQueueSummary.eventCount >= 2);
+	}
 
 async function exists(file) {
   try {

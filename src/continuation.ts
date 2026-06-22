@@ -20,9 +20,11 @@ import { readContinuationChildBacklogs, resolveContinuationChildBacklogNames } f
 import { createContinuationFeedback, createContinuationRoutingCostSummary, createContinuationTournamentSummary } from './continuation-feedback.js';
 import { createContinuationHumanActionState } from './continuation-human-actions.js';
 import { summarizeNextJobRouting } from './continuation-job-routing-summary.js';
+import { appendContinuationRunEvents, resolvePriorDistributedRunPaths } from './continuation-run-events.js';
 import { writeContinuationTaskSource } from './continuation-task-source.js';
 import { projectContinuationTerminalOutcomes } from './continuation-terminal-outcomes.js';
 import { coerceCodexSwarmTasksInput, createCodexSwarmPlan } from './index.js';
+import { normalizeCodexDistributedRunOptions } from './distributed-run.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
 import type { FrontierCodexContinuationInput, FrontierCodexContinuationResult } from './types-continuation.js';
 
@@ -130,6 +132,25 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
   await fs.writeFile(routingPolicyPath, JSON.stringify(nextRoutingPolicy, null, 2) + '\n');
   await fs.writeFile(humanActionState.statePath, JSON.stringify(humanActionState, null, 2) + '\n');
   if (nextPlan && nextPlanPath) await fs.writeFile(nextPlanPath, JSON.stringify(nextPlan, null, 2) + '\n');
+  const continuationRun = await appendContinuationRunEvents({
+    input,
+    cwd,
+    outDir,
+    collection,
+    generatedAt,
+    humanActions: humanActionState.actions,
+    answeredActions: humanActionState.answeredActions,
+    nextJobCount: nextJobs.length,
+    nextJobIds: nextJobs.map((job) => job.id),
+    nextJobTaskIds: nextJobs.map((job) => job.taskId),
+    artifactPaths: {
+      backlogPath,
+      routingPolicyPath,
+      humanActionStatePath: humanActionState.statePath,
+      ...(nextTasksPath ? { nextTasksPath } : {}),
+      ...(nextPlanPath ? { nextPlanPath } : {})
+    }
+  });
   const result: FrontierCodexContinuationResult = {
     kind: FRONTIER_SWARM_CODEX_CONTINUATION_KIND,
     version: FRONTIER_SWARM_CODEX_CONTINUATION_VERSION,
@@ -142,6 +163,9 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     backlogPath,
     routingPolicyPath,
     humanActionStatePath: humanActionState.statePath,
+    ...(continuationRun?.runEventsPath ? { runEventsPath: continuationRun.runEventsPath } : {}),
+    ...(continuationRun?.runDashboardPath ? { runDashboardPath: continuationRun.runDashboardPath } : {}),
+    ...(continuationRun?.distributedRun ? { distributedRun: continuationRun.distributedRun } : {}),
     ...(nextTasksPath ? { nextTasksPath } : {}),
     ...(nextPlanPath ? { nextPlanPath } : {}),
     childBacklogNames,
@@ -203,6 +227,9 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
         backlogPath,
         routingPolicyPath,
         humanActionStatePath: humanActionState.statePath,
+        ...(continuationRun?.runEventsPath ? { runEventsPath: continuationRun.runEventsPath } : {}),
+        ...(continuationRun?.runDashboardPath ? { runDashboardPath: continuationRun.runDashboardPath } : {}),
+        ...(continuationRun?.distributedRun ? { distributedRunDir: continuationRun.distributedRun.paths.runDir } : {}),
         ...(nextTasksPath ? { nextTasksPath } : {}),
         ...(nextPlanPath ? { nextPlanPath } : {}),
         childBacklogPaths
@@ -219,6 +246,8 @@ async function resolveContinuationCollection(
 ): Promise<FrontierCodexCollectResult | undefined> {
   if (input.collection) return readContinuationCollection(input.collection, cwd);
   if (!input.run) return undefined;
+  const distributedRun = normalizeCodexDistributedRunOptions(input.distributedRun);
+  const priorDistributedPaths = await resolvePriorDistributedRunPaths(input, cwd, distributedRun);
   return collectCodexSwarmRun({
     run: input.run,
     cwd,
@@ -226,10 +255,14 @@ async function resolveContinuationCollection(
     checkStale: input.checkStale,
     semanticImportExpected: input.semanticImportExpected,
     branchPrefix: input.branchPrefix,
-    runSyncPeers: input.runSyncPeers,
-    runSyncDirection: input.runSyncDirection,
-    runSyncEvidencePath: input.runSyncEvidencePath,
-    runSyncHistoryPath: input.runSyncHistoryPath
+    runEventsPath: input.runEventsPath !== undefined ? input.runEventsPath : priorDistributedPaths?.runEventsPath,
+    runDashboardPath: input.runDashboardPath !== undefined ? input.runDashboardPath : priorDistributedPaths?.runDashboardPath,
+    runSyncPeers: distributedRun.enabled
+      ? uniqueStrings([...(input.runSyncPeers ?? []), ...distributedRun.peers])
+      : input.runSyncPeers,
+    runSyncDirection: distributedRun.enabled ? distributedRun.syncDirection : input.runSyncDirection,
+    runSyncEvidencePath: input.runSyncEvidencePath !== undefined ? input.runSyncEvidencePath : priorDistributedPaths?.runSyncEvidencePath,
+    runSyncHistoryPath: input.runSyncHistoryPath !== undefined ? input.runSyncHistoryPath : priorDistributedPaths?.runSyncHistoryPath
   });
 }
 
@@ -265,15 +298,9 @@ function countByString(values: readonly string[]): Record<string, number> {
   return out;
 }
 
-function sanitizeContinuationBacklogForPlan(
-  backlog: FrontierSwarmBacklog,
-  explicitTasks: readonly FrontierSwarmTaskInput[]
-): FrontierSwarmBacklog {
+function sanitizeContinuationBacklogForPlan(backlog: FrontierSwarmBacklog, explicitTasks: readonly FrontierSwarmTaskInput[]): FrontierSwarmBacklog {
   const entryTaskIds = new Map(backlog.entries.map((entry) => [entry.id, entry.taskId ?? entry.id]));
-  const plannedTaskIds = new Set([
-    ...explicitTasks.map((task) => task.id),
-    ...entryTaskIds.values()
-  ]);
+  const plannedTaskIds = new Set([...explicitTasks.map((task) => task.id), ...entryTaskIds.values()]);
   const normalizeTaskId = (value: string) => entryTaskIds.get(value) ?? value;
   return {
     ...backlog,

@@ -6,96 +6,10 @@ import {
   path,
   scoreCodexSwarmPatches
 } from './context.mjs';
+import { testStrictAdmissionRejectsMissingQueueOutcome } from './apply-admission.mjs';
 import { assertApplyEvidence } from './apply-evidence.mjs';
+import { readySemanticImport } from './apply-score-fixtures.mjs';
 import { testWeakSemanticAdmissionScore } from './apply-score-semantic.mjs';
-
-const readySemanticImport = {
-  total: 1,
-  selected: 1,
-  eligible: 1,
-  omitted: 0,
-  imported: 1,
-  skipped: 0,
-  errors: 0,
-  sourceMapCount: 1,
-  sourceMapMappingCount: 1,
-  lossCount: 0,
-  lossesBySeverity: {},
-  semanticIndex: { documents: 1, symbols: 2, occurrences: 2, relations: 1, facts: 0 },
-  dependencies: { total: 1, calls: 1, uses: 0, references: 0, imports: 0, depends: 0, extends: 0, implements: 0, includes: 0, requires: 0, byPredicate: { calls: 1 }, predicates: ['calls'], ids: ['rel_action_calls_helper'], sourceSymbolIds: ['symbol:action'], targetSymbolIds: ['symbol:helper'] },
-  dependencyEdgeHints: ['re-export:./public.ts'],
-  semanticSidecars: { total: 1, symbols: 1, ownershipRegions: 1, patchHints: 1, empty: 0 },
-  universalAstLayers: {
-    total: 2,
-    names: ['semanticSymbols', 'projectionEvidence'],
-    ids: ['layer:semanticSymbols', 'layer:projectionEvidence'],
-    byName: { semanticSymbols: 1, projectionEvidence: 1 },
-    empty: false
-  },
-  proofSpec: {
-    total: 2,
-    ids: ['proof:apply', 'contract:apply', 'obligation:apply'],
-    contracts: 1,
-    refinements: 0,
-    invariants: 0,
-    termination: 0,
-    temporal: 0,
-    obligations: 1,
-    artifacts: 0,
-    assumptions: 0,
-    evidence: 1,
-    discharged: 1,
-    failed: 0,
-    open: 0,
-    unknown: 0,
-    stale: 0,
-    assumed: 0,
-    contractKinds: ['postcondition'],
-    artifactKinds: [],
-    byStatus: { discharged: 1 },
-    byContractKind: { postcondition: 1 },
-    byArtifactKind: {},
-    empty: false
-  },
-  paradigmSemantics: {
-    total: 3,
-    ids: ['paradigm:apply', 'logic:apply', 'lower:apply'],
-    groups: ['logicPrograms', 'stackEffects', 'loweringRecords'],
-    kinds: ['hornClause', 'concatenativeStackEffect', 'frontierToTarget'],
-    evidence: 1,
-    bindingScopes: 0,
-    bindings: 0,
-    patterns: 0,
-    typeConstraints: 0,
-    evaluationModels: 0,
-    memoryLocations: 0,
-    effectRegions: 0,
-    controlRegions: 0,
-    logicPrograms: 1,
-    actorSystems: 0,
-    stackEffects: 1,
-    arrayShapes: 0,
-    numericKernels: 0,
-    dataflowNetworks: 0,
-    clockModels: 0,
-    objectModels: 0,
-    macroExpansions: 0,
-    reflectionBoundaries: 0,
-    loweringRecords: 1,
-    byGroup: { logicPrograms: 1, stackEffects: 1, loweringRecords: 1 },
-    byKind: { hornClause: 1, concatenativeStackEffect: 1, frontierToTarget: 1 },
-    hasRuntimeSemantics: false,
-    hasLogicSemantics: true,
-    hasStackSemantics: true,
-    hasArraySemantics: false,
-    hasMacroOrReflection: false,
-    hasLowering: true,
-    empty: false
-  },
-  sourceProjections: { total: 1, preserved: 1, stubs: 0, ready: 1, needsReview: 0, blocked: 0 },
-  nativeCompiles: { total: 1, emitted: 1, preserved: 1, targetStubs: 0, ready: 1, needsReview: 0, blocked: 0 },
-  readiness: { ready: 1 }
-};
 
 export async function testApplyAndScore({ tmp }, mergeBundle) {
   const applyRepo = path.join(tmp, 'apply-repo');
@@ -134,14 +48,21 @@ export async function testApplyAndScore({ tmp }, mergeBundle) {
     metadata: { ...mergeBundle.metadata, semanticImport: readySemanticImport },
     reasons: []
   }, null, 2) + '\n');
+  await writeReadyQueueOutcomeModel(path.join(tmp, 'ready-collection'), readyDir);
 
   const applyDryRun = await applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: applyRepo });
   assert.strictEqual(applyDryRun.ok, true);
   assert.strictEqual(applyDryRun.dryRun, true);
   assert.strictEqual(applyDryRun.summary.checked, 1);
   assert.strictEqual(applyDryRun.entries[0].dryRun, true);
+  assert.strictEqual(applyDryRun.admission.mode, 'strict');
+  assert.strictEqual(applyDryRun.admission.accepted, 1);
+  assert.strictEqual(applyDryRun.entries[0].admission.status, 'accepted');
+  assert.ok(applyDryRun.entries[0].semanticLease.granted);
+  assert.strictEqual(applyDryRun.entries[0].semanticLease.fence.ok, true);
   await assertApplyEvidence(applyDryRun, { gateKinds: ['git-apply-check'], decisions: ['record-only'] });
   assert.strictEqual(await fs.readFile(path.join(applyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
+  await testStrictAdmissionRejectsMissingQueueOutcome(applyRepo, tmp, readyDir);
   await testScore(applyRepo, tmp);
   await testScoreIndexOnlyCollection(applyRepo, tmp, readyDir);
   await testScoreDedupesCollectedAndIndexedBundle(applyRepo, tmp, readyDir);
@@ -153,6 +74,63 @@ export async function testApplyAndScore({ tmp }, mergeBundle) {
   );
   await testCommitApply(tmp);
   await testScoreCalibration(applyRepo, tmp);
+}
+
+async function writeReadyQueueOutcomeModel(collectionDir, readyDir) {
+  const queueOutcomeModel = {
+    kind: 'frontier.swarm.queue-outcome-model',
+    version: 1,
+    id: 'queue-outcome-model:apply-test',
+    generatedAt: Date.now(),
+    decisions: [{
+      id: 'queue-decision:apply-job-ready',
+      subjectId: 'apply-task',
+      subjectAliases: ['apply-job', 'job:apply-job', 'apply-task', 'task:apply-task', 'queue:apply-task'],
+      jobId: 'apply-job',
+      taskId: 'apply-task',
+      queueItemIds: ['apply-task'],
+      category: 'continuation',
+      outcome: 'ready',
+      decision: 'ready',
+      terminal: false,
+      closesSubject: false,
+      coordinatorReview: false,
+      humanBlocked: false,
+      staleOrRerun: false,
+      conflict: false,
+      reviewDebt: false,
+      reasons: ['ready-to-apply'],
+      conflictingJobIds: [],
+      generatedAt: Date.now()
+    }],
+    subjects: [],
+    latestDecisions: [],
+    supersededDecisions: [],
+    visibleReviewDebt: [],
+    visibleHumanBlockers: [],
+    visibleReruns: [],
+    visibleConflicts: [],
+    bySubjectId: {},
+    subjectIdByAlias: {},
+    latestDecisionIdByAlias: {}
+  };
+  await fs.writeFile(path.join(collectionDir, 'queue-outcome-model.json'), JSON.stringify(queueOutcomeModel, null, 2) + '\n');
+  await fs.writeFile(path.join(collectionDir, 'collection.json'), JSON.stringify({
+    buckets: {
+      'ready-to-apply': [{
+        bucket: 'ready-to-apply',
+        jobId: 'apply-job',
+        mergePath: path.join(readyDir, 'merge.json'),
+        outputDir: readyDir
+      }],
+      'research-complete': [],
+      'needs-human-port': [],
+      'rerun-work': [],
+      'failed-evidence': [],
+      'stale-against-head': []
+    },
+    queueOutcomeModel
+  }, null, 2) + '\n');
 }
 
 async function testScoreIndexOnlyCollection(applyRepo, tmp, readyDir) {

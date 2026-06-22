@@ -67,6 +67,20 @@ export async function testRunSync({ tmp }) {
   assert.strictEqual(coordinatorDashboard.metadata.artifactPaths.runSyncEvidence, result.runSyncEvidencePath);
   assert.strictEqual(coordinatorDashboard.metadata.artifactPaths.runSyncHistory, result.runSyncHistoryPath);
 
+  const noopSync = await syncCodexRunEventPeers({
+    cwd: tmp,
+    runEventsPath: result.runEventsPath,
+    peers: [peerDir],
+    direction: 'bidirectional',
+    runSyncEvidencePath: path.join(outDir, 'run-sync-noop-evidence.json'),
+    runSyncHistoryPath: path.join(outDir, 'run-sync-noop-history.jsonl')
+  });
+  assert.ok(noopSync);
+  assert.strictEqual(noopSync.ok, true);
+  assert.strictEqual(noopSync.summary.acceptedEventCount, 0);
+  assert.strictEqual(noopSync.summary.hasWork, false);
+  assert.strictEqual(noopSync.summary.conflictCount, 0);
+
   const apiPeerDir = path.join(tmp, 'run-sync-api-peer');
   await fs.mkdir(apiPeerDir, { recursive: true });
   const apiPeerEvent = createRunEvent('evt-api-peer-note', plan.runId, 'api-peer-note', 'api-peer-runner');
@@ -109,6 +123,25 @@ export async function testRunSync({ tmp }) {
   assert.strictEqual(cliSync.runSyncEvidencePath, cliEvidencePath);
   assert.strictEqual(cliSync.summary.pulledEventCount, 1);
   assert.strictEqual(cliSync.summary.pushedEventCount, 0);
+
+  const conflictLocalDir = path.join(tmp, 'run-sync-conflict-local');
+  const conflictPeerDir = path.join(tmp, 'run-sync-conflict-peer');
+  await fs.mkdir(conflictLocalDir, { recursive: true });
+  await fs.mkdir(conflictPeerDir, { recursive: true });
+  await fs.writeFile(path.join(conflictLocalDir, 'run-events.jsonl'), JSON.stringify(createRunEvent('evt-conflict-local', plan.runId, 'local-conflict', 'conflict-actor')) + '\n');
+  await fs.writeFile(path.join(conflictPeerDir, 'run-events.jsonl'), JSON.stringify(createRunEvent('evt-conflict-peer', plan.runId, 'peer-conflict', 'conflict-actor')) + '\n');
+  const conflictSync = await syncCodexRunEventPeers({
+    cwd: tmp,
+    run: conflictLocalDir,
+    peers: [conflictPeerDir],
+    direction: 'bidirectional',
+    runSyncEvidencePath: path.join(conflictLocalDir, 'run-sync-conflict-evidence.json'),
+    runSyncHistoryPath: path.join(conflictLocalDir, 'run-sync-conflict-history.jsonl')
+  });
+  assert.ok(conflictSync);
+  assert.strictEqual(conflictSync.ok, false);
+  assert.ok(conflictSync.summary.conflictCount >= 1);
+  assert.ok(conflictSync.exchanges[0].conflicts.some((conflict) => String(conflict.kind).includes('actor')));
 }
 
 function createRunEvent(id, runId, noteId, actorId) {
