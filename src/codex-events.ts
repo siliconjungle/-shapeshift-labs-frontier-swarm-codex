@@ -12,7 +12,6 @@ import {
 } from './constants.js';
 import { writeJsonAtomic } from './common.js';
 import { readCodexPidProcesses } from './collect.js';
-import { createCodexLiveRunGraphDashboardMetadata } from './run-graph-live.js';
 import { createCodexRunEventsDashboardMetadata } from './run-events.js';
 import type {
   FrontierCodexPidEntry,
@@ -52,16 +51,12 @@ export async function writeSwarmCoordinatorSnapshot(
     pidManifestPath?: string;
     runEventsPath?: string;
     runDashboardPath?: string;
-    liveRunGraphEventsPath?: string;
   }
 ): Promise<void> {
   const processes = input.pidManifestPath ? await readCodexPidProcesses(input.pidManifestPath).catch(() => []) : [];
   const runEventsMetadata = createCodexRunEventsDashboardMetadata({
     runEventsPath: input.runEventsPath,
     runDashboardPath: input.runDashboardPath
-  });
-  const liveRunGraphMetadata = createCodexLiveRunGraphDashboardMetadata({
-    liveRunGraphEventsPath: input.liveRunGraphEventsPath
   });
   const dashboard = createSwarmCoordinatorDashboard({
     plan: input.plan,
@@ -74,13 +69,11 @@ export async function writeSwarmCoordinatorSnapshot(
       pidManifestPath: input.pidManifestPath ?? null,
       runEventsPath: input.runEventsPath ?? null,
       runDashboardPath: input.runDashboardPath ?? null,
-      liveRunGraphEventsPath: input.liveRunGraphEventsPath ?? null,
       artifactPaths: {
         coordinatorDashboard: file,
-        ...liveRunGraphMetadata.artifactPaths,
         ...runEventsMetadata.artifactPaths
       },
-      runSource: input.runEventsPath ? runEventsMetadata.runSource : liveRunGraphMetadata.runSource,
+      runSource: runEventsMetadata.runSource,
       proof: input.proof
     }
   });

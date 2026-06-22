@@ -17,7 +17,6 @@ import { createCodexRunMetadata } from './codex-run-metadata.js';
 import { createCodexWorkspacePlan, createSwarmWorkspaceProof, prepareCodexWorkspace } from './codex-workspace.js';
 import { readCodexHumanActionArtifacts } from './human-actions.js';
 import { applyWorkspacePreExecWriteFence, collectChangedPaths, emptyChangedPathCollection, filterWorkspaceChangedPaths, mergeWorkspaceChangedPathCollections, quarantineWorkspacePatchCandidatePaths, restoreWorkspaceChangedPaths, restoreWorkspacePreExecWriteFence, runVerification, shouldSnapshotWorkspaceChanges, snapshotWorkspaceFiles, writeCodexPatchFile } from './codex-workspace-changes.js';
-import { appendCodexLiveRunGraphEvent, createCodexLiveJobStartedEvent, resolveCodexLiveRunGraphEventsPath } from './run-graph-live.js';
 import { appendCodexJobResultTimelineEvents } from './codex-run-timeline.js';
 import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions } from './index.js';
 
@@ -66,25 +65,7 @@ export async function runCodexJob(
   await fs.writeFile(paths.contextBudgetPath, JSON.stringify(contextBudget, null, 2) + '\n');
   const args = buildCodexArgs(job, { ...options, workspacePath: workspace, paths });
   const startedAt = Date.now();
-  const liveRunGraphEventsPath = resolveCodexLiveRunGraphEventsPath({
-    cwd: options.cwd,
-    outDir,
-    liveRunGraphEventsPath: options.liveRunGraphEventsPath
-  });
   await options.onJobStarted?.({ ...hookInput, prompt, args });
-  await appendCodexLiveRunGraphEvent(liveRunGraphEventsPath, createCodexLiveJobStartedEvent({
-    runId: options.eventStream?.runId,
-    outDir,
-    job,
-    generatedAt: startedAt,
-    data: {
-      workspace: workspacePlan.path,
-      capabilities: job.capabilities,
-      resourceRequirements: job.resourceRequirements,
-      resourceAllocation,
-      contextBudget
-    }
-  }));
   await appendFileSwarmEvent(options.eventStream, {
     type: 'agent.scheduled',
     jobId: job.id,

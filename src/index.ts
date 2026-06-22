@@ -78,7 +78,6 @@ export {
   appendCodexRunEvents,
   createCodexRunEventsDashboardMetadata,
   createCodexRunProjection,
-  importCodexLegacyRunEvents,
   initCodexRunEvents,
   readCodexRunEvents,
   resolveCodexRunDashboardPath,
@@ -87,8 +86,6 @@ export {
   writeCodexRunEvents
 } from './run-events.js';
 export type {
-  FrontierCodexLegacyRunEventImportOptions,
-  FrontierCodexLegacyRunEventImportResult,
   FrontierCodexRunDashboardPathOptions,
   FrontierCodexRunDashboardWriteOptions,
   FrontierCodexRunEventPathOptions

@@ -43,7 +43,7 @@ import { testDashboardUi } from './smoke/dashboard-ui.mjs';
 import { testHumanActionArtifacts } from './smoke/human-actions.mjs';
 import { testHumanActionAnswers } from './smoke/human-action-answers.mjs';
 import { testModelPricing } from './smoke/model-pricing.mjs';
-import { testLiveRunGraphEvents } from './smoke/live-run-graph-events.mjs';
+import { testRunEventsCurrentFormat } from './smoke/run-events-current-format.mjs';
 import './smoke/collection-noise.mjs';
 import './smoke/workspace-lockdown.mjs';
 
@@ -52,7 +52,7 @@ const context = await createSmokeContext();
 testRunGraphTournamentRsiLinks();
 await testPlanningAndLinks(context);
 await testResourceAwareScheduling(context);
-await testLiveRunGraphEvents(context);
+await testRunEventsCurrentFormat(context);
 await testCompactLogTruncation(context);
 await testContextBudget(context);
 testModelPricing();

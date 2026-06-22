@@ -104,6 +104,14 @@
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-event-log"
   },
   {
+    "id": "frontier-run",
+    "name": "@shapeshift-labs/frontier-run",
+    "role": "Append-only distributed run graphs, causal event DAGs, evidence nodes, lanes, leases, refs, segments, dashboard projections, and admission decision records for Frontier agent work.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-run",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-run",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-run"
+  },
+  {
     "id": "frontier-inspect",
     "name": "@shapeshift-labs/frontier-inspect",
     "role": "Cross-package inspection/evidence bundles, registry graph snapshots, feature/resource impact reports, timeline/event normalization, redaction, JSONL import/export, and AI-readable app feature maps.",

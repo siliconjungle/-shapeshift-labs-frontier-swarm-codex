@@ -10,7 +10,6 @@ import {
   createSwarmWorkspaceManifest,
   discoverCodexHandoffArtifacts,
   estimateCodexModelCost,
-  importCodexLegacyRunEvents,
   continueCodexSwarmLoop,
   resolveCodexRunEventsPath,
   runCodexSwarm,
@@ -23,7 +22,6 @@ import {
   type FrontierCodexSwarmCliInput,
   type FrontierCodexCollectResult,
   type FrontierCodexApplyResult,
-  type FrontierCodexLegacyRunEventImportResult,
   type FrontierCodexJsTsSafeMergeApplySummary,
   type FrontierCodexSemanticEditAdmissionDecision,
   type FrontierCodexSemanticEditReplaySummary,
@@ -122,7 +120,6 @@ const collectPromise: Promise<FrontierCodexCollectResult> = collectCodexSwarmRun
 const applyPromise: Promise<FrontierCodexApplyResult> = applyCodexSwarmCollection({ collection: '.', dryRun: true });
 const scorePromise: Promise<FrontierCodexPatchScoreResult> = scoreCodexSwarmPatches({ collection: '.', focusedCommands: ['npm test'] });
 const handoffArtifactsPromise: Promise<FrontierCodexHandoffArtifact[]> = discoverCodexHandoffArtifacts({ root: '.' });
-const runEventImportPromise: Promise<FrontierCodexLegacyRunEventImportResult> = importCodexLegacyRunEvents({ run: '.' });
 const continuationPromise: Promise<FrontierCodexContinuationResult> = continueCodexSwarmLoop({
   collection: '.',
   backlog: { id: 'runtime-backlog', entries: [] },
