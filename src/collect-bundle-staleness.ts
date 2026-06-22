@@ -1,7 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { FrontierSwarmMergeBundle, FrontierSwarmPatchStatus } from '@shapeshift-labs/frontier-swarm';
-import { pathExists, resolveBundlePatchPath, runProcess, tail, uniqueStrings } from './common.js';
+import {
+  checkSwarmGitPatch,
+  hashSwarmGitWorkspaceFile,
+  readSwarmGitHeadBlobHash,
+  type FrontierSwarmGitLoggedCommandResult
+} from '@shapeshift-labs/frontier-swarm-git';
+import { pathExists, resolveBundlePatchPath, uniqueStrings } from './common.js';
 import { collectFailureReasonClasses } from './collect-bundle-reasons.js';
 
 export interface FrontierCodexPatchStaleness {
@@ -21,10 +27,10 @@ export async function bundlePatchStaleness(
   if (!patchPath || !await pathExists(patchPath)) return patchStalenessResult(false, 'missing', ['missing patch'], false);
   const patch = await fs.readFile(patchPath, 'utf8').catch(() => '');
   if (!patch.trim()) return patchStalenessResult(false, 'missing', ['empty patch'], false);
-  const result = await runProcess('git', ['apply', '--check', patchPath], { cwd, allowFailure: true });
-  if (result.status === 0) return patchStalenessResult(false, 'applies', ['patch applies to working tree'], true);
-  const cached = await runProcess('git', ['apply', '--check', '--cached', patchPath], { cwd, allowFailure: true });
-  if (cached.status === 0) {
+  const result = await checkSwarmGitPatch({ cwd, patchPath });
+  if (result.ok) return patchStalenessResult(false, 'applies', ['patch applies to working tree'], true);
+  const cached = await checkSwarmGitPatch({ cwd, patchPath, cached: true });
+  if (cached.ok) {
     return patchStalenessResult(false, 'dirty-workspace-conflict', ['patch applies to index but not dirty working tree'], true);
   }
   const baseStatus = await patchBaseHashStatus(patch, cwd);
@@ -32,7 +38,7 @@ export async function bundlePatchStaleness(
     return patchStalenessResult(
       false,
       'needs-port',
-      ['patch does not expose comparable base hashes; coordinator review must port it', ...baseStatus.reasons, ...tail(result.stderr || result.stdout, 3)],
+      ['patch does not expose comparable base hashes; coordinator review must port it', ...baseStatus.reasons, ...loggedCommandTail(result.command, 3)],
       false
     );
   }
@@ -40,14 +46,14 @@ export async function bundlePatchStaleness(
     return patchStalenessResult(
       false,
       'needs-port',
-      ['patch base hashes match HEAD or working tree content but textual apply failed', ...baseStatus.reasons, ...tail(result.stderr || result.stdout, 3)],
+      ['patch base hashes match HEAD or working tree content but textual apply failed', ...baseStatus.reasons, ...loggedCommandTail(result.command, 3)],
       true
     );
   }
   return patchStalenessResult(
     false,
     'needs-port',
-    ['patch base hashes differ from HEAD and working tree content; manual port required', ...baseStatus.reasons, ...tail(result.stderr || result.stdout, 3)],
+    ['patch base hashes differ from HEAD and working tree content; manual port required', ...baseStatus.reasons, ...loggedCommandTail(result.command, 3)],
     false
   );
 }
@@ -74,19 +80,22 @@ async function patchBaseHashStatus(patch: string, cwd: string): Promise<{ known:
   let mismatched = 0;
   const reasons: string[] = [];
   for (const entry of entries) {
-    const head = await runProcess('git', ['rev-parse', `HEAD:${entry.path}`], { cwd, allowFailure: true });
-    const headHash = head.stdout.trim();
-    if (head.status === 0 && headHash.startsWith(entry.oldHash)) continue;
-    const worktree = await runProcess('git', ['hash-object', '--', entry.path], { cwd, allowFailure: true });
-    const worktreeHash = worktree.stdout.trim();
-    if (worktree.status === 0 && worktreeHash.startsWith(entry.oldHash)) {
+    const head = await readSwarmGitHeadBlobHash({ cwd, file: entry.path });
+    if (head.ok && head.hash?.startsWith(entry.oldHash)) continue;
+    const worktree = await hashSwarmGitWorkspaceFile({ cwd, file: entry.path });
+    if (worktree.ok && worktree.hash?.startsWith(entry.oldHash)) {
       reasons.push(`base hash matches working tree content for ${entry.path}`);
       continue;
     }
     mismatched += 1;
-    reasons.push(head.status !== 0 ? `missing HEAD blob for ${entry.path}` : `base hash mismatch for ${entry.path}`);
+    reasons.push(!head.ok ? `missing HEAD blob for ${entry.path}` : `base hash mismatch for ${entry.path}`);
   }
   return { known: true, mismatched, reasons };
+}
+
+function loggedCommandTail(command: FrontierSwarmGitLoggedCommandResult, maxLines: number): string[] {
+  const preferred = command.stderrTail.length ? command.stderrTail : command.stdoutTail;
+  return preferred.slice(-maxLines);
 }
 
 function parsePatchBaseHashes(patch: string, cwd: string): Array<{ path: string; oldHash: string }> {

@@ -2,9 +2,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { matchesGlob, type FrontierSwarmCommand, type FrontierSwarmMergeBundle } from '@shapeshift-labs/frontier-swarm';
+import { applySwarmGitPatchToWorkspace, runSwarmGitProcess } from '@shapeshift-labs/frontier-swarm-git';
 import { FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND, FRONTIER_SWARM_CODEX_PATCH_SCORE_VERSION } from './constants.js';
 import type { FrontierCodexCollectBucket, FrontierCodexCollectResult, FrontierCodexPatchScoreEntry, FrontierCodexPatchScoreInput, FrontierCodexPatchScoreResult, FrontierCodexPatchScoreStatus } from './index.js';
-import { copyWorkspacePath, findFilesByName, pathExists, pathHasIgnoredSegment, resolveBundlePatchPath, runLoggedProcess, slug, uniqueStrings, uniqueWorkspacePaths } from './common.js';
+import { copyWorkspacePath, findFilesByName, pathExists, pathHasIgnoredSegment, resolveBundlePatchPath, slug, tail, uniqueStrings, uniqueWorkspacePaths } from './common.js';
 import { collectCodexSwarmRun } from './collect.js';
 import { summarizePatchScoreSemanticEvidence } from './patch-score-semantic.js';
 import { contextBudgetFromBundle } from './context-budget.js';
@@ -158,17 +159,14 @@ async function scoreCodexMergeBundle(input: {
   }
   const workspacePath = await createScoreWorkspace(input.cwd, input.bundle.jobId, input.input);
   try {
-    const check = await runLoggedProcess('git', ['apply', '--check', patchPath], workspacePath);
-    commands.push(check);
-    if (check.status !== 0) {
-      return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings(['git apply --check failed', ...semanticEvidence.reasons, ...contextReasons]) };
+    const patchApply = await applySwarmGitPatchToWorkspace({ workspace: workspacePath, patchPath, dryRun: false });
+    commands.push(...patchApply.commands);
+    if (!patchApply.ok) {
+      return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings([patchApply.error ?? 'git apply failed', ...semanticEvidence.reasons, ...contextReasons]) };
     }
-    const apply = await runLoggedProcess('git', ['apply', patchPath], workspacePath);
-    commands.push(apply);
-    if (apply.status !== 0) return { ...base, workspacePath, status: 'conflict', score: 0, reasons: uniqueStrings(['git apply failed', ...semanticEvidence.reasons, ...contextReasons]) };
     const gates = scoreCommands(input.bundle, input.input);
     for (const gate of gates) {
-      const run = await runLoggedProcess(gate.command, gate.args, gate.cwd ? path.resolve(workspacePath, gate.cwd) : workspacePath);
+      const run = await runScoreCommand(gate.command, gate.args, gate.cwd ? path.resolve(workspacePath, gate.cwd) : workspacePath);
       commands.push(run);
       if (run.status !== 0 && gate.required !== false) {
         return {
@@ -217,6 +215,16 @@ async function scoreCodexMergeBundle(input: {
   } finally {
     if (!input.input.keepWorkspaces) await fs.rm(workspacePath, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+async function runScoreCommand(command: string, args: readonly string[], cwd: string): Promise<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }> {
+  const result = await runSwarmGitProcess(command, args, { cwd, allowFailure: true });
+  return {
+    command: [command, ...args],
+    status: result.status,
+    stdoutTail: tail(result.stdout),
+    stderrTail: tail(result.stderr)
+  };
 }
 
 function contextBudgetReasons(contextBudget: ReturnType<typeof contextBudgetFromBundle>): string[] {

@@ -38,7 +38,7 @@ export async function testWorkspaceOnlyCollection(tmp) {
     }, null, 2)
   ].join('\n') + '\n');
   await fs.writeFile(path.join(evidenceDir, 'workspace-proof.json'), JSON.stringify({
-    kind: 'frontier.swarm-codex.workspace-proof',
+    kind: 'frontier.swarm-git.workspace-proof',
     version: 1,
     id: 'workspace-proof:workspace-only-recovered',
     generatedAt: Date.now(),
@@ -126,7 +126,7 @@ async function assertWorkspaceOnlyFailedPatch(tmp) {
     }, null, 2)
   ].join('\n') + '\n');
   await fs.writeFile(path.join(evidenceDir, 'workspace-proof.json'), JSON.stringify({
-    kind: 'frontier.swarm-codex.workspace-proof',
+    kind: 'frontier.swarm-git.workspace-proof',
     version: 1,
     id: 'workspace-proof:workspace-only-failed-patch',
     generatedAt: Date.now(),
@@ -223,7 +223,7 @@ async function assertWorkspaceOnlyStoppedPartialRecovery(tmp) {
     }, null, 2)
   ].join('\n') + '\n');
   await fs.writeFile(path.join(evidenceDir, 'workspace-proof.json'), JSON.stringify({
-    kind: 'frontier.swarm-codex.workspace-proof',
+    kind: 'frontier.swarm-git.workspace-proof',
     version: 1,
     id: 'workspace-proof:workspace-only-stopped-partial',
     generatedAt: Date.now(),

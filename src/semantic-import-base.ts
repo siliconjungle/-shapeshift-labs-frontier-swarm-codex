@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { normalizeWorkspacePath, pathExists, runProcess } from './common.js';
+import { readSwarmGitHeadFile } from '@shapeshift-labs/frontier-swarm-git';
+import { normalizeWorkspacePath } from './common.js';
 import { semanticImportPathVariants } from './semantic-import-select.js';
 
 export interface SemanticImportBaseSource {
@@ -145,16 +146,15 @@ async function readBaseSourceFromGit(
   variants: readonly string[],
   maxBytes: number
 ): Promise<SemanticImportBaseSource | undefined> {
-  if (!await pathExists(path.join(baseCwd, '.git'))) return undefined;
   for (const candidate of variants) {
     const normalized = normalizeWorkspacePath(candidate);
     if (!normalized) continue;
-    const result = await runProcess('git', ['show', `HEAD:${normalized}`], { cwd: baseCwd, allowFailure: true });
-    if (result.status !== 0 || Buffer.byteLength(result.stdout, 'utf8') > maxBytes) continue;
+    const result = await readSwarmGitHeadFile({ cwd: baseCwd, file: normalized, maxBytes });
+    if (!result) continue;
     return {
-      path: normalized,
-      sourceText: result.stdout,
-      bytes: Buffer.byteLength(result.stdout, 'utf8'),
+      path: result.path,
+      sourceText: result.sourceText,
+      bytes: result.bytes,
       source: 'git-head',
       foundBy: 'git-show-head'
     };
@@ -167,16 +167,15 @@ async function readHeadSourceFromGit(
   variants: readonly string[],
   maxBytes: number
 ): Promise<SemanticImportHeadSource | undefined> {
-  if (!await pathExists(path.join(headCwd, '.git'))) return undefined;
   for (const candidate of variants) {
     const normalized = normalizeWorkspacePath(candidate);
     if (!normalized) continue;
-    const result = await runProcess('git', ['show', `HEAD:${normalized}`], { cwd: headCwd, allowFailure: true });
-    if (result.status !== 0 || Buffer.byteLength(result.stdout, 'utf8') > maxBytes) continue;
+    const result = await readSwarmGitHeadFile({ cwd: headCwd, file: normalized, maxBytes });
+    if (!result) continue;
     return {
-      path: normalized,
-      sourceText: result.stdout,
-      bytes: Buffer.byteLength(result.stdout, 'utf8'),
+      path: result.path,
+      sourceText: result.sourceText,
+      bytes: result.bytes,
       source: 'git-head',
       foundBy: 'git-show-head'
     };

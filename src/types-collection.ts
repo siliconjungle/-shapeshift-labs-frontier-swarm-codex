@@ -12,8 +12,10 @@ import type {
   FrontierSwarmQueueOverlay
 } from '@shapeshift-labs/frontier-swarm';
 import type {
-  FRONTIER_SWARM_CODEX_APPLY_LEDGER_KIND,
-  FRONTIER_SWARM_CODEX_APPLY_LEDGER_VERSION,
+  FRONTIER_SWARM_GIT_APPLY_LEDGER_KIND,
+  FRONTIER_SWARM_GIT_APPLY_LEDGER_VERSION
+} from '@shapeshift-labs/frontier-swarm-git';
+import type {
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND,
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION,
   FRONTIER_SWARM_CODEX_CLEANUP_PLAN_KIND,
@@ -285,8 +287,8 @@ export interface FrontierCodexApplyEntry {
 }
 
 export interface FrontierCodexApplyResult {
-  kind: typeof FRONTIER_SWARM_CODEX_APPLY_LEDGER_KIND;
-  version: typeof FRONTIER_SWARM_CODEX_APPLY_LEDGER_VERSION;
+  kind: typeof FRONTIER_SWARM_GIT_APPLY_LEDGER_KIND;
+  version: typeof FRONTIER_SWARM_GIT_APPLY_LEDGER_VERSION;
   ok: boolean;
   cwd: string;
   collectionDir: string;

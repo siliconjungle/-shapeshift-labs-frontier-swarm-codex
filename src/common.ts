@@ -258,24 +258,6 @@ export function resolveBundlePatchPath(bundle: FrontierSwarmMergeBundle, mergePa
 }
 
 
-export async function runLoggedProcess(command: string, args: readonly string[], cwd: string): Promise<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }> {
-  const result = await runProcess(command, args, { cwd, allowFailure: true });
-  return {
-    command: [command, ...args],
-    status: result.status,
-    stdoutTail: tail(result.stdout),
-    stderrTail: tail(result.stderr)
-  };
-}
-
-
-export async function gitDirty(cwd: string): Promise<string[]> {
-  const result = await runProcess('git', ['status', '--porcelain'], { cwd, allowFailure: true });
-  if (result.status !== 0) return [];
-  return result.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.slice(3));
-}
-
-
 export function firstNonEmptyLine(text: string): string | undefined {
   return text.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
 }
