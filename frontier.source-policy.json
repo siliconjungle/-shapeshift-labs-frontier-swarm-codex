@@ -49,11 +49,6 @@
         "maxLines": 393,
         "reason": "existing codex job runner size baseline; split in a dedicated source-policy cleanup"
       },
-      "src/collect-run-graph.ts": {
-        "maxLines": 1492,
-        "maxChars": 56206,
-        "reason": "existing run graph collector size baseline; split in a dedicated source-policy cleanup"
-      },
       "src/collect-workspace-only.ts": {
         "maxLines": 454,
         "reason": "existing workspace-only collector size baseline; split in a dedicated source-policy cleanup"
@@ -70,11 +65,6 @@
       "src/dashboard.ts": {
         "maxLines": 322,
         "reason": "existing dashboard server size baseline; split in a dedicated source-policy cleanup"
-      },
-      "src/run-graph-live.ts": {
-        "maxLines": 923,
-        "maxChars": 32212,
-        "reason": "semantic-admission live graph integration baseline; split graph event adapters in a dedicated source-policy cleanup"
       },
       "src/semantic-import.ts": {
         "maxLines": 576,

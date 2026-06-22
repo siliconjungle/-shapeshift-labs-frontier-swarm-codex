@@ -6,7 +6,6 @@ import {
 } from './constants.js';
 import { isObject } from './common.js';
 import { createBoundedCodexArtifactStore } from './collect-artifact-store.js';
-import { createCodexCollectRunGraph } from './collect-run-graph.js';
 import type {
   FrontierCodexApplyLedgerSummary,
   FrontierCodexCollectBucket,
@@ -61,7 +60,6 @@ export async function persistCodexCollectResult(input: {
   artifactStoreTimeoutMs?: number;
 }): Promise<FrontierCodexCollectResult> {
   const { result } = input;
-  result.runGraph = result.runGraph ?? createCodexCollectRunGraph({ result, generatedAt: result.generatedAt });
   await fs.mkdir(result.outDir, { recursive: true });
   const collectionPath = path.join(result.outDir, 'collection.json');
   await fs.writeFile(collectionPath, JSON.stringify(result, null, 2) + '\n');
@@ -94,8 +92,7 @@ async function writeResultArtifactFiles(result: FrontierCodexCollectResult): Pro
     ['coordinator-query.json', result.dashboard],
     ['compact-dashboard.json', result.compactDashboard],
     ['queue-outcome-model.json', result.queueOutcomeModel],
-    ['terminal-state.json', result.terminalState],
-    ['run-graph.json', result.runGraph]
+    ['terminal-state.json', result.terminalState]
   ];
   await Promise.all(writes.map(([file, value]) => fs.writeFile(path.join(result.outDir, file), JSON.stringify(value, null, 2) + '\n')));
 }

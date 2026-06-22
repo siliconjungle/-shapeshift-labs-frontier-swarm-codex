@@ -1,12 +1,12 @@
 import assert from 'node:assert';
-import { collectCodexSwarmRun, fs, path } from './context.mjs';
+import { collectCodexSwarmRun, exists, fs, path } from './context.mjs';
 import {
   cleanEditScriptSemanticImportSummary,
   editScriptSemanticImportSummary,
   factSemanticImportSummary
 } from './semantic-import-quality-fixtures.mjs';
 
-export async function testSemanticAdmissionSidecarGraph({ tmp }, mergeBundle) {
+export async function testSemanticAdmissionSidecars({ tmp }, mergeBundle) {
   const runDir = path.join(tmp, 'semantic-admission-sidecars-run');
   await writeSemanticSidecarAdmissionJob(runDir, mergeBundle, {
     jobId: 'semantic-sidecar-safe',
@@ -51,44 +51,18 @@ export async function testSemanticAdmissionSidecarGraph({ tmp }, mergeBundle) {
     outDir: path.join(runDir, 'collected')
   });
 
-  assert.strictEqual(collection.runGraph.summary.semanticCandidateCount, 3);
-  assert.strictEqual(collection.runGraph.summary.semanticAdmissionCount, 3);
-  assert.strictEqual(collection.runGraph.summary.semanticOwnershipRegionCount, 3);
+  const collectedEntries = Object.values(collection.buckets).flat();
+  assert.strictEqual(collectedEntries.length, 3);
+  assert.strictEqual(await exists(path.join(collection.outDir, 'run-graph.json')), false);
+  assert.strictEqual('runGraph' in collection, false);
 
-  const semanticCandidates = collection.runGraph.nodes.filter((node) => node.kind === 'semantic-candidate');
-  const byJob = new Map(semanticCandidates.map((node) => [node.jobId, node]));
-  assert.strictEqual(byJob.get('semantic-sidecar-safe').status, 'safe');
-  assert.strictEqual(byJob.get('semantic-sidecar-review').status, 'review');
-  assert.strictEqual(byJob.get('semantic-sidecar-conflict').status, 'conflict');
-  assert.ok(byJob.get('semantic-sidecar-review').data.reasonCodes.includes('semantic-sidecar-review-required'));
-  assert.ok(byJob.get('semantic-sidecar-conflict').data.reasonCodes.includes('semantic-sidecar-symbol-conflict'));
-  assert.ok(byJob.get('semantic-sidecar-conflict').data.conflictKeys.includes('region:source#src/runtime/semantic-sidecar-conflict.ts#function#run'));
-  assert.strictEqual(byJob.get('semantic-sidecar-safe').data.ownershipRegionIds.length, 1);
-
-  const aggregateSafeCandidate = collection.runGraph.nodes.find((node) => node.id === 'candidate:semantic-sidecar-safe');
-  assert.strictEqual(aggregateSafeCandidate.data.semanticSidecarAdmission.safeCount, 1);
-  const aggregateReviewCandidate = collection.runGraph.nodes.find((node) => node.id === 'candidate:semantic-sidecar-review');
-  assert.strictEqual(aggregateReviewCandidate.data.semanticSidecarAdmission.reviewCount, 1);
-  const aggregateConflictCandidate = collection.runGraph.nodes.find((node) => node.id === 'candidate:semantic-sidecar-conflict');
-  assert.strictEqual(aggregateConflictCandidate.data.semanticSidecarAdmission.conflictCount, 1);
-
-  const reviewAdmission = collection.runGraph.nodes.find((node) =>
-    node.kind === 'semantic-admission' && node.jobId === 'semantic-sidecar-review'
-  );
-  assert.ok(reviewAdmission.data.reasonCodes.includes('semantic-sidecar-review-required'));
-  assert.ok(collection.runGraph.edges.some((edge) =>
-    edge.kind === 'touches' &&
-    edge.from === byJob.get('semantic-sidecar-safe').id &&
-    edge.to.startsWith('semantic-region:semantic-sidecar-safe:')
-  ));
-
-  const persistedRunGraph = JSON.parse(await fs.readFile(path.join(collection.outDir, 'run-graph.json'), 'utf8'));
-  assert.strictEqual(persistedRunGraph.summary.semanticCandidateCount, 3);
-  const persistedConflict = persistedRunGraph.nodes.find((node) =>
-    node.kind === 'semantic-candidate' && node.jobId === 'semantic-sidecar-conflict'
-  );
-  assert.strictEqual(persistedConflict.status, 'conflict');
-  assert.ok(persistedConflict.data.reasonCodes.includes('semantic-sidecar-symbol-conflict'));
+  const byJob = new Map(collectedEntries.map((entry) => [entry.jobId, entry]));
+  for (const jobId of ['semantic-sidecar-safe', 'semantic-sidecar-review', 'semantic-sidecar-conflict']) {
+    const entry = byJob.get(jobId);
+    assert.ok(entry);
+    assert.ok(entry.bundle.semanticImport);
+    assert.strictEqual(typeof entry.bundle.semanticImport, 'object');
+  }
 }
 
 async function writeSemanticSidecarAdmissionJob(runDir, mergeBundle, input) {

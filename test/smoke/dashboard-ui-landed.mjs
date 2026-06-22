@@ -9,13 +9,13 @@ import {
 } from './context.mjs';
 
 export async function runDashboardLandedAndSteeringSmoke(context, collectionDir) {
-  await assertLegacyCollection(context.tmp);
+  await assertMinimalCollection(context.tmp);
   await assertLandedCollection(context.tmp);
   await assertSteeringIntent(context.tmp, collectionDir);
 }
 
-async function assertLegacyCollection(tmp) {
-  const collectionDir = path.join(tmp, 'legacy-collection');
+async function assertMinimalCollection(tmp) {
+  const collectionDir = path.join(tmp, 'minimal-collection');
   await fs.mkdir(collectionDir, { recursive: true });
   await fs.writeFile(path.join(collectionDir, 'collection.json'), JSON.stringify({
     ok: true,
@@ -23,11 +23,11 @@ async function assertLegacyCollection(tmp) {
     buckets: {
       'ready-to-apply': [{
         bucket: 'ready-to-apply',
-        jobId: 'legacy-job',
+        jobId: 'minimal-job',
         outputDir: collectionDir,
         bundle: {
-          jobId: 'legacy-job',
-          taskId: 'legacy-task',
+          jobId: 'minimal-job',
+          taskId: 'minimal-task',
           lane: 'runtime',
           status: 'completed',
           mergeReadiness: 'verified-patch',

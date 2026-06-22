@@ -1,6 +1,5 @@
 import assert from 'node:assert';
 import { classifyCodexSemanticCollectAdmission } from '../dist/collect-bundles.js';
-import { createCodexCollectRunGraph } from '../dist/collect-run-graph.js';
 import { createSmokeContext } from './smoke/context.mjs';
 import {
   collectCodexSwarmRun,
@@ -31,7 +30,7 @@ import {
 import { testSemanticLineageCollection } from './smoke/semantic-lineage-collection.mjs';
 import { testSwarmRunCollection } from './smoke/swarm-run-collection.mjs';
 import { testSemanticAdmissionGates } from './smoke/semantic-admission-gates.mjs';
-import { testSemanticAdmissionSidecarGraph } from './smoke/semantic-admission-sidecars.mjs';
+import { testSemanticAdmissionSidecars } from './smoke/semantic-admission-sidecars.mjs';
 import { testTerminalDrainMixedOracle } from './smoke/terminal-drain-e2e.mjs';
 import { testArtifactArchiveCompaction } from './smoke/artifact-archive.mjs';
 import { testTournamentCli } from './smoke/tournament-cli.mjs';
@@ -49,7 +48,6 @@ import './smoke/workspace-lockdown.mjs';
 
 const context = await createSmokeContext();
 
-testRunGraphTournamentRsiLinks();
 await testPlanningAndLinks(context);
 await testResourceAwareScheduling(context);
 await testRunEventsCurrentFormat(context);
@@ -72,7 +70,7 @@ await testArtifactArchiveCompaction(context, collectionDir);
 await testTournamentCli(context);
 await testSemanticImportQuality(context, mergeBundle);
 await testSemanticAdmissionGates(context, mergeBundle);
-await testSemanticAdmissionSidecarGraph(context);
+await testSemanticAdmissionSidecars(context, mergeBundle);
 await testTerminalDrainMixedOracle(context);
 await testSemanticAdmissionReasonCodes(context, mergeBundle);
 await testSemanticLineageCollection(context, mergeBundle);
@@ -227,13 +225,16 @@ async function testSemanticAdmissionReasonCodes({ tmp }, mergeBundle) {
     outDir: path.join(runDir, 'collected')
   });
   assert.strictEqual(collection.summary['needs-human-port'], 1);
-  const candidate = collection.runGraph.nodes.find((node) => node.id === 'candidate:semantic-reason-graph-ready');
-  assert.ok(candidate);
-  assert.strictEqual(candidate.data.semanticAdmission.status, 'review');
-  assert.ok(candidate.data.semanticAdmission.reasonCodes.includes('tests-missing'));
-  const persistedRunGraph = JSON.parse(await fs.readFile(path.join(collection.outDir, 'run-graph.json'), 'utf8'));
-  const persistedCandidate = persistedRunGraph.nodes.find((node) => node.id === 'candidate:semantic-reason-graph-ready');
-  assert.ok(persistedCandidate.data.semanticAdmission.reasonCodes.includes('tests-missing'));
+  const collectedBundle = Object.values(collection.buckets)
+    .flat()
+    .find((entry) => entry.jobId === 'semantic-reason-graph-ready')?.bundle;
+  assert.ok(collectedBundle);
+  const collectedDecision = classifyCodexSemanticCollectAdmission(collectedBundle, {
+    hasActionablePatch: true,
+    semanticImportExpected: true
+  });
+  assert.strictEqual(collectedDecision.status, 'review');
+  assert.ok(collectedDecision.reasonCodes.includes('tests-missing'));
 }
 
 function classifySemanticReasonBundle(mergeBundle, input) {
@@ -328,287 +329,4 @@ function semanticReasonCodePatch(file) {
     '+export const value = 2;',
     ''
   ].join('\n');
-}
-
-function testRunGraphTournamentRsiLinks() {
-  const generatedAt = 123;
-  const selectedBundle = runGraphBundleFixture({
-    jobId: 'runtime-selected',
-    taskId: 'runtime-task-selected',
-    disposition: 'auto-mergeable',
-    status: 'completed',
-    autoMergeable: true,
-    model: 'gpt-5',
-    modelTier: 'deep',
-    metadata: {
-      modelRoute: {
-        id: 'model-route-selected',
-        route: 'panel',
-        mode: 'override',
-        selectedComputeId: 'codex.deep',
-        recommendedComputeIds: ['codex.deep', 'codex.fast'],
-        fuserComputeId: 'codex.fuser',
-        summary: { routingPolicyFeedbackCount: 1, routingPolicyPreferenceCount: 1 },
-        reasons: ['policy-preferred'],
-        panel: {
-          id: 'panel-selected',
-          strategy: 'panel',
-          memberComputeIds: ['codex.deep', 'codex.fast'],
-          fuserComputeId: 'codex.fuser',
-          recommended: true,
-          summary: { memberCount: 2 }
-        }
-      },
-      modelRoutingFeedback: {
-        id: 'routing-feedback-selected',
-        jobId: 'runtime-selected',
-        taskId: 'runtime-task-selected',
-        lane: 'runtime',
-        model: 'gpt-5',
-        modelTier: 'deep',
-        resultStatus: 'completed',
-        mergeDisposition: 'auto-mergeable',
-        selected: true
-      }
-    },
-    generatedAt
-  });
-  const rejectedBundle = runGraphBundleFixture({
-    jobId: 'runtime-rejected',
-    taskId: 'runtime-task-rejected',
-    disposition: 'rejected',
-    status: 'failed',
-    autoMergeable: false,
-    model: 'gpt-5-mini',
-    modelTier: 'fast',
-    generatedAt
-  });
-  const graph = createCodexCollectRunGraph({
-    result: {
-      kind: 'frontier.swarm-codex.collection',
-      version: 1,
-      ok: true,
-      runDir: '/tmp/run-graph-fixture',
-      outDir: '/tmp/run-graph-fixture/collected',
-      generatedAt,
-      buckets: {
-        'ready-to-apply': [{
-          bucket: 'ready-to-apply',
-          jobId: selectedBundle.jobId,
-          mergePath: '/tmp/run-graph-fixture/selected/merge.json',
-          outputDir: '/tmp/run-graph-fixture/selected',
-          bundle: selectedBundle
-        }],
-        'research-complete': [],
-        'needs-human-port': [],
-        'rerun-work': [],
-        'failed-evidence': [{
-          bucket: 'failed-evidence',
-          jobId: rejectedBundle.jobId,
-          mergePath: '/tmp/run-graph-fixture/rejected/merge.json',
-          outputDir: '/tmp/run-graph-fixture/rejected',
-          bundle: rejectedBundle
-        }],
-        'stale-against-head': []
-      },
-      strategyTournament: {
-        kind: 'frontier.swarm.strategy-tournament',
-        version: 1,
-        id: 'tournament-fixture',
-        title: 'Tournament Fixture',
-        winnerId: 'strategy-selected',
-        generatedAt,
-        candidates: [{
-          id: 'strategy-selected',
-          status: 'selected',
-          jobId: selectedBundle.jobId,
-          taskId: selectedBundle.taskId,
-          lane: selectedBundle.lane,
-          model: 'gpt-5',
-          modelTier: 'deep',
-          score: 98,
-          reasons: ['best candidate'],
-          bundle: selectedBundle
-        }, {
-          id: 'strategy-rejected',
-          status: 'rejected',
-          disposition: 'rejected',
-          jobId: rejectedBundle.jobId,
-          taskId: rejectedBundle.taskId,
-          lane: rejectedBundle.lane,
-          model: 'gpt-5-mini',
-          modelTier: 'fast',
-          score: 5,
-          reasons: ['failed verification'],
-          bundle: rejectedBundle
-        }],
-        standings: [],
-        matches: [],
-        summary: {
-          strategyCount: 2,
-          gameCount: 2,
-          matchCount: 2,
-          verifiedCount: 1,
-          rejectedCount: 1,
-          undefinedCount: 0,
-          sampleConfidence: 'low',
-          decisionGrade: 'usable',
-          topStrategyId: 'strategy-selected',
-          topScore: 98,
-          outcomeCounts: { selected: 1, rejected: 1 }
-        }
-      },
-      strategyHistory: { kind: 'frontier.swarm.strategy-tournament-history', version: 1, id: 'history-fixture', tournaments: [], generatedAt },
-      tournamentAdaptiveFeedback: {
-        kind: 'frontier.swarm.tournament-adaptive-feedback',
-        version: 1,
-        id: 'adaptive-feedback-fixture',
-        tournamentId: 'tournament-fixture',
-        historyId: 'history-fixture',
-        generatedAt,
-        observations: [{
-          kind: 'low-score',
-          severity: 'warning',
-          jobId: rejectedBundle.jobId,
-          lane: rejectedBundle.lane,
-          score: 0.1,
-          reason: 'rejected strategy was weak',
-          metadata: {
-            taskId: rejectedBundle.taskId,
-            model: 'gpt-5-mini',
-            modelTier: 'fast'
-          }
-        }],
-        recommendations: [{
-          id: 'recommend-selected',
-          action: 'increase',
-          target: 'lane',
-          key: 'runtime',
-          model: 'gpt-5',
-          computeId: 'codex.deep',
-          score: 0.9,
-          reason: 'prefer selected strategy',
-          metadata: {
-            jobId: selectedBundle.jobId,
-            taskId: selectedBundle.taskId,
-            lane: selectedBundle.lane,
-            modelTier: 'deep'
-          }
-        }],
-        summary: {
-          observationCount: 1,
-          recommendationCount: 1,
-          reduceSignals: 0,
-          increaseSignals: 1,
-          holdSignals: 0
-        }
-      },
-      mergeIndex: { summary: {} },
-      queueOverlay: { summary: {} },
-      evidenceIndex: { summary: {} },
-      admission: { summary: {} },
-      dashboard: { summary: {}, jobs: [], duplicateGroups: [], processes: [] },
-      compactDashboard: {},
-      semanticImport: {},
-      semanticEditAdmission: {},
-      semanticEditScriptAdmission: {},
-      semanticPatchBundleOverlaps: {},
-      qualitySignals: {},
-      noiseBreakdown: {},
-      summary: {
-        total: 2,
-        'ready-to-apply': 1,
-        'research-complete': 0,
-        'needs-human-port': 0,
-        'rerun-work': 0,
-        'failed-evidence': 1,
-        'stale-against-head': 0
-      }
-    }
-  });
-  const selected = runGraphNode(graph, 'candidate:strategy:strategy-selected');
-  const rejected = runGraphNode(graph, 'candidate:strategy:strategy-rejected');
-  assert.strictEqual(selected.jobId, 'runtime-selected');
-  assert.strictEqual(selected.taskId, 'runtime-task-selected');
-  assert.strictEqual(selected.lane, 'runtime');
-  assert.strictEqual(selected.model, 'gpt-5');
-  assert.strictEqual(selected.refs.job, 'job:runtime-selected');
-  assert.strictEqual(rejected.jobId, 'runtime-rejected');
-  assert.strictEqual(rejected.status, 'rejected');
-  assert.ok(runGraphEdge(graph, 'mergesInto', 'candidate:strategy:strategy-selected', 'candidate:runtime-selected'));
-  assert.ok(runGraphEdge(graph, 'supersedes', 'candidate:strategy:strategy-rejected', 'candidate:runtime-rejected'));
-  assert.ok(runGraphEdge(graph, 'supersedes', 'candidate:strategy:strategy-selected', 'candidate:strategy:strategy-rejected'));
-
-  const observation = graph.nodes.find((node) => node.id.startsWith('feedback:adaptive-observation:'));
-  assert.ok(observation);
-  assert.strictEqual(observation.jobId, 'runtime-rejected');
-  assert.strictEqual(observation.taskId, 'runtime-task-rejected');
-  assert.strictEqual(observation.model, 'gpt-5-mini');
-  assert.ok(runGraphEdge(graph, 'verifies', observation.id, 'candidate:runtime-rejected'));
-
-  const recommendation = runGraphNode(graph, 'decision:adaptive-recommendation:adaptive-feedback-fixture:recommend-selected');
-  assert.strictEqual(recommendation.jobId, 'runtime-selected');
-  assert.strictEqual(recommendation.computeId, 'codex.deep');
-  assert.ok(runGraphEdge(graph, 'produces', 'rsi:adaptive:adaptive-feedback-fixture', recommendation.id));
-  assert.ok(runGraphEdge(graph, 'decides', recommendation.id, 'candidate:runtime-selected'));
-  assert.ok(runGraphEdge(graph, 'mergesInto', 'rsi:adaptive:adaptive-feedback-fixture', 'rsi:tournament:tournament-fixture'));
-
-  assert.ok(runGraphNode(graph, 'decision:model-route:runtime-selected:model-route-selected'));
-  assert.ok(runGraphNode(graph, 'decision:panel:runtime-selected:panel-selected'));
-  assert.ok(runGraphNode(graph, 'decision:fusion:runtime-selected:codex.fuser'));
-  const routingFeedback = runGraphNode(graph, 'feedback:model-routing:routing-feedback-selected');
-  assert.strictEqual(routingFeedback.model, 'gpt-5');
-  assert.strictEqual(routingFeedback.taskId, 'runtime-task-selected');
-  assert.ok(runGraphEdge(graph, 'verifies', routingFeedback.id, 'candidate:runtime-selected'));
-}
-
-function runGraphBundleFixture(input) {
-  return {
-    kind: 'frontier.swarm.merge-bundle',
-    version: 1,
-    id: `bundle:${input.jobId}`,
-    runId: 'run-graph-fixture',
-    planId: 'plan-fixture',
-    jobId: input.jobId,
-    taskId: input.taskId,
-    lane: 'runtime',
-    title: input.jobId,
-    generatedAt: input.generatedAt,
-    status: input.status,
-    mergeReadiness: input.autoMergeable ? 'verified-patch' : 'rejected',
-    disposition: input.disposition,
-    riskLevel: 'low',
-    autoMergeable: input.autoMergeable,
-    changedPaths: [`src/${input.jobId}.ts`],
-    changedRegions: [],
-    ownedFilesTouched: [],
-    allowedWrites: ['src/**'],
-    ownershipViolations: [],
-    patchPath: `/tmp/${input.jobId}.patch`,
-    patchHash: `${input.jobId}-hash`,
-    evidencePaths: [`/tmp/${input.jobId}/evidence.json`],
-    commandsPassed: input.autoMergeable ? [{ name: 'unit', status: 0 }] : [],
-    commandsFailed: input.autoMergeable ? [] : [{ name: 'unit', status: 1 }],
-    queueItemIds: [input.taskId],
-    staleAgainstHead: false,
-    reasons: input.autoMergeable ? [] : ['failed verification'],
-    metadata: {
-      tournamentStrategy: {
-        model: input.model,
-        modelTier: input.modelTier,
-        routingKey: { lane: 'runtime', taskKind: 'implementation', workKind: 'implementation', modelTier: input.modelTier }
-      },
-      ...(input.metadata ?? {})
-    }
-  };
-}
-
-function runGraphNode(graph, id) {
-  const node = graph.nodes.find((entry) => entry.id === id);
-  assert.ok(node, `missing run graph node ${id}`);
-  return node;
-}
-
-function runGraphEdge(graph, kind, from, to) {
-  return graph.edges.find((entry) => entry.kind === kind && entry.from === from && entry.to === to);
 }
