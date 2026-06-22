@@ -91,7 +91,7 @@ const ownershipChangedIndex = runSource.indexOf("const ownershipChangedPaths = w
 const ownershipIndex = runSource.indexOf('const ownership = checkSwarmOwnership(job, ownershipChangedPaths);');
 const quarantineIndex = runSource.indexOf('const workspacePatchQuarantine = quarantineWorkspacePatchCandidatePaths');
 const restoreIndex = runSource.indexOf('const ownershipRestore = workspacePlan.allowedWritePolicy.mode === \'strict\'');
-const verificationIndex = runSource.indexOf('const verification = options.runVerification && !strictOwnershipBlocked ? await runVerification');
+const verificationIndex = runSource.indexOf('const verificationEvidence = options.runVerification && !strictOwnershipBlocked');
 assert.ok(rawChangedIndex > -1, 'runner must keep raw changed paths before caller filters');
 assert.ok(ownershipChangedIndex > rawChangedIndex, 'runner must derive ownership paths from raw changed paths');
 assert.ok(ownershipIndex > ownershipChangedIndex, 'runner must evaluate ownership against policy-selected changed paths');

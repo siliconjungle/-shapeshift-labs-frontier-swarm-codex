@@ -22,6 +22,7 @@ export interface CodexRunMetadataInput {
     skippedCommands: unknown[];
   };
   semanticImportSummary?: unknown;
+  verificationGateEvidence?: unknown;
   codexHandoffArtifacts?: unknown;
 }
 
@@ -51,6 +52,7 @@ export function createCodexRunMetadata(input: CodexRunMetadataInput): Record<str
       verificationSkippedCommandCount: input.strictOwnership.skippedCommands.length
     } : {}),
     ...(input.semanticImportSummary ? { semanticImport: input.semanticImportSummary } : {}),
+    ...(input.verificationGateEvidence ? { verificationGateEvidence: input.verificationGateEvidence } : {}),
     ...(input.codexHandoffArtifacts ? { codexHandoffArtifacts: input.codexHandoffArtifacts } : {})
   };
 }

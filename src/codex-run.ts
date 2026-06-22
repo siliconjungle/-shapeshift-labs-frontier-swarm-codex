@@ -16,8 +16,9 @@ import { createCodexContextBudgetReport, finalizeCodexContextBudgetReport } from
 import { createCodexRunMetadata } from './codex-run-metadata.js';
 import { createCodexWorkspacePlan, createSwarmWorkspaceProof, prepareCodexWorkspace } from './codex-workspace.js';
 import { readCodexHumanActionArtifacts } from './human-actions.js';
-import { applyWorkspacePreExecWriteFence, collectChangedPaths, emptyChangedPathCollection, filterWorkspaceChangedPaths, mergeWorkspaceChangedPathCollections, quarantineWorkspacePatchCandidatePaths, restoreWorkspaceChangedPaths, restoreWorkspacePreExecWriteFence, runVerification, shouldSnapshotWorkspaceChanges, snapshotWorkspaceFiles, writeCodexPatchFile } from './codex-workspace-changes.js';
+import { applyWorkspacePreExecWriteFence, collectChangedPaths, emptyChangedPathCollection, filterWorkspaceChangedPaths, mergeWorkspaceChangedPathCollections, quarantineWorkspacePatchCandidatePaths, restoreWorkspaceChangedPaths, restoreWorkspacePreExecWriteFence, shouldSnapshotWorkspaceChanges, snapshotWorkspaceFiles, writeCodexPatchFile } from './codex-workspace-changes.js';
 import { appendCodexJobResultTimelineEvents } from './codex-run-timeline.js';
+import { runCodexJobVerification } from './codex-verification.js';
 import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions } from './index.js';
 
 export { runCodexSwarm } from './codex-run-swarm.js';
@@ -164,7 +165,10 @@ export async function runCodexJob(
       reason: verificationSkippedReason ?? 'strict-out-of-scope-source-writes-skipped-verification'
     }))
     : [];
-  const verification = options.runVerification && !strictOwnershipBlocked ? await runVerification(job.verification, workspace) : [];
+  const verificationEvidence = options.runVerification && !strictOwnershipBlocked
+    ? await runCodexJobVerification(job, workspace, paths)
+    : undefined;
+  const verification = verificationEvidence?.verification ?? [];
   const failedVerification = verification.some((entry) => entry.required !== false && entry.status !== 0);
   const codexDeferredFailure = execution.deferredReason
     ? {
@@ -205,6 +209,7 @@ export async function runCodexJob(
   const evidencePaths = uniqueStrings([
     paths.evidenceDir, evidenceSummaryPath, paths.resourceAllocationPath, paths.contextBudgetPath,
     paths.workspaceProofPath, paths.mergeBundlePath,
+    ...(verificationEvidence?.evidencePaths ?? []),
     ...(patchPath ? [patchPath] : []),
     ...(semanticImport ? semanticImport.evidencePaths : []),
     paths.patchIntentPath, paths.logSummaryPath,
@@ -232,7 +237,8 @@ export async function runCodexJob(
     reportedChangedPaths: reportedChangedPaths.observedChangedPaths,
     humanActions,
     strictOwnership,
-    semanticImportSummary
+    semanticImportSummary,
+    verificationGateEvidence: verificationEvidence?.metadata
   };
   const result: FrontierSwarmJobResultInput = {
     jobId: job.id,
@@ -265,6 +271,7 @@ export async function runCodexJob(
     evidencePaths: uniqueStrings([
       paths.evidenceDir, evidenceSummaryPath, paths.resourceAllocationPath, paths.contextBudgetPath,
       paths.workspaceProofPath, paths.patchIntentPath, paths.logSummaryPath,
+      ...(verificationEvidence?.evidencePaths ?? []),
       ...humanActions.paths,
       ...(semanticImport ? semanticImport.evidencePaths : []),
       ...handoffArtifacts.map((artifact) => artifact.path)

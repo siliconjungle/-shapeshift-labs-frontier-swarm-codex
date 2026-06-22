@@ -16,6 +16,8 @@ export async function testRunEventsCurrentFormat({ tmp }) {
       }]
     }
   });
+  const jobId = plan.jobs[0].id;
+  const taskId = plan.jobs[0].taskId;
   const outDir = path.join(tmp, 'run-events-current-format-run');
   const runEventsPath = path.join(outDir, 'run-events.jsonl');
   const runDashboardPath = path.join(outDir, 'run-dashboard.json');
@@ -42,6 +44,30 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(sawPlanEventsWhileExecutorRunning, true);
   assert.strictEqual(await exists(liveEventsPath), false);
 
+  const verificationGateEvidence = result.run.results[0].metadata.verificationGateEvidence;
+  const gateExecutionsPath = verificationGateEvidence.gateExecutionsPath;
+  const gateSummaryPath = verificationGateEvidence.gateSummaryPath;
+
+  const gateExecutions = (await fs.readFile(gateExecutionsPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  assert.strictEqual(gateExecutions.length, 1);
+  assert.strictEqual(gateExecutions[0].kind, 'frontier.test.gate-execution');
+  assert.strictEqual(gateExecutions[0].id, `gate.verify.${jobId}.1.current-ok`);
+  assert.strictEqual(gateExecutions[0].gateKind, 'test');
+  assert.strictEqual(gateExecutions[0].status, 'passed');
+  assert.strictEqual(gateExecutions[0].metadata.source, 'frontier-swarm-codex.verification');
+  assert.strictEqual(gateExecutions[0].metadata.jobId, jobId);
+  assert.strictEqual(gateExecutions[0].metadata.taskId, taskId);
+  assert.deepStrictEqual(gateExecutions[0].packageScope, ['@shapeshift-labs/frontier-swarm-codex', 'runtime']);
+
+  const gateSummary = JSON.parse(await fs.readFile(gateSummaryPath, 'utf8'));
+  assert.strictEqual(gateSummary.kind, 'frontier.test.gate-evidence');
+  assert.strictEqual(gateSummary.total, 1);
+  assert.strictEqual(gateSummary.passed, 1);
+
   const runEvents = await readCodexRunEvents(runEventsPath);
   const runEventTypes = runEvents.map((event) => event.type);
   for (const type of ['run.created', 'node.created', 'edge.created', 'artifact.attached', 'decision.recorded']) {
@@ -67,6 +93,12 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(dashboard.metadata.runSource.format, 'jsonl');
   assert.strictEqual(dashboard.metadata.runSource.runEventsPath, runEventsPath);
   assert.strictEqual(dashboard.metadata.runSource.runDashboardPath, runDashboardPath);
+  assert.strictEqual(verificationGateEvidence.kind, 'frontier-swarm-codex.verification-gate-evidence');
+  assert.strictEqual(verificationGateEvidence.gateExecutionCount, 1);
+  assert.strictEqual(verificationGateEvidence.gateExecutionsPath, gateExecutionsPath);
+  assert.strictEqual(verificationGateEvidence.gateSummaryPath, gateSummaryPath);
+  assert.ok(result.run.results[0].evidencePaths.includes(gateExecutionsPath));
+  assert.ok(result.run.results[0].evidencePaths.includes(gateSummaryPath));
 }
 
 async function exists(file) {
