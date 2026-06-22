@@ -19,10 +19,18 @@ export {
   FRONTIER_SWARM_CODEX_CONTINUATION_VERSION,
   FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_KIND,
   FRONTIER_SWARM_CODEX_DEPENDENCY_HEALTH_VERSION,
+  FRONTIER_SWARM_CODEX_HUMAN_ACTION_EVENT_KIND,
+  FRONTIER_SWARM_CODEX_HUMAN_ACTION_EVENT_VERSION,
+  FRONTIER_SWARM_CODEX_HUMAN_ACTION_STATE_KIND,
+  FRONTIER_SWARM_CODEX_HUMAN_ACTION_STATE_VERSION,
   FRONTIER_SWARM_CODEX_JOB_EVIDENCE_KIND,
   FRONTIER_SWARM_CODEX_JOB_EVIDENCE_VERSION,
   FRONTIER_SWARM_CODEX_LINK_REPAIR_KIND,
   FRONTIER_SWARM_CODEX_LINK_REPAIR_VERSION,
+  FRONTIER_SWARM_CODEX_MODEL_TELEMETRY_KIND,
+  FRONTIER_SWARM_CODEX_MODEL_TELEMETRY_SUMMARY_KIND,
+  FRONTIER_SWARM_CODEX_MODEL_TELEMETRY_SUMMARY_VERSION,
+  FRONTIER_SWARM_CODEX_MODEL_TELEMETRY_VERSION,
   FRONTIER_SWARM_CODEX_PATCH_INTENT_KIND,
   FRONTIER_SWARM_CODEX_PATCH_INTENT_VERSION,
   FRONTIER_SWARM_CODEX_PATCH_SCORE_KIND,
@@ -106,6 +114,34 @@ export type {
   FrontierCodexQueueRuntimePaths,
   FrontierCodexQueueRuntimeSummary
 } from './queue-runtime.js';
+export {
+  FRONTIER_SWARM_CODEX_HUMAN_ACTION_EVENTS_FILE,
+  FRONTIER_SWARM_CODEX_HUMAN_ACTION_STATE_FILE,
+  FRONTIER_SWARM_CODEX_MODEL_TELEMETRY_EVENTS_FILE,
+  FRONTIER_SWARM_CODEX_MODEL_TELEMETRY_SUMMARY_FILE,
+  appendCodexRuntimeProjectionResult,
+  createCodexHumanActionEvents,
+  createCodexModelTelemetryRecord,
+  finalizeCodexRuntimeProjectionStores,
+  initCodexRuntimeProjectionStores,
+  mergeHumanActionsForProjection,
+  modelTelemetrySummaryDashboardFields,
+  readCodexHumanActionBrokerState,
+  readCodexHumanActionEvents,
+  readCodexModelTelemetryRecords,
+  readCodexModelTelemetrySummary,
+  readCodexRuntimeProjectionArtifacts,
+  resolveCodexRuntimeProjectionPaths,
+  summarizeCodexHumanActionBrokerState,
+  summarizeCodexModelTelemetry
+} from './runtime-projections.js';
+export type {
+  FrontierCodexHumanActionBrokerState,
+  FrontierCodexHumanActionEvent,
+  FrontierCodexModelTelemetryRecord,
+  FrontierCodexModelTelemetrySummary,
+  FrontierCodexRuntimeProjectionPaths
+} from './runtime-projections.js';
 export {
   buildCodexArgs,
   createCodexResourceAllocation,

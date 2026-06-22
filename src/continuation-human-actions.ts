@@ -5,6 +5,10 @@ import {
   resolveCodexHumanActions,
   type FrontierCodexResolvedHumanActions
 } from './human-actions.js';
+import {
+  mergeHumanActionsForProjection,
+  readCodexRuntimeProjectionArtifacts
+} from './runtime-projections.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
 import type { FrontierCodexContinuationInput } from './types-continuation.js';
 
@@ -28,8 +32,13 @@ export async function createContinuationHumanActionState(input: {
     answerPaths: input.continuation.humanAnswerPaths,
     roots: [input.collection?.outDir, input.collection?.runDir, path.join(input.cwd, 'agent-runs', 'loom-ui-human-actions')]
   });
+  const runtimeProjections = await readCodexRuntimeProjectionArtifacts(input.collection?.runDir);
+  const actions = mergeHumanActionsForProjection(
+    runtimeProjections.humanActionState?.actions,
+    humanActionsFromDashboard(input.collection?.dashboard)
+  );
   const resolved = resolveCodexHumanActions({
-    actions: humanActionsFromDashboard(input.collection?.dashboard),
+    actions,
     answers: answers.answers,
     generatedAt: input.generatedAt
   });

@@ -13,11 +13,7 @@ import {
   type FrontierSwarmMergeBundle,
   type FrontierSwarmPatchStatus
 } from '@shapeshift-labs/frontier-swarm';
-import type {
-  FrontierCodexCollectBucket,
-  FrontierCodexCollectInput,
-  FrontierCodexCollectResult
-} from './index.js';
+import type { FrontierCodexCollectBucket, FrontierCodexCollectInput, FrontierCodexCollectResult } from './index.js';
 import {
   findFilesByName,
   isObject,
@@ -42,15 +38,9 @@ import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } 
 import { collectedQualitySignalsFromDashboard, enrichCollectedCoordinatorDashboard } from './collect-dashboard.js';
 import { contextBudgetFromBundle } from './context-budget.js';
 import { summarizeSemanticPatchBundleOverlaps } from './semantic-bundle-overlaps.js';
-import {
-  resolveOrSynthesizeCollectedPatch,
-  type CodexCollectMergeRecord
-} from './collect-workspace-recovery.js';
+import { resolveOrSynthesizeCollectedPatch, type CodexCollectMergeRecord } from './collect-workspace-recovery.js';
 import { collectWorkspaceOnlyMergeRecords } from './collect-workspace-only.js';
-import {
-  createCodexCollectionQueueOutcomeModel,
-  createCodexCollectionTerminalState
-} from './collect-terminal-state.js';
+import { createCodexCollectionQueueOutcomeModel, createCodexCollectionTerminalState } from './collect-terminal-state.js';
 import {
   attachApplyLedgerSummary,
   attachLandedHealthSummary,
@@ -64,12 +54,10 @@ import {
 } from './collect-noise.js';
 import { readCodexPidProcesses, resolveRunDirectory } from './collect-pids.js';
 import { COLLECTED_OUTPUT_SEGMENTS, createEmptyCollectBuckets } from './collect-setup.js';
-import {
-  createCodexCollectResult,
-  createCodexCollectSummary,
-  persistCodexCollectResult
-} from './collect-finalize.js';
+import { createCodexCollectResult, createCodexCollectSummary, persistCodexCollectResult } from './collect-finalize.js';
 import { attachSemanticPatchBundleOverlaps } from './collect-overlaps.js';
+import { attachRuntimeProjectionMetadata } from './collect-runtime-projections.js';
+import { readCodexRuntimeProjectionArtifacts } from './runtime-projections.js';
 
 export { readCodexPidProcesses } from './collect-pids.js';
 
@@ -86,6 +74,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const semanticImportQualities = new Map<string, ReturnType<typeof summarizeCodexSemanticImportQuality>>();
   const contextBudgets = new Map<string, NonNullable<ReturnType<typeof contextBudgetFromBundle>>>();
   const processes = await readCodexPidProcesses(path.join(runDir, 'pids.json')).catch(() => []);
+  const runtimeProjections = await readCodexRuntimeProjectionArtifacts(runDir);
   const mergePaths = (await findFilesByName(runDir, 'merge.json'))
     .filter((mergePath) => !pathHasIgnoredSegment(path.relative(runDir, mergePath), COLLECTED_OUTPUT_SEGMENTS));
   const mergeRecordsByJob = new Map<string, CodexCollectMergeRecord>();
@@ -267,6 +256,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     generatedAt,
     metadata: { runDir, outDir }
   }), semanticImportQualities, semanticImportExpected, contextBudgets, collectedBundles);
+  attachRuntimeProjectionMetadata(dashboard, runtimeProjections);
   const semanticPatchBundleOverlaps = await summarizeSemanticPatchBundleOverlaps(collectedBundles);
   const compactDashboard = createCodexCompactDashboard({
     runDir,
@@ -324,6 +314,11 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     qualitySignals,
     noiseBreakdown,
     ...(landedHealth ? { landedHealth } : {}),
+    metadata: {
+      runtimeProjectionPaths: runtimeProjections.paths,
+      ...(runtimeProjections.modelTelemetrySummary ? { modelTelemetrySummary: runtimeProjections.modelTelemetrySummary } : {}),
+      ...(runtimeProjections.humanActionState ? { humanActionState: runtimeProjections.humanActionState } : {})
+    },
     summary
   });
   return persistCodexCollectResult({

@@ -54,6 +54,10 @@ export async function writeSwarmCoordinatorSnapshot(
     queueStatePath?: string;
     queueEventsPath?: string;
     queueSummaryPath?: string;
+    modelTelemetryPath?: string;
+    modelTelemetrySummaryPath?: string;
+    humanActionEventsPath?: string;
+    humanActionStatePath?: string;
   }
 ): Promise<void> {
   const processes = input.pidManifestPath ? await readCodexPidProcesses(input.pidManifestPath).catch(() => []) : [];
@@ -75,12 +79,20 @@ export async function writeSwarmCoordinatorSnapshot(
       queueStatePath: input.queueStatePath ?? null,
       queueEventsPath: input.queueEventsPath ?? null,
       queueSummaryPath: input.queueSummaryPath ?? null,
+      modelTelemetryPath: input.modelTelemetryPath ?? null,
+      modelTelemetrySummaryPath: input.modelTelemetrySummaryPath ?? null,
+      humanActionEventsPath: input.humanActionEventsPath ?? null,
+      humanActionStatePath: input.humanActionStatePath ?? null,
       artifactPaths: {
         coordinatorDashboard: file,
         ...runEventsMetadata.artifactPaths,
         ...(input.queueStatePath ? { queueState: input.queueStatePath } : {}),
         ...(input.queueEventsPath ? { queueEvents: input.queueEventsPath } : {}),
-        ...(input.queueSummaryPath ? { queueSummary: input.queueSummaryPath } : {})
+        ...(input.queueSummaryPath ? { queueSummary: input.queueSummaryPath } : {}),
+        ...(input.modelTelemetryPath ? { modelTelemetry: input.modelTelemetryPath } : {}),
+        ...(input.modelTelemetrySummaryPath ? { modelTelemetrySummary: input.modelTelemetrySummaryPath } : {}),
+        ...(input.humanActionEventsPath ? { humanActionEvents: input.humanActionEventsPath } : {}),
+        ...(input.humanActionStatePath ? { humanActionState: input.humanActionStatePath } : {})
       },
       runSource: runEventsMetadata.runSource,
       proof: input.proof

@@ -29,6 +29,12 @@ export interface FrontierCodexDashboardArtifactPaths {
   coordinatorDashboard?: string;
   runEvents?: string;
   runDashboard?: string;
+  queueState?: string;
+  queueEvents?: string;
+  queueSummary?: string; modelTelemetry?: string;
+  modelTelemetrySummary?: string;
+  humanActionEvents?: string;
+  humanActionState?: string;
 }
 
 export interface FrontierCodexDashboardRunSourceMetadata {
@@ -222,6 +228,20 @@ export interface FrontierCodexDashboardSnapshot {
     nextJobChangedComputeCount?: number;
     nextJobRoutingFeedbackMatchCount?: number;
     nextJobRoutingCostSignalCount?: number;
+    modelTelemetryRecordCount?: number;
+    modelTelemetryJobCount?: number;
+    modelTelemetryPriceKnownRecordCount?: number;
+    modelTelemetryUnknownPriceRecordCount?: number;
+    modelTelemetryEstimatedCostUsd?: number;
+    modelTelemetryEstimatedInputCostUsd?: number;
+    modelTelemetryEstimatedOutputCostUsd?: number;
+    modelTelemetryEstimatedCostMicroUsd?: number;
+    modelTelemetryBillableInputTokens?: number;
+    modelTelemetryOutputTokens?: number;
+    modelTelemetryVerificationRequiredFailed?: number;
+    humanActionBrokerActionCount?: number;
+    humanActionBrokerOpenCount?: number;
+    humanActionBrokerDismissedCount?: number;
   };
   semantic: FrontierCodexDashboardSemanticMetrics;
   health: FrontierCodexDashboardHealthMetrics;

@@ -44,11 +44,19 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(result.queueStatePath, path.join(outDir, 'queue-state.json'));
   assert.strictEqual(result.queueEventsPath, path.join(outDir, 'queue-events.jsonl'));
   assert.strictEqual(result.queueSummaryPath, path.join(outDir, 'queue-summary.json'));
+  assert.strictEqual(result.modelTelemetryPath, path.join(outDir, 'model-telemetry.jsonl'));
+  assert.strictEqual(result.modelTelemetrySummaryPath, path.join(outDir, 'model-telemetry-summary.json'));
+  assert.strictEqual(result.humanActionEventsPath, path.join(outDir, 'human-actions.jsonl'));
+  assert.strictEqual(result.humanActionStatePath, path.join(outDir, 'human-actions-state.json'));
   assert.strictEqual(sawPlanEventsWhileExecutorRunning, true);
   assert.strictEqual(await exists(liveEventsPath), false);
   assert.strictEqual(await exists(result.queueStatePath), true);
   assert.strictEqual(await exists(result.queueEventsPath), true);
   assert.strictEqual(await exists(result.queueSummaryPath), true);
+  assert.strictEqual(await exists(result.modelTelemetryPath), true);
+  assert.strictEqual(await exists(result.modelTelemetrySummaryPath), true);
+  assert.strictEqual(await exists(result.humanActionEventsPath), true);
+  assert.strictEqual(await exists(result.humanActionStatePath), true);
 
   const queueState = JSON.parse(await fs.readFile(result.queueStatePath, 'utf8'));
   assert.strictEqual(queueState.kind, 'frontier.queue.state');
@@ -62,6 +70,31 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(queueSummary.kind, 'frontier.swarm-codex.queue-runtime');
   assert.strictEqual(queueSummary.inspection.completed, 1);
   assert.deepStrictEqual(queueSummary.terminalSwarmJobIds, [jobId]);
+
+  const telemetryRecords = (await fs.readFile(result.modelTelemetryPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  assert.strictEqual(telemetryRecords.length, 1);
+  assert.strictEqual(telemetryRecords[0].kind, 'frontier.swarm-codex.model-telemetry');
+  assert.strictEqual(telemetryRecords[0].jobId, jobId);
+  assert.strictEqual(telemetryRecords[0].taskId, taskId);
+  assert.strictEqual(telemetryRecords[0].status, 'completed');
+  assert.strictEqual(telemetryRecords[0].verificationTotal, 1);
+  assert.strictEqual(telemetryRecords[0].verificationPassed, 1);
+
+  const telemetrySummary = JSON.parse(await fs.readFile(result.modelTelemetrySummaryPath, 'utf8'));
+  assert.strictEqual(telemetrySummary.kind, 'frontier.swarm-codex.model-telemetry-summary');
+  assert.strictEqual(telemetrySummary.recordCount, 1);
+  assert.strictEqual(telemetrySummary.jobCount, 1);
+  assert.strictEqual(telemetrySummary.verificationPassed, 1);
+  assert.strictEqual(telemetrySummary.humanActionCount, 0);
+
+  const humanActionState = JSON.parse(await fs.readFile(result.humanActionStatePath, 'utf8'));
+  assert.strictEqual(humanActionState.kind, 'frontier.swarm-codex.human-action-state');
+  assert.strictEqual(humanActionState.actionCount, 0);
+  assert.strictEqual(humanActionState.openActionCount, 0);
 
   const verificationGateEvidence = result.run.results[0].metadata.verificationGateEvidence;
   const gateExecutionsPath = verificationGateEvidence.gateExecutionsPath;
@@ -106,6 +139,10 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(dashboard.metadata.queueStatePath, result.queueStatePath);
   assert.strictEqual(dashboard.metadata.queueEventsPath, result.queueEventsPath);
   assert.strictEqual(dashboard.metadata.queueSummaryPath, result.queueSummaryPath);
+  assert.strictEqual(dashboard.metadata.modelTelemetryPath, result.modelTelemetryPath);
+  assert.strictEqual(dashboard.metadata.modelTelemetrySummaryPath, result.modelTelemetrySummaryPath);
+  assert.strictEqual(dashboard.metadata.humanActionEventsPath, result.humanActionEventsPath);
+  assert.strictEqual(dashboard.metadata.humanActionStatePath, result.humanActionStatePath);
   assert.strictEqual('liveRunGraphEventsPath' in dashboard.metadata, false);
   assert.strictEqual(dashboard.metadata.artifactPaths.coordinatorDashboard, path.join(outDir, 'coordinator-dashboard.json'));
   assert.strictEqual(dashboard.metadata.artifactPaths.runEvents, runEventsPath);
@@ -113,6 +150,10 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(dashboard.metadata.artifactPaths.queueState, result.queueStatePath);
   assert.strictEqual(dashboard.metadata.artifactPaths.queueEvents, result.queueEventsPath);
   assert.strictEqual(dashboard.metadata.artifactPaths.queueSummary, result.queueSummaryPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.modelTelemetry, result.modelTelemetryPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.modelTelemetrySummary, result.modelTelemetrySummaryPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.humanActionEvents, result.humanActionEventsPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.humanActionState, result.humanActionStatePath);
   assert.strictEqual('liveRunGraphEvents' in dashboard.metadata.artifactPaths, false);
   assert.strictEqual(dashboard.metadata.runSource.mode, 'frontier-run-events');
   assert.strictEqual(dashboard.metadata.runSource.format, 'jsonl');

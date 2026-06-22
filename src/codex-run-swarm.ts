@@ -21,6 +21,12 @@ import { runScheduledJobPool } from './codex-run-scheduler.js';
 import { runCodexJob } from './codex-run.js';
 import { createCodexQueueRuntime } from './queue-runtime.js';
 import {
+  appendCodexRuntimeProjectionResult,
+  finalizeCodexRuntimeProjectionStores,
+  initCodexRuntimeProjectionStores,
+  resolveCodexRuntimeProjectionPaths
+} from './runtime-projections.js';
+import {
   appendCodexRunEvents,
   initCodexRunEvents,
   readCodexRunEvents,
@@ -72,6 +78,20 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     runDashboardPath: runDashboardPath ?? options.runDashboardPath
   };
   const queueRuntime = await createCodexQueueRuntime(plan, runOptions, outDir);
+  const runtimeProjectionPaths = resolveCodexRuntimeProjectionPaths(runOptions, outDir);
+  await initCodexRuntimeProjectionStores(runtimeProjectionPaths);
+  const jobsById = new Map(plan.jobs.map((job) => [job.id, job]));
+  const projectedJobIds = new Set<string>();
+  const appendRuntimeProjection = async (result: Parameters<typeof appendCodexRuntimeProjectionResult>[0]['result']) => {
+    if (projectedJobIds.has(result.jobId)) return;
+    projectedJobIds.add(result.jobId);
+    await appendCodexRuntimeProjectionResult({
+      paths: runtimeProjectionPaths,
+      plan,
+      job: jobsById.get(result.jobId),
+      result
+    });
+  };
   const adaptiveObservations = await readAdaptiveFeedbackObservations(options);
   const results = await runScheduledJobPool(plan, {
     concurrency: Math.max(1, options.maxConcurrency ?? 1),
@@ -80,8 +100,10 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     observations: adaptiveObservations,
     outDir,
     eventStream,
-    queueRuntime
+    queueRuntime,
+    onJobSettled: appendRuntimeProjection
   }, (job, lease) => runCodexJob(job, runOptions, outDir, lease));
+  for (const result of results) await appendRuntimeProjection(result);
   for (const result of results) {
     const job = plan.jobs.find((entry) => entry.id === result.jobId);
     if (job) {
@@ -103,6 +125,11 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   const runEvents = runEventsPath ? await readCodexRunEvents(runEventsPath) : [];
   await writeCodexRunDashboard(runDashboardPath, runEvents, { runId: run.id });
   const queueSummary = await queueRuntime?.writeSummary();
+  const runtimeProjectionFinal = await finalizeCodexRuntimeProjectionStores({
+    paths: runtimeProjectionPaths,
+    plan,
+    generatedAt: Date.now()
+  });
   await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({
     ok,
     outDir,
@@ -111,7 +138,9 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     ...(runEventsPath ? { runEventsPath } : {}),
     ...(runDashboardPath ? { runDashboardPath } : {}),
     ...(queueRuntime ? queueRuntime.paths : {}),
-    ...(queueSummary ? { queueSummary } : {})
+    ...(queueSummary ? { queueSummary } : {}),
+    ...runtimeProjectionPaths,
+    ...runtimeProjectionFinal
   }, null, 2) + '\n');
   await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
     ok,
@@ -123,7 +152,8 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     pidManifestPath,
     runEventsPath,
     runDashboardPath,
-    ...(queueRuntime ? queueRuntime.paths : {})
+    ...(queueRuntime ? queueRuntime.paths : {}),
+    ...runtimeProjectionPaths
   });
   const result: FrontierCodexSwarmRunResult = {
     ok,
@@ -133,7 +163,8 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     proof,
     ...(runEventsPath ? { runEventsPath } : {}),
     ...(runDashboardPath ? { runDashboardPath } : {}),
-    ...(queueRuntime ? queueRuntime.paths : {})
+    ...(queueRuntime ? queueRuntime.paths : {}),
+    ...runtimeProjectionPaths
   };
   await options.onSwarmFinished?.({ result });
   return result;

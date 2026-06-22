@@ -36,6 +36,7 @@ export async function runScheduledJobPool(
     outDir?: string;
     eventStream?: FrontierSwarmEventStream;
     queueRuntime?: FrontierCodexQueueRuntime;
+    onJobSettled?: (result: FrontierSwarmJobResultInput) => Promise<void> | void;
   },
   worker: (job: FrontierSwarmJob, lease: FrontierSwarmLease) => Promise<FrontierSwarmJobResultInput>
 ): Promise<FrontierSwarmJobResultInput[]> {
@@ -51,6 +52,7 @@ export async function runScheduledJobPool(
     results.push(terminalResult);
     resultByJob.set(terminalResult.jobId, terminalResult);
     completed.add(terminalResult.jobId);
+    await input.onJobSettled?.(terminalResult);
   }
   const adaptiveHistory: FrontierSwarmAdaptiveLoadPlan[] = [];
   let currentAdaptiveLimits: FrontierSwarmAdaptiveLoadPlan['effectiveLimits'] | undefined;
@@ -131,6 +133,7 @@ export async function runScheduledJobPool(
         };
         results.push(result);
         resultByJob.set(result.jobId, result);
+        await input.onJobSettled?.(result);
       }
       break;
     }
@@ -140,6 +143,7 @@ export async function runScheduledJobPool(
     await input.queueRuntime?.settleJob(settled.result);
     results.push(settled.result);
     resultByJob.set(settled.jobId, settled.result);
+    await input.onJobSettled?.(settled.result);
   }
   await input.queueRuntime?.writeSummary();
   return plan.jobs.map((job) => resultByJob.get(job.id)).filter((result): result is FrontierSwarmJobResultInput => !!result);

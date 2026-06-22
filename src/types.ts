@@ -15,4 +15,5 @@ export type * from './types-dependency-health.js';
 export type * from './types-resume.js';
 export type * from './types-continuation.js';
 export type * from './types-dashboard.js';
+export type * from './runtime-projections.js';
 export type * from './tournament-query.js';

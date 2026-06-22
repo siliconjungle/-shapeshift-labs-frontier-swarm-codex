@@ -146,7 +146,7 @@ export function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarm
     dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
     runVerification: boolArg(args.verify, false),
     ...runEventOptionsArg(args),
-    queueStatePath: pathOrFalseArg(args.queueState ?? args['queue-state']), queueEventsPath: pathOrFalseArg(args.queueEvents ?? args['queue-events']), queueSummaryPath: pathOrFalseArg(args.queueSummary ?? args['queue-summary']),
+    queueStatePath: pathOrFalseArg(args.queueState ?? args['queue-state']), queueEventsPath: pathOrFalseArg(args.queueEvents ?? args['queue-events']), queueSummaryPath: pathOrFalseArg(args.queueSummary ?? args['queue-summary']), modelTelemetryPath: pathOrFalseArg(args.modelTelemetry ?? args['model-telemetry']), modelTelemetrySummaryPath: pathOrFalseArg(args.modelTelemetrySummary ?? args['model-telemetry-summary']), humanActionEventsPath: pathOrFalseArg(args.humanActionEvents ?? args['human-action-events']), humanActionStatePath: pathOrFalseArg(args.humanActionState ?? args['human-action-state']),
     semanticImport: semanticImportArg(args), workspace: workspaceArg(args),
     allowedWritePolicy,
     collectGitStatus: allowedWritePolicy?.mode === 'off' ? false : undefined

@@ -21,6 +21,13 @@ import { createDashboardSummary } from './dashboard-ui-summary.js';
 import { createDashboardTimeSeries } from './dashboard-ui-time-series.js';
 import { dashboardArtifactRoots } from './dashboard-ui-workspace.js';
 import { numberValue } from './dashboard-ui-values.js';
+import {
+  mergeHumanActionsForProjection,
+  modelTelemetrySummaryDashboardFields,
+  readCodexRuntimeProjectionArtifacts,
+  type FrontierCodexHumanActionBrokerState,
+  type FrontierCodexModelTelemetrySummary
+} from './runtime-projections.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
 import type { FrontierCodexContinuationResult } from './types-continuation.js';
 import type { CollectedDashboardSource } from './dashboard-ui-types.js';
@@ -54,6 +61,7 @@ export async function readCodexDashboardSnapshot(input: FrontierCodexDashboardSn
   const run = runSource?.json ?? (collectionSource?.json?.runDir ? (await readArtifact<FrontierCodexSwarmRunResult>(cwd, collectionSource.json.runDir, 'swarm-results.json'))?.json : undefined);
   const collection = collectionSource?.json;
   const continuation = fullContinuationSource?.json;
+  const runtimeProjections = await readCodexRuntimeProjectionArtifacts(run?.outDir ?? collection?.runDir);
   const artifactRoots = dashboardArtifactRoots(cwd, runSource?.dir, collectionSource?.dir, collection?.runDir, collection?.outDir);
   const jobs = await createDashboardJobs(run, collection, { cwd, artifactRoots, artifactBases: artifactRoots });
   const semantic = createDashboardSemanticMetrics(collection, jobs);
@@ -68,6 +76,8 @@ export async function readCodexDashboardSnapshot(input: FrontierCodexDashboardSn
     run,
     collection,
     continuation,
+    modelTelemetrySummary: runtimeProjections.modelTelemetrySummary,
+    humanActionState: runtimeProjections.humanActionState,
     jobs,
     semantic
   });
@@ -125,9 +135,20 @@ function createDashboardSnapshot(input: {
   run?: FrontierCodexSwarmRunResult;
   collection?: FrontierCodexCollectResult;
   continuation?: FrontierCodexContinuationResult;
+  modelTelemetrySummary?: FrontierCodexModelTelemetrySummary;
+  humanActionState?: FrontierCodexHumanActionBrokerState;
   jobs: FrontierCodexDashboardSnapshot['jobs'];
   semantic: FrontierCodexDashboardSnapshot['semantic'];
 }): FrontierCodexDashboardSnapshot {
+  const summary = {
+    ...createDashboardSummary(input.run, input.collection, input.continuation, input.jobs),
+    ...modelTelemetrySummaryDashboardFields(input.modelTelemetrySummary),
+    ...(input.humanActionState ? {
+      humanActionBrokerActionCount: input.humanActionState.actionCount,
+      humanActionBrokerOpenCount: input.humanActionState.openActionCount,
+      humanActionBrokerDismissedCount: input.humanActionState.dismissedActionCount
+    } : {})
+  };
   return {
     kind: FRONTIER_SWARM_CODEX_DASHBOARD_SNAPSHOT_KIND,
     version: FRONTIER_SWARM_CODEX_DASHBOARD_SNAPSHOT_VERSION,
@@ -135,14 +156,14 @@ function createDashboardSnapshot(input: {
     generatedAt: Date.now(),
     cwd: input.cwd,
     sources: input.sources,
-    summary: createDashboardSummary(input.run, input.collection, input.continuation, input.jobs),
+    summary,
     semantic: input.semantic,
     health: createDashboardHealthMetrics(input.jobs),
     quality: createDashboardQualityMetrics(input.jobs, input.semantic),
     timeSeries: createDashboardTimeSeries(input.run, input.jobs),
     lanes: createLaneRows(input.jobs),
     jobs: input.jobs,
-    humanActions: createDashboardHumanActions(input.collection?.dashboard),
+    humanActions: createDashboardHumanActionRows(input.collection?.dashboard, input.humanActionState),
     events: (input.run?.run.events ?? []).slice(-80).map((event) => ({
       type: event.type,
       at: event.at,
@@ -154,6 +175,20 @@ function createDashboardSnapshot(input: {
     backlog: continuationBacklog(input.continuation),
     raw: { ...(input.run ? { run: input.run } : {}), ...(input.collection ? { collection: input.collection } : {}), ...(input.continuation ? { continuation: input.continuation } : {}) }
   };
+}
+
+function createDashboardHumanActionRows(
+  dashboard: unknown,
+  humanActionState: FrontierCodexHumanActionBrokerState | undefined
+): FrontierCodexDashboardSnapshot['humanActions'] {
+  const dashboardActions = createDashboardHumanActions(dashboard);
+  if (!humanActionState) return dashboardActions;
+  return createDashboardHumanActions({
+    humanActions: mergeHumanActionsForProjection(
+      humanActionState.actions,
+      dashboardActions as unknown as Record<string, unknown>[]
+    )
+  });
 }
 
 function continuationRouting(continuation: FrontierCodexContinuationResult | undefined): FrontierCodexDashboardSnapshot['routing'] {

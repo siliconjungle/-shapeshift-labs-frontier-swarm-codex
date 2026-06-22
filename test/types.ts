@@ -11,6 +11,8 @@ import {
   discoverCodexHandoffArtifacts,
   estimateCodexModelCost,
   continueCodexSwarmLoop,
+  readCodexHumanActionBrokerState,
+  readCodexModelTelemetrySummary,
   resolveCodexRunEventsPath,
   runCodexSwarm,
   scoreCodexSwarmPatches,
@@ -32,6 +34,8 @@ import {
   type FrontierCodexResourceAllocation,
   type FrontierCodexResourceSchedulingOptions,
   type FrontierCodexModelCostEstimate,
+  type FrontierCodexHumanActionBrokerState,
+  type FrontierCodexModelTelemetrySummary,
   type FrontierCodexSwarmRunOptions,
   type FrontierCodexSwarmRunResult
 } from '../dist/index.js';
@@ -105,15 +109,25 @@ const runOptions: FrontierCodexSwarmRunOptions = {
   runDashboardPath: 'run-dashboard.json',
   queueStatePath: 'queue-state.json',
   queueEventsPath: 'queue-events.jsonl',
-  queueSummaryPath: 'queue-summary.json'
+  queueSummaryPath: 'queue-summary.json',
+  modelTelemetryPath: 'model-telemetry.jsonl',
+  modelTelemetrySummaryPath: 'model-telemetry-summary.json',
+  humanActionEventsPath: 'human-actions.jsonl',
+  humanActionStatePath: 'human-actions-state.json'
 };
 resultPromise.then((result) => {
   result.queueStatePath satisfies string | undefined;
   result.queueEventsPath satisfies string | undefined;
   result.queueSummaryPath satisfies string | undefined;
+  result.modelTelemetryPath satisfies string | undefined;
+  result.modelTelemetrySummaryPath satisfies string | undefined;
+  result.humanActionEventsPath satisfies string | undefined;
+  result.humanActionStatePath satisfies string | undefined;
 });
 const runEventsPath: string | undefined = resolveCodexRunEventsPath({ outDir: '.' });
 const runProjection = createCodexRunProjection([]);
+const modelTelemetrySummaryPromise: Promise<FrontierCodexModelTelemetrySummary | undefined> = readCodexModelTelemetrySummary('model-telemetry-summary.json');
+const humanActionStatePromise: Promise<FrontierCodexHumanActionBrokerState | undefined> = readCodexHumanActionBrokerState('human-actions-state.json');
 const cliInput: FrontierCodexSwarmCliInput = {
   manifest: { lanes: [{ id: 'runtime', allowedWrites: ['src/**'] }] },
   tasks: [],
@@ -225,9 +239,13 @@ collectPromise.then((collection) => {
   collection.queueOutcomeModel?.summary.visibleReviewDebtCount satisfies number | undefined;
   collection.terminalState?.summary.activeItemCount satisfies number | undefined;
   collection.summary.collectorGeneratedPatchCount satisfies number | undefined;
+  collection.metadata?.modelTelemetrySummary satisfies unknown;
+  collection.metadata?.humanActionState satisfies unknown;
   collection.buckets['needs-human-port'][0]?.generatedByCollector satisfies boolean | undefined;
   collection.buckets['needs-human-port'][0]?.patchPath satisfies string | undefined;
 });
+modelTelemetrySummaryPromise satisfies Promise<FrontierCodexModelTelemetrySummary | undefined>;
+humanActionStatePromise satisfies Promise<FrontierCodexHumanActionBrokerState | undefined>;
 applyPromise satisfies Promise<FrontierCodexApplyResult>;
 scorePromise satisfies Promise<FrontierCodexPatchScoreResult>;
 handoffArtifactsPromise satisfies Promise<readonly { kind: string; path: string }[]>;
