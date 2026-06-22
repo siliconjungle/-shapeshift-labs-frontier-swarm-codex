@@ -7,7 +7,8 @@ import {
   createSwarmProof,
   createSwarmRun,
   recordSwarmEvent,
-  type FrontierSwarmPlan
+  type FrontierSwarmPlan,
+  type FrontierSwarmRoutingController
 } from '@shapeshift-labs/frontier-swarm';
 import { readAdaptiveFeedbackObservations } from './codex-adaptive-feedback.js';
 import {
@@ -26,6 +27,7 @@ import {
   initCodexRuntimeProjectionStores,
   resolveCodexRuntimeProjectionPaths
 } from './runtime-projections.js';
+import { resolveCodexLiveRoutingPaths, type FrontierCodexLiveRoutingPaths } from './live-routing.js';
 import {
   appendCodexRunEvents,
   initCodexRunEvents,
@@ -79,8 +81,11 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   };
   const queueRuntime = await createCodexQueueRuntime(plan, runOptions, outDir);
   const runtimeProjectionPaths = resolveCodexRuntimeProjectionPaths(runOptions, outDir);
+  const liveRoutingPaths: FrontierCodexLiveRoutingPaths = resolveCodexLiveRoutingPaths(runOptions, outDir);
   await initCodexRuntimeProjectionStores(runtimeProjectionPaths);
-  const jobsById = new Map(plan.jobs.map((job) => [job.id, job]));
+  let effectivePlan = plan;
+  let latestLiveRoutingController: FrontierSwarmRoutingController | undefined;
+  let jobsById = new Map(effectivePlan.jobs.map((job) => [job.id, job]));
   const projectedJobIds = new Set<string>();
   const appendRuntimeProjection = async (result: Parameters<typeof appendCodexRuntimeProjectionResult>[0]['result']) => {
     if (projectedJobIds.has(result.jobId)) return;
@@ -101,11 +106,18 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     outDir,
     eventStream,
     queueRuntime,
+    liveRouting: runOptions.liveRouting,
+    liveRoutingPaths,
+    onPlanRerouted: ({ plan: routedPlan, controller }) => {
+      effectivePlan = routedPlan;
+      latestLiveRoutingController = controller;
+      jobsById = new Map(effectivePlan.jobs.map((job) => [job.id, job]));
+    },
     onJobSettled: appendRuntimeProjection
   }, (job, lease) => runCodexJob(job, runOptions, outDir, lease));
   for (const result of results) await appendRuntimeProjection(result);
   for (const result of results) {
-    const job = plan.jobs.find((entry) => entry.id === result.jobId);
+    const job = effectivePlan.jobs.find((entry) => entry.id === result.jobId);
     if (job) {
       await options.onJobFinished?.({ job, result });
       await appendFileSwarmEvent(eventStream, {
@@ -117,6 +129,10 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
         data: { status: result.status, mergeReadiness: result.mergeReadiness, changedPathCount: result.changedPaths?.length ?? 0 }
       });
     }
+  }
+  if (effectivePlan !== plan) {
+    run = createSwarmRun({ plan: effectivePlan, status: 'running', startedAt: run.startedAt });
+    run = recordSwarmEvent(run, startedEvent);
   }
   for (const result of results) run = completeSwarmJob(run, result);
   const proof = createSwarmProof(run, { validation: plan.validation });
@@ -133,6 +149,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({
     ok,
     outDir,
+    plan: effectivePlan,
     run,
     proof,
     ...(runEventsPath ? { runEventsPath } : {}),
@@ -140,12 +157,14 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     ...(queueRuntime ? queueRuntime.paths : {}),
     ...(queueSummary ? { queueSummary } : {}),
     ...runtimeProjectionPaths,
+    ...liveRoutingPaths,
+    ...(latestLiveRoutingController ? { liveRoutingController: latestLiveRoutingController } : {}),
     ...runtimeProjectionFinal
   }, null, 2) + '\n');
   await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
     ok,
     outDir,
-    plan,
+    plan: effectivePlan,
     run,
     proof,
     eventStream,
@@ -153,18 +172,21 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     runEventsPath,
     runDashboardPath,
     ...(queueRuntime ? queueRuntime.paths : {}),
-    ...runtimeProjectionPaths
+    ...runtimeProjectionPaths,
+    ...liveRoutingPaths
   });
   const result: FrontierCodexSwarmRunResult = {
     ok,
     outDir,
-    plan,
+    plan: effectivePlan,
     run,
     proof,
     ...(runEventsPath ? { runEventsPath } : {}),
     ...(runDashboardPath ? { runDashboardPath } : {}),
     ...(queueRuntime ? queueRuntime.paths : {}),
-    ...runtimeProjectionPaths
+    ...runtimeProjectionPaths,
+    ...liveRoutingPaths,
+    ...(latestLiveRoutingController ? { liveRoutingController: latestLiveRoutingController } : {})
   };
   await options.onSwarmFinished?.({ result });
   return result;

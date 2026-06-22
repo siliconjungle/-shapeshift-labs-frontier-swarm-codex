@@ -11,8 +11,11 @@ import {
   discoverCodexHandoffArtifacts,
   estimateCodexModelCost,
   continueCodexSwarmLoop,
+  createCodexLiveRoutingController,
   readCodexHumanActionBrokerState,
   readCodexModelTelemetrySummary,
+  normalizeCodexLiveRoutingOptions,
+  resolveCodexLiveRoutingPaths,
   resolveCodexRunEventsPath,
   runCodexSwarm,
   scoreCodexSwarmPatches,
@@ -35,6 +38,8 @@ import {
   type FrontierCodexResourceSchedulingOptions,
   type FrontierCodexModelCostEstimate,
   type FrontierCodexHumanActionBrokerState,
+  type FrontierCodexLiveRoutingPaths,
+  type FrontierCodexLiveRoutingResolvedOptions,
   type FrontierCodexModelTelemetrySummary,
   type FrontierCodexSwarmRunOptions,
   type FrontierCodexSwarmRunResult
@@ -113,7 +118,11 @@ const runOptions: FrontierCodexSwarmRunOptions = {
   modelTelemetryPath: 'model-telemetry.jsonl',
   modelTelemetrySummaryPath: 'model-telemetry-summary.json',
   humanActionEventsPath: 'human-actions.jsonl',
-  humanActionStatePath: 'human-actions-state.json'
+  humanActionStatePath: 'human-actions-state.json',
+  liveRouting: { enabled: true, routingMode: 'fill', minSamples: 1, writeArtifacts: true },
+  liveRoutingPolicyPath: 'model-routing-policy.live.json',
+  liveRoutingControllerPath: 'routing-controller.json',
+  liveRoutingHistoryPath: 'routing-controller-history.json'
 };
 resultPromise.then((result) => {
   result.queueStatePath satisfies string | undefined;
@@ -123,9 +132,21 @@ resultPromise.then((result) => {
   result.modelTelemetrySummaryPath satisfies string | undefined;
   result.humanActionEventsPath satisfies string | undefined;
   result.humanActionStatePath satisfies string | undefined;
+  result.liveRoutingPolicyPath satisfies string | undefined;
+  result.liveRoutingControllerPath satisfies string | undefined;
+  result.liveRoutingHistoryPath satisfies string | undefined;
+  result.liveRoutingController?.summary.changedComputeCount satisfies number | undefined;
 });
 const runEventsPath: string | undefined = resolveCodexRunEventsPath({ outDir: '.' });
 const runProjection = createCodexRunProjection([]);
+const liveRoutingOptions: FrontierCodexLiveRoutingResolvedOptions = normalizeCodexLiveRoutingOptions(runOptions.liveRouting);
+const liveRoutingPaths: FrontierCodexLiveRoutingPaths = resolveCodexLiveRoutingPaths(runOptions, '.');
+const liveRoutingController = createCodexLiveRoutingController({
+  plan,
+  records: [],
+  options: liveRoutingOptions,
+  generatedAt: Date.now()
+});
 const modelTelemetrySummaryPromise: Promise<FrontierCodexModelTelemetrySummary | undefined> = readCodexModelTelemetrySummary('model-telemetry-summary.json');
 const humanActionStatePromise: Promise<FrontierCodexHumanActionBrokerState | undefined> = readCodexHumanActionBrokerState('human-actions-state.json');
 const cliInput: FrontierCodexSwarmCliInput = {
@@ -231,6 +252,8 @@ workspacePlan satisfies FrontierCodexWorkspacePlan;
 resourceAllocation.env satisfies Record<string, string>;
 resourceScheduling satisfies FrontierCodexResourceSchedulingOptions;
 runOptions satisfies FrontierCodexSwarmRunOptions;
+liveRoutingPaths.liveRoutingPolicyPath satisfies string | undefined;
+liveRoutingController.summary.telemetryRecordCount satisfies number;
 cliInput satisfies FrontierCodexSwarmCliInput;
 workspaceManifest.kind satisfies string;
 resultPromise satisfies Promise<FrontierCodexSwarmRunResult>;

@@ -48,6 +48,9 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(result.modelTelemetrySummaryPath, path.join(outDir, 'model-telemetry-summary.json'));
   assert.strictEqual(result.humanActionEventsPath, path.join(outDir, 'human-actions.jsonl'));
   assert.strictEqual(result.humanActionStatePath, path.join(outDir, 'human-actions-state.json'));
+  assert.strictEqual(result.liveRoutingPolicyPath, path.join(outDir, 'model-routing-policy.live.json'));
+  assert.strictEqual(result.liveRoutingControllerPath, path.join(outDir, 'routing-controller.json'));
+  assert.strictEqual(result.liveRoutingHistoryPath, path.join(outDir, 'routing-controller-history.json'));
   assert.strictEqual(sawPlanEventsWhileExecutorRunning, true);
   assert.strictEqual(await exists(liveEventsPath), false);
   assert.strictEqual(await exists(result.queueStatePath), true);
@@ -57,6 +60,9 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(await exists(result.modelTelemetrySummaryPath), true);
   assert.strictEqual(await exists(result.humanActionEventsPath), true);
   assert.strictEqual(await exists(result.humanActionStatePath), true);
+  assert.strictEqual(await exists(result.liveRoutingPolicyPath), true);
+  assert.strictEqual(await exists(result.liveRoutingControllerPath), true);
+  assert.strictEqual(await exists(result.liveRoutingHistoryPath), true);
 
   const queueState = JSON.parse(await fs.readFile(result.queueStatePath, 'utf8'));
   assert.strictEqual(queueState.kind, 'frontier.queue.state');
@@ -143,6 +149,9 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(dashboard.metadata.modelTelemetrySummaryPath, result.modelTelemetrySummaryPath);
   assert.strictEqual(dashboard.metadata.humanActionEventsPath, result.humanActionEventsPath);
   assert.strictEqual(dashboard.metadata.humanActionStatePath, result.humanActionStatePath);
+  assert.strictEqual(dashboard.metadata.liveRoutingPolicyPath, result.liveRoutingPolicyPath);
+  assert.strictEqual(dashboard.metadata.liveRoutingControllerPath, result.liveRoutingControllerPath);
+  assert.strictEqual(dashboard.metadata.liveRoutingHistoryPath, result.liveRoutingHistoryPath);
   assert.strictEqual('liveRunGraphEventsPath' in dashboard.metadata, false);
   assert.strictEqual(dashboard.metadata.artifactPaths.coordinatorDashboard, path.join(outDir, 'coordinator-dashboard.json'));
   assert.strictEqual(dashboard.metadata.artifactPaths.runEvents, runEventsPath);
@@ -154,6 +163,9 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(dashboard.metadata.artifactPaths.modelTelemetrySummary, result.modelTelemetrySummaryPath);
   assert.strictEqual(dashboard.metadata.artifactPaths.humanActionEvents, result.humanActionEventsPath);
   assert.strictEqual(dashboard.metadata.artifactPaths.humanActionState, result.humanActionStatePath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.liveRoutingPolicy, result.liveRoutingPolicyPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.liveRoutingController, result.liveRoutingControllerPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.liveRoutingHistory, result.liveRoutingHistoryPath);
   assert.strictEqual('liveRunGraphEvents' in dashboard.metadata.artifactPaths, false);
   assert.strictEqual(dashboard.metadata.runSource.mode, 'frontier-run-events');
   assert.strictEqual(dashboard.metadata.runSource.format, 'jsonl');

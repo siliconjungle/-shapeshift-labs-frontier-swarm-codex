@@ -1,4 +1,5 @@
 export type * from './types-run.js';
+export type * from './types-live-routing.js';
 export type * from './types-semantic.js';
 export type * from './types-semantic-compact.js';
 export type * from './types-semantic-edit.js';

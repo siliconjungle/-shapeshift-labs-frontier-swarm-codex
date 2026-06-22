@@ -33,8 +33,8 @@ export interface FrontierCodexDashboardArtifactPaths {
   queueEvents?: string;
   queueSummary?: string; modelTelemetry?: string;
   modelTelemetrySummary?: string;
-  humanActionEvents?: string;
-  humanActionState?: string;
+  humanActionEvents?: string; humanActionState?: string;
+  liveRoutingPolicy?: string; liveRoutingController?: string; liveRoutingHistory?: string;
 }
 
 export interface FrontierCodexDashboardRunSourceMetadata {

@@ -58,6 +58,9 @@ export async function writeSwarmCoordinatorSnapshot(
     modelTelemetrySummaryPath?: string;
     humanActionEventsPath?: string;
     humanActionStatePath?: string;
+    liveRoutingPolicyPath?: string;
+    liveRoutingControllerPath?: string;
+    liveRoutingHistoryPath?: string;
   }
 ): Promise<void> {
   const processes = input.pidManifestPath ? await readCodexPidProcesses(input.pidManifestPath).catch(() => []) : [];
@@ -83,6 +86,9 @@ export async function writeSwarmCoordinatorSnapshot(
       modelTelemetrySummaryPath: input.modelTelemetrySummaryPath ?? null,
       humanActionEventsPath: input.humanActionEventsPath ?? null,
       humanActionStatePath: input.humanActionStatePath ?? null,
+      liveRoutingPolicyPath: input.liveRoutingPolicyPath ?? null,
+      liveRoutingControllerPath: input.liveRoutingControllerPath ?? null,
+      liveRoutingHistoryPath: input.liveRoutingHistoryPath ?? null,
       artifactPaths: {
         coordinatorDashboard: file,
         ...runEventsMetadata.artifactPaths,
@@ -92,7 +98,10 @@ export async function writeSwarmCoordinatorSnapshot(
         ...(input.modelTelemetryPath ? { modelTelemetry: input.modelTelemetryPath } : {}),
         ...(input.modelTelemetrySummaryPath ? { modelTelemetrySummary: input.modelTelemetrySummaryPath } : {}),
         ...(input.humanActionEventsPath ? { humanActionEvents: input.humanActionEventsPath } : {}),
-        ...(input.humanActionStatePath ? { humanActionState: input.humanActionStatePath } : {})
+        ...(input.humanActionStatePath ? { humanActionState: input.humanActionStatePath } : {}),
+        ...(input.liveRoutingPolicyPath ? { liveRoutingPolicy: input.liveRoutingPolicyPath } : {}),
+        ...(input.liveRoutingControllerPath ? { liveRoutingController: input.liveRoutingControllerPath } : {}),
+        ...(input.liveRoutingHistoryPath ? { liveRoutingHistory: input.liveRoutingHistoryPath } : {})
       },
       runSource: runEventsMetadata.runSource,
       proof: input.proof

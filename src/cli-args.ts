@@ -8,9 +8,9 @@ import {
   type FrontierCodexSwarmRunOptions
 } from './index.js';
 import { contextBudgetArg } from './cli-context-budget.js';
+import { liveRoutingArg } from './cli-live-routing-args.js';
 import { pathOrFalseArg, runEventOptionsArg } from './cli-run-events-args.js';
-export type CliValue = string | boolean | string[];
-export type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
+export type CliValue = string | boolean | string[]; export type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
 
 export function parseArgs(argv: string[]): CliArgs {
   const out: CliArgs = { _: [] };
@@ -30,7 +30,6 @@ export function parseArgs(argv: string[]): CliArgs {
   }
   return out;
 }
-
 export async function loadPlan(options: CliArgs) {
   const manifestPath = String(options.manifest ?? '');
   const tasksPath = String(options.tasks ?? '');
@@ -133,6 +132,7 @@ export function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarm
     compactLogs: compactLogsArg(args),
     contextBudget: contextBudgetArg(args),
     dependencyHealth: dependencyHealthArg(args),
+    liveRouting: liveRoutingArg(args),
     semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
     adaptiveFeedbackPath: stringArg(args.adaptiveFeedback ?? args['adaptive-feedback'] ?? args.tournamentFeedback ?? args['tournament-feedback']),
     sandbox: stringArg(args.sandbox),
@@ -146,7 +146,7 @@ export function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarm
     dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
     runVerification: boolArg(args.verify, false),
     ...runEventOptionsArg(args),
-    queueStatePath: pathOrFalseArg(args.queueState ?? args['queue-state']), queueEventsPath: pathOrFalseArg(args.queueEvents ?? args['queue-events']), queueSummaryPath: pathOrFalseArg(args.queueSummary ?? args['queue-summary']), modelTelemetryPath: pathOrFalseArg(args.modelTelemetry ?? args['model-telemetry']), modelTelemetrySummaryPath: pathOrFalseArg(args.modelTelemetrySummary ?? args['model-telemetry-summary']), humanActionEventsPath: pathOrFalseArg(args.humanActionEvents ?? args['human-action-events']), humanActionStatePath: pathOrFalseArg(args.humanActionState ?? args['human-action-state']),
+    queueStatePath: pathOrFalseArg(args.queueState ?? args['queue-state']), queueEventsPath: pathOrFalseArg(args.queueEvents ?? args['queue-events']), queueSummaryPath: pathOrFalseArg(args.queueSummary ?? args['queue-summary']), modelTelemetryPath: pathOrFalseArg(args.modelTelemetry ?? args['model-telemetry']), modelTelemetrySummaryPath: pathOrFalseArg(args.modelTelemetrySummary ?? args['model-telemetry-summary']), humanActionEventsPath: pathOrFalseArg(args.humanActionEvents ?? args['human-action-events']), humanActionStatePath: pathOrFalseArg(args.humanActionState ?? args['human-action-state']), liveRoutingPolicyPath: pathOrFalseArg(args.liveRoutingPolicy ?? args['live-routing-policy']), liveRoutingControllerPath: pathOrFalseArg(args.liveRoutingController ?? args['live-routing-controller']), liveRoutingHistoryPath: pathOrFalseArg(args.liveRoutingHistory ?? args['live-routing-history']),
     semanticImport: semanticImportArg(args), workspace: workspaceArg(args),
     allowedWritePolicy,
     collectGitStatus: allowedWritePolicy?.mode === 'off' ? false : undefined

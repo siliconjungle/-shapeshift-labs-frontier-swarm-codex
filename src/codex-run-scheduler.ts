@@ -12,17 +12,27 @@ import {
   type FrontierSwarmJobResultInput,
   type FrontierSwarmLease,
   type FrontierSwarmMergeBundle,
-  type FrontierSwarmPlan
+  type FrontierSwarmModelTelemetryRecordInput,
+  type FrontierSwarmPlan,
+  type FrontierSwarmRoutingController
 } from '@shapeshift-labs/frontier-swarm';
 import { writeJsonAtomic } from './common.js';
 import { createCodexResourceScheduledPlan } from './codex-resource-schedule.js';
 import { summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { appendFileSwarmEvent } from './codex-events.js';
 import { contextBudgetFromCoordinatorJob } from './context-budget.js';
+import {
+  createCodexLiveRoutingController,
+  createCodexLiveRoutingTelemetryRecord,
+  normalizeCodexLiveRoutingOptions,
+  writeCodexLiveRoutingArtifacts,
+  type FrontierCodexLiveRoutingPaths
+} from './live-routing.js';
 import type {
   FrontierCodexContextBudgetReport,
   FrontierCodexAdaptiveConcurrencyOptions,
-  FrontierCodexLogSummary
+  FrontierCodexLogSummary,
+  FrontierCodexSwarmRunOptions
 } from './index.js';
 import type { FrontierCodexQueueRuntime } from './queue-runtime.js';
 
@@ -36,31 +46,95 @@ export async function runScheduledJobPool(
     outDir?: string;
     eventStream?: FrontierSwarmEventStream;
     queueRuntime?: FrontierCodexQueueRuntime;
+    liveRouting?: FrontierCodexSwarmRunOptions['liveRouting'];
+    liveRoutingPaths?: FrontierCodexLiveRoutingPaths;
     onJobSettled?: (result: FrontierSwarmJobResultInput) => Promise<void> | void;
+    onPlanRerouted?: (input: { plan: FrontierSwarmPlan; controller: FrontierSwarmRoutingController }) => Promise<void> | void;
   },
   worker: (job: FrontierSwarmJob, lease: FrontierSwarmLease) => Promise<FrontierSwarmJobResultInput>
 ): Promise<FrontierSwarmJobResultInput[]> {
   const concurrency = Math.max(1, Math.floor(input.concurrency));
   const adaptiveOptions = normalizeAdaptiveConcurrencyOptions(input.adaptive, concurrency);
-  const resourceSchedule = createCodexResourceScheduledPlan(plan, concurrency, input.resourceScheduling);
+  let resourceSchedule = createCodexResourceScheduledPlan(plan, concurrency, input.resourceScheduling);
+  let currentPlan = resourceSchedule.plan;
   const results: FrontierSwarmJobResultInput[] = [];
   const active = new Map<string, Promise<FrontierSwarmJobResultInput>>();
+  const activeJobs = new Map<string, FrontierSwarmJob>();
   const leases: FrontierSwarmLease[] = [];
   const completed = new Set<string>();
   const resultByJob = new Map<string, FrontierSwarmJobResultInput>();
-  for (const terminalResult of input.queueRuntime?.seedTerminalResults(plan.jobs) ?? []) {
+  const liveRoutingOptions = normalizeCodexLiveRoutingOptions(input.liveRouting);
+  const liveRoutingRecords: FrontierSwarmModelTelemetryRecordInput[] = [];
+  const liveRoutingHistory: FrontierSwarmRoutingController[] = [];
+  let lastLiveRoutingRecordCount = 0;
+  let lastLiveRoutingController: FrontierSwarmRoutingController | undefined;
+  const recordLiveTelemetry = (result: FrontierSwarmJobResultInput, job?: FrontierSwarmJob) => {
+    if (!liveRoutingOptions.enabled) return;
+    const sourceJob = job ?? activeJobs.get(result.jobId) ?? currentPlan.jobs.find((entry) => entry.id === result.jobId);
+    liveRoutingRecords.push(createCodexLiveRoutingTelemetryRecord({
+      plan: currentPlan,
+      job: sourceJob,
+      result,
+      generatedAt: Date.now()
+    }));
+  };
+  const refreshLiveRouting = async () => {
+    if (!liveRoutingOptions.enabled || liveRoutingRecords.length === 0 || liveRoutingRecords.length === lastLiveRoutingRecordCount) return;
+    const controller = createCodexLiveRoutingController({
+      plan: currentPlan,
+      records: liveRoutingRecords,
+      options: liveRoutingOptions,
+      activeJobIds: Array.from(active.keys()),
+      completedJobIds: Array.from(completed),
+      generatedAt: Date.now()
+    });
+    lastLiveRoutingRecordCount = liveRoutingRecords.length;
+    lastLiveRoutingController = controller;
+    liveRoutingHistory.push(controller);
+    if (controller.routedPlan) {
+      currentPlan = controller.routedPlan;
+      resourceSchedule = createCodexResourceScheduledPlan(currentPlan, concurrency, input.resourceScheduling);
+      currentPlan = resourceSchedule.plan;
+      await input.onPlanRerouted?.({ plan: currentPlan, controller });
+    }
+    if (input.liveRoutingPaths) {
+      await writeCodexLiveRoutingArtifacts({
+        paths: input.liveRoutingPaths,
+        options: liveRoutingOptions,
+        controller,
+        history: liveRoutingHistory
+      }).catch(() => {});
+    }
+    await appendFileSwarmEvent(input.eventStream, {
+      type: 'swarm.live-routing',
+      runId: currentPlan.runId,
+      data: {
+        controllerId: controller.id,
+        policyId: controller.policy.id,
+        routingMode: controller.routingMode,
+        telemetryRecordCount: controller.summary.telemetryRecordCount,
+        changedComputeCount: controller.summary.changedComputeCount,
+        signalCount: controller.summary.signalCount,
+        preferCount: controller.summary.preferCount,
+        avoidCount: controller.summary.avoidCount
+      }
+    });
+  };
+  for (const terminalResult of input.queueRuntime?.seedTerminalResults(currentPlan.jobs) ?? []) {
     results.push(terminalResult);
     resultByJob.set(terminalResult.jobId, terminalResult);
     completed.add(terminalResult.jobId);
+    recordLiveTelemetry(terminalResult);
     await input.onJobSettled?.(terminalResult);
   }
   const adaptiveHistory: FrontierSwarmAdaptiveLoadPlan[] = [];
   let currentAdaptiveLimits: FrontierSwarmAdaptiveLoadPlan['effectiveLimits'] | undefined;
-  while (resultByJob.size < plan.jobs.length) {
-    const run = createSwarmRun({ plan: resourceSchedule.plan, status: 'running', results });
+  while (resultByJob.size < currentPlan.jobs.length) {
+    await refreshLiveRouting();
+    const run = createSwarmRun({ plan: currentPlan, status: 'running', results });
     run.jobs = run.jobs.map((job) => active.has(job.id) ? { ...job, status: 'running' } : job);
     const adaptivePlan = adaptiveOptions.enabled ? createSwarmAdaptiveLoadPlan({
-      plan: resourceSchedule.plan,
+      plan: currentPlan,
       run,
       mode: adaptiveOptions.mode,
       maxLimits: { maxReadyJobs: adaptiveOptions.maxConcurrency, ...resourceSchedule.limits },
@@ -99,12 +173,12 @@ export async function runScheduledJobPool(
     const readyWindow = Math.max(0, effectiveConcurrency - active.size);
     const schedule = createSwarmSchedule({
       ...(adaptivePlan
-        ? createSwarmScheduleInputFromAdaptiveLoadPlan(resourceSchedule.plan, adaptivePlan, { run })
-        : { plan: resourceSchedule.plan, run, ...resourceSchedule.limits }),
+        ? createSwarmScheduleInputFromAdaptiveLoadPlan(currentPlan, adaptivePlan, { run })
+        : { plan: currentPlan, run, ...resourceSchedule.limits }),
       maxReadyJobs: readyWindow
     });
     const queueLeases = input.queueRuntime
-      ? await input.queueRuntime.leaseScheduledJobs(schedule.ready, new Map(resourceSchedule.plan.jobs.map((job) => [job.id, job])), readyWindow)
+      ? await input.queueRuntime.leaseScheduledJobs(schedule.ready, new Map(currentPlan.jobs.map((job) => [job.id, job])), readyWindow)
       : undefined;
     const queueLeasedJobIds = queueLeases ? new Set(queueLeases.map((lease) => lease.jobId)) : undefined;
     const nextLeases = createSwarmLeases({
@@ -114,10 +188,11 @@ export async function runScheduledJobPool(
       existingLeases: leases
     });
     for (const lease of nextLeases) {
-      const job = resourceSchedule.plan.jobs.find((entry) => entry.id === lease.jobId);
+      const job = currentPlan.jobs.find((entry) => entry.id === lease.jobId);
       if (!job || active.has(job.id) || completed.has(job.id)) continue;
       if (queueLeasedJobIds && !queueLeasedJobIds.has(job.id)) continue;
       leases.push(lease);
+      activeJobs.set(job.id, job);
       active.set(job.id, worker(job, lease));
     }
     if (active.size === 0) {
@@ -133,20 +208,33 @@ export async function runScheduledJobPool(
         };
         results.push(result);
         resultByJob.set(result.jobId, result);
+        recordLiveTelemetry(result);
         await input.onJobSettled?.(result);
       }
       break;
     }
     const settled = await Promise.race(Array.from(active.entries()).map(async ([jobId, promise]) => ({ jobId, result: await promise })));
     active.delete(settled.jobId);
+    const settledJob = activeJobs.get(settled.jobId);
+    activeJobs.delete(settled.jobId);
     completed.add(settled.jobId);
     await input.queueRuntime?.settleJob(settled.result);
     results.push(settled.result);
     resultByJob.set(settled.jobId, settled.result);
+    recordLiveTelemetry(settled.result, settledJob);
     await input.onJobSettled?.(settled.result);
   }
+  await refreshLiveRouting();
   await input.queueRuntime?.writeSummary();
-  return plan.jobs.map((job) => resultByJob.get(job.id)).filter((result): result is FrontierSwarmJobResultInput => !!result);
+  if (lastLiveRoutingController && input.liveRoutingPaths) {
+    await writeCodexLiveRoutingArtifacts({
+      paths: input.liveRoutingPaths,
+      options: liveRoutingOptions,
+      controller: lastLiveRoutingController,
+      history: liveRoutingHistory
+    }).catch(() => {});
+  }
+  return currentPlan.jobs.map((job) => resultByJob.get(job.id)).filter((result): result is FrontierSwarmJobResultInput => !!result);
 }
 
 function normalizeAdaptiveConcurrencyOptions(

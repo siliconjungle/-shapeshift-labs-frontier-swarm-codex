@@ -143,6 +143,20 @@ export type {
   FrontierCodexRuntimeProjectionPaths
 } from './runtime-projections.js';
 export {
+  FRONTIER_SWARM_CODEX_LIVE_ROUTING_CONTROLLER_FILE,
+  FRONTIER_SWARM_CODEX_LIVE_ROUTING_HISTORY_FILE,
+  FRONTIER_SWARM_CODEX_LIVE_ROUTING_POLICY_FILE,
+  createCodexLiveRoutingController,
+  createCodexLiveRoutingTelemetryRecord,
+  normalizeCodexLiveRoutingOptions,
+  resolveCodexLiveRoutingPaths,
+  writeCodexLiveRoutingArtifacts
+} from './live-routing.js';
+export type {
+  FrontierCodexLiveRoutingPaths,
+  FrontierCodexLiveRoutingResolvedOptions
+} from './live-routing.js';
+export {
   buildCodexArgs,
   createCodexResourceAllocation,
   normalizeCodexApprovalPolicy,

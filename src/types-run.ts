@@ -18,6 +18,7 @@ import type {
   FrontierSwarmModelRoutingPolicySignalInput,
   FrontierSwarmPlan,
   FrontierSwarmPlanInput,
+  FrontierSwarmRoutingController,
   FrontierSwarmRun,
   FrontierSwarmTaskInput
 } from '@shapeshift-labs/frontier-swarm';
@@ -25,13 +26,11 @@ import type { FrontierCodexSemanticImportOptions } from './types-semantic.js';
 import type { FrontierCodexLogSummary } from './types-evidence.js';
 import type { FrontierCodexWorkspacePlan } from './types-workspace.js';
 import type { FrontierCodexDependencyHealthOptions } from './types-dependency-health.js';
+import type { FrontierCodexLiveRoutingOptions } from './types-live-routing.js';
 
 export type FrontierCodexModelPolicy = 'config-default' | 'plan' | 'explicit';
-
 export type FrontierCodexSwarmWorkspaceMode = 'current' | 'git-worktree' | 'snapshot' | 'copy';
-
 export type FrontierCodexAllowedWriteEnforcement = 'audit' | 'strict' | 'off';
-
 export interface FrontierCodexAllowedWritePolicyContract {
   mode: FrontierCodexAllowedWriteEnforcement;
   observesHostWorkspaceChanges: boolean;
@@ -261,6 +260,7 @@ export interface FrontierCodexSwarmRunOptions {
   compactLogs?: boolean | FrontierCodexCompactLogOptions;
   contextBudget?: boolean | FrontierCodexContextBudgetOptions;
   dependencyHealth?: boolean | FrontierCodexDependencyHealthOptions;
+  liveRouting?: boolean | FrontierCodexLiveRoutingOptions;
   semanticImportExpected?: boolean;
   adaptiveFeedbackPath?: string;
   adaptiveObservations?: readonly FrontierSwarmAdaptiveObservationInput[];
@@ -284,7 +284,7 @@ export interface FrontierCodexSwarmRunOptions {
   executor?: FrontierCodexExecutor;
   eventStream?: FrontierSwarmEventStream;
   runEventsPath?: string | false; runDashboardPath?: string | false;
-  queueStatePath?: string | false; queueEventsPath?: string | false; queueSummaryPath?: string | false; modelTelemetryPath?: string | false; modelTelemetrySummaryPath?: string | false; humanActionEventsPath?: string | false; humanActionStatePath?: string | false;
+  queueStatePath?: string | false; queueEventsPath?: string | false; queueSummaryPath?: string | false; modelTelemetryPath?: string | false; modelTelemetrySummaryPath?: string | false; humanActionEventsPath?: string | false; humanActionStatePath?: string | false; liveRoutingPolicyPath?: string | false; liveRoutingControllerPath?: string | false; liveRoutingHistoryPath?: string | false;
   coordinatorSnapshotPath?: string; pidManifestPath?: string;
   prepareJobWorkspace?: FrontierCodexJobWorkspaceHook;
   renderJobPrompt?: FrontierCodexJobPromptHook;
@@ -303,7 +303,7 @@ export interface FrontierCodexSwarmRunResult {
   proof: ReturnType<typeof createSwarmProof>;
   runEventsPath?: string;
   runDashboardPath?: string;
-  queueStatePath?: string; queueEventsPath?: string; queueSummaryPath?: string; modelTelemetryPath?: string; modelTelemetrySummaryPath?: string; humanActionEventsPath?: string; humanActionStatePath?: string;
+  queueStatePath?: string; queueEventsPath?: string; queueSummaryPath?: string; modelTelemetryPath?: string; modelTelemetrySummaryPath?: string; humanActionEventsPath?: string; humanActionStatePath?: string; liveRoutingPolicyPath?: string; liveRoutingControllerPath?: string; liveRoutingHistoryPath?: string; liveRoutingController?: FrontierSwarmRoutingController;
 }
 
 export interface FrontierCodexSwarmCliInput {
