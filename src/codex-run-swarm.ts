@@ -36,6 +36,7 @@ import {
   resolveCodexRunEventsPath,
   writeCodexRunDashboard
 } from './run-events.js';
+import { syncCodexRunEventPeers } from './run-sync.js';
 import type { FrontierCodexSwarmRunOptions, FrontierCodexSwarmRunResult } from './index.js';
 
 export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCodexSwarmRunOptions): Promise<FrontierCodexSwarmRunResult> {
@@ -138,8 +139,22 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   const proof = createSwarmProof(run, { validation: plan.validation });
   const ok = run.summary.failedCount === 0 && run.summary.blockedCount === 0 && run.summary.ownershipViolationCount === 0;
   await appendFileSwarmEvent(eventStream, { type: 'swarm.finished', runId: run.id, data: { ok, summary: run.summary } });
-  const runEvents = runEventsPath ? await readCodexRunEvents(runEventsPath) : [];
-  await writeCodexRunDashboard(runDashboardPath, runEvents, { runId: run.id });
+  const runSync = await syncCodexRunEventPeers({
+    cwd: options.cwd,
+    run: outDir,
+    outDir,
+    runEventsPath: runEventsPath ?? options.runEventsPath,
+    runDashboardPath: runDashboardPath ?? options.runDashboardPath,
+    peers: options.runSyncPeers,
+    direction: options.runSyncDirection,
+    runSyncEvidencePath: options.runSyncEvidencePath,
+    runSyncHistoryPath: options.runSyncHistoryPath,
+    runId: run.id
+  });
+  if (!runSync) {
+    const runEvents = runEventsPath ? await readCodexRunEvents(runEventsPath) : [];
+    await writeCodexRunDashboard(runDashboardPath, runEvents, { runId: run.id });
+  }
   const queueSummary = await queueRuntime?.writeSummary();
   const runtimeProjectionFinal = await finalizeCodexRuntimeProjectionStores({
     paths: runtimeProjectionPaths,
@@ -154,6 +169,9 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     proof,
     ...(runEventsPath ? { runEventsPath } : {}),
     ...(runDashboardPath ? { runDashboardPath } : {}),
+    ...(runSync?.runSyncEvidencePath ? { runSyncEvidencePath: runSync.runSyncEvidencePath } : {}),
+    ...(runSync?.runSyncHistoryPath ? { runSyncHistoryPath: runSync.runSyncHistoryPath } : {}),
+    ...(runSync ? { runSync } : {}),
     ...(queueRuntime ? queueRuntime.paths : {}),
     ...(queueSummary ? { queueSummary } : {}),
     ...runtimeProjectionPaths,
@@ -171,6 +189,9 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     pidManifestPath,
     runEventsPath,
     runDashboardPath,
+    ...(runSync?.runSyncEvidencePath ? { runSyncEvidencePath: runSync.runSyncEvidencePath } : {}),
+    ...(runSync?.runSyncHistoryPath ? { runSyncHistoryPath: runSync.runSyncHistoryPath } : {}),
+    ...(runSync ? { runSync } : {}),
     ...(queueRuntime ? queueRuntime.paths : {}),
     ...runtimeProjectionPaths,
     ...liveRoutingPaths
@@ -183,6 +204,9 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     proof,
     ...(runEventsPath ? { runEventsPath } : {}),
     ...(runDashboardPath ? { runDashboardPath } : {}),
+    ...(runSync?.runSyncEvidencePath ? { runSyncEvidencePath: runSync.runSyncEvidencePath } : {}),
+    ...(runSync?.runSyncHistoryPath ? { runSyncHistoryPath: runSync.runSyncHistoryPath } : {}),
+    ...(runSync ? { runSync } : {}),
     ...(queueRuntime ? queueRuntime.paths : {}),
     ...runtimeProjectionPaths,
     ...liveRoutingPaths,

@@ -8,6 +8,7 @@ import type {
   FrontierSwarmPlan,
   FrontierSwarmPlanInput
 } from '@shapeshift-labs/frontier-swarm';
+import type { FrontierRunSyncDirection } from '@shapeshift-labs/frontier-run';
 import type {
   FRONTIER_SWARM_CODEX_CONTINUATION_KIND,
   FRONTIER_SWARM_CODEX_CONTINUATION_VERSION
@@ -23,6 +24,10 @@ export interface FrontierCodexContinuationInput {
   checkStale?: boolean;
   semanticImportExpected?: boolean;
   branchPrefix?: string;
+  runSyncPeers?: readonly string[];
+  runSyncDirection?: FrontierRunSyncDirection;
+  runSyncEvidencePath?: string | false;
+  runSyncHistoryPath?: string | false;
   backlog?: FrontierSwarmBacklog | FrontierSwarmBacklogInput | unknown;
   backlogPath?: string;
   routingPolicy?: FrontierSwarmModelRoutingPolicyInput | FrontierSwarmModelRoutingPolicy | unknown;

@@ -225,7 +225,11 @@ async function resolveContinuationCollection(
     outDir: input.collectionOutDir,
     checkStale: input.checkStale,
     semanticImportExpected: input.semanticImportExpected,
-    branchPrefix: input.branchPrefix
+    branchPrefix: input.branchPrefix,
+    runSyncPeers: input.runSyncPeers,
+    runSyncDirection: input.runSyncDirection,
+    runSyncEvidencePath: input.runSyncEvidencePath,
+    runSyncHistoryPath: input.runSyncHistoryPath
   });
 }
 

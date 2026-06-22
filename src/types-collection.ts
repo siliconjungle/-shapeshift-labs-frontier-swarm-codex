@@ -30,6 +30,7 @@ import type {
 import type { FrontierCodexCompactDashboard } from './types-evidence.js';
 import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
 import type { FrontierCodexApplySemanticLeaseEvidence } from './types-apply-lease.js';
+import type { FrontierCodexRunSyncOptions, FrontierCodexRunSyncResult } from './run-sync.js';
 
 export type * from './types-collection-quality.js';
 export type * from './types-collection-score.js';
@@ -49,6 +50,7 @@ export interface FrontierCodexCollectInput {
   checkStale?: boolean;
   semanticImportExpected?: boolean;
   branchPrefix?: string;
+  runSyncPeers?: readonly string[]; runSyncDirection?: FrontierCodexRunSyncOptions['direction']; runSyncEvidencePath?: string | false; runSyncHistoryPath?: string | false;
   artifactStoreMode?: FrontierCodexArtifactStoreMode;
   artifactStoreTimeoutMs?: number;
 }
@@ -91,6 +93,7 @@ export interface FrontierCodexCollectResult {
   landedHealth?: FrontierCodexLandedHealthSummary;
   artifactStore?: FrontierCodexArtifactStoreResult;
   artifactStoreStatus?: FrontierCodexArtifactStoreStatus;
+  runSync?: FrontierCodexRunSyncResult;
   metadata?: FrontierCodexCollectionMetadata;
   summary: FrontierCodexCollectSummary;
 }

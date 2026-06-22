@@ -14,6 +14,7 @@ export async function testCliAndPidManifest({ tmp }) {
   const helpSource = await fs.readFile(new URL('../../dist/cli-help.js', import.meta.url), 'utf8');
   assert.ok(cliSource.includes("from './index.js'"));
   assert.ok(cliSource.includes('stopCodexSwarmRun'));
+  assert.ok(cliSource.includes('syncCodexRunEventPeers'));
   assert.ok(cliSource.includes('continueCodexSwarmLoop'));
   assert.ok(cliSource.includes('shouldContinueAfterRun'));
   assert.ok(cliArgsSource.includes('continueOut'));
@@ -27,6 +28,7 @@ export async function testCliAndPidManifest({ tmp }) {
   assert.ok(helpSource.includes('--cwd <dir> source/workspace root'));
   assert.ok(helpSource.includes('resume    Resume unfinished jobs from a prior run directory'));
   assert.ok(helpSource.includes('doctor    Check package resolution before launching workers'));
+  assert.ok(helpSource.includes('sync      Exchange frontier-run JSONL events with another run directory or event log'));
   assert.ok(helpSource.includes('continue  Build the next closed-loop wave from a run or collected merge bundle directory'));
   assert.ok(helpSource.includes('continue and next-wave require --run <dir|swarm-results.json> or --collection <dir|collection.json>'));
   assert.ok(helpSource.includes('--backlog <file>'));
@@ -43,6 +45,8 @@ export async function testCliAndPidManifest({ tmp }) {
   assert.ok(helpSource.includes('continue reads --routing-policy as input and writes model-routing-policy.next.json'));
   assert.ok(helpSource.includes('plan/run consume model-routing-policy.next.json with --routing-policy <file>'));
   assert.ok(helpSource.includes('dependency-health.json'));
+  assert.ok(helpSource.includes('--sync-peer <path> --run-sync-direction pull|push|bidirectional'));
+  assert.ok(helpSource.includes('--run-sync-evidence <file|false> --run-sync-history <file|false>'));
   assert.ok(helpSource.includes('--resume-overlay <file>'));
   assert.ok(helpSource.includes('tournament show/query/compare/history/feedback'));
   assert.ok(helpSource.includes('--adaptive-feedback <tournament-adaptive-feedback.json>'));

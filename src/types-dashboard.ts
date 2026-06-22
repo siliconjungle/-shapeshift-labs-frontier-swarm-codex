@@ -29,8 +29,8 @@ export interface FrontierCodexDashboardArtifactPaths {
   coordinatorDashboard?: string;
   runEvents?: string;
   runDashboard?: string;
-  queueState?: string;
-  queueEvents?: string;
+  runSyncEvidence?: string; runSyncHistory?: string;
+  queueState?: string; queueEvents?: string;
   queueSummary?: string; modelTelemetry?: string;
   modelTelemetrySummary?: string;
   humanActionEvents?: string; humanActionState?: string;

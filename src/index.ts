@@ -41,6 +41,8 @@ export {
   FRONTIER_SWARM_CODEX_QUERY_VERSION,
   FRONTIER_SWARM_CODEX_RESUME_OVERLAY_KIND,
   FRONTIER_SWARM_CODEX_RESUME_OVERLAY_VERSION,
+  FRONTIER_SWARM_CODEX_RUN_SYNC_KIND,
+  FRONTIER_SWARM_CODEX_RUN_SYNC_VERSION,
   FRONTIER_SWARM_CODEX_STEERING_INTENT_KIND,
   FRONTIER_SWARM_CODEX_STEERING_INTENT_VERSION,
   FRONTIER_SWARM_CODEX_SEMANTIC_IMPORT_KIND,
@@ -98,6 +100,21 @@ export type {
   FrontierCodexRunDashboardWriteOptions,
   FrontierCodexRunEventPathOptions
 } from './run-events.js';
+export {
+  FRONTIER_SWARM_CODEX_RUN_SYNC_EVIDENCE_FILE,
+  FRONTIER_SWARM_CODEX_RUN_SYNC_HISTORY_FILE,
+  normalizeCodexRunSyncDirection,
+  resolveCodexRunSyncEventsPath,
+  resolveCodexRunSyncEvidencePath,
+  resolveCodexRunSyncHistoryPath,
+  syncCodexRunEventPeers
+} from './run-sync.js';
+export type {
+  FrontierCodexRunSyncOptions,
+  FrontierCodexRunSyncPathOptions,
+  FrontierCodexRunSyncResult,
+  FrontierCodexRunSyncSummary
+} from './run-sync.js';
 export {
   FRONTIER_SWARM_CODEX_QUEUE_EVENTS_FILE,
   FRONTIER_SWARM_CODEX_QUEUE_RUNTIME_KIND,

@@ -44,6 +44,7 @@ import { testHumanActionAnswers } from './smoke/human-action-answers.mjs';
 import { testLiveRoutingController } from './smoke/live-routing.mjs';
 import { testModelPricing } from './smoke/model-pricing.mjs';
 import { testRunEventsCurrentFormat } from './smoke/run-events-current-format.mjs';
+import { testRunSync } from './smoke/run-sync.mjs';
 import './smoke/collection-noise.mjs';
 import './smoke/workspace-lockdown.mjs';
 
@@ -52,6 +53,7 @@ const context = await createSmokeContext();
 await testPlanningAndLinks(context);
 await testResourceAwareScheduling(context);
 await testRunEventsCurrentFormat(context);
+await testRunSync(context);
 await testLiveRoutingController(context);
 await testCompactLogTruncation(context);
 await testContextBudget(context);

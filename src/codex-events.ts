@@ -51,6 +51,8 @@ export async function writeSwarmCoordinatorSnapshot(
     pidManifestPath?: string;
     runEventsPath?: string;
     runDashboardPath?: string;
+    runSyncEvidencePath?: string;
+    runSyncHistoryPath?: string;
     queueStatePath?: string;
     queueEventsPath?: string;
     queueSummaryPath?: string;
@@ -79,6 +81,8 @@ export async function writeSwarmCoordinatorSnapshot(
       pidManifestPath: input.pidManifestPath ?? null,
       runEventsPath: input.runEventsPath ?? null,
       runDashboardPath: input.runDashboardPath ?? null,
+      runSyncEvidencePath: input.runSyncEvidencePath ?? null,
+      runSyncHistoryPath: input.runSyncHistoryPath ?? null,
       queueStatePath: input.queueStatePath ?? null,
       queueEventsPath: input.queueEventsPath ?? null,
       queueSummaryPath: input.queueSummaryPath ?? null,
@@ -92,6 +96,8 @@ export async function writeSwarmCoordinatorSnapshot(
       artifactPaths: {
         coordinatorDashboard: file,
         ...runEventsMetadata.artifactPaths,
+        ...(input.runSyncEvidencePath ? { runSyncEvidence: input.runSyncEvidencePath } : {}),
+        ...(input.runSyncHistoryPath ? { runSyncHistory: input.runSyncHistoryPath } : {}),
         ...(input.queueStatePath ? { queueState: input.queueStatePath } : {}),
         ...(input.queueEventsPath ? { queueEvents: input.queueEventsPath } : {}),
         ...(input.queueSummaryPath ? { queueSummary: input.queueSummaryPath } : {}),

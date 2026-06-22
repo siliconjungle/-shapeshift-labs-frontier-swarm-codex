@@ -38,6 +38,7 @@ import {
   scoreCodexSwarmPatches,
   spawnCodexExecutor,
   stopCodexSwarmRun,
+  syncCodexRunEventPeers,
   writeCodexDashboardSteeringIntent,
   writeCodexDependencyHealthReport
 } from '../../dist/index.js';
@@ -77,6 +78,7 @@ export {
   scoreCodexSwarmPatches,
   spawnCodexExecutor,
   stopCodexSwarmRun,
+  syncCodexRunEventPeers,
   writeCodexDependencyHealthReport,
   writeCodexDashboardSteeringIntent
 };

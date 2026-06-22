@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { applyCodexSwarmCollection, checkCodexDependencyHealth, collectCodexSwarmRun, continueCodexSwarmLoop, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, writeCodexDependencyHealthReport } from './index.js';
+import { applyCodexSwarmCollection, checkCodexDependencyHealth, collectCodexSwarmRun, continueCodexSwarmLoop, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, syncCodexRunEventPeers, writeCodexDependencyHealthReport } from './index.js';
 import { printHelp } from './cli-help.js';
 import { handleCodexTournamentCommand } from './tournament-query.js';
 import { handleCodexQueryCommand } from './query.js';
 import { handleCodexCleanupCommand } from './cleanup.js';
 import { collectResultForCli } from './cli-output.js';
+import { pathOrFalseArg, runSyncOptionsArg } from './cli-run-events-args.js';
 import {
   boolArg,
   bucketArg,
@@ -84,16 +85,42 @@ try {
     const result = await stopCodexSwarmRun({ run, signal });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
+  } else if (command === 'sync') {
+    const run = stringArg(args.run);
+    const runEventsPath = pathOrFalseArg(args.runEvents ?? args['run-events']);
+    const peers = listArg(args.peer ?? args.remote ?? args.runSyncPeer ?? args['run-sync-peer'] ?? args.syncPeer ?? args['sync-peer']);
+    if (!run && !runEventsPath) throw new Error('sync requires --run <run-dir|swarm-results.json|run-events.jsonl> or --run-events <file>');
+    if (!peers?.length) throw new Error('sync requires --peer <run-dir|swarm-results.json|run-events.jsonl>');
+    const runSyncOptions = runSyncOptionsArg(args);
+    const result = await syncCodexRunEventPeers({
+      cwd: stringArg(args.cwd),
+      run,
+      outDir: stringArg(args.outDir ?? args.out),
+      runEventsPath,
+      runDashboardPath: pathOrFalseArg(args.runDashboard ?? args['run-dashboard']),
+      peers,
+      direction: runSyncOptions.runSyncDirection,
+      runSyncEvidencePath: runSyncOptions.runSyncEvidencePath,
+      runSyncHistoryPath: runSyncOptions.runSyncHistoryPath
+    });
+    if (!result) throw new Error('sync found no run events to exchange');
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
   } else if (command === 'collect') {
     const run = String(args.run ?? '');
     if (!run) throw new Error('collect requires --run <run-dir|swarm-results.json>');
+    const runSyncOptions = runSyncOptionsArg(args);
     const result = await collectCodexSwarmRun({
       run,
       outDir: stringArg(args.outDir ?? args.out),
       cwd: stringArg(args.cwd),
       checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
       semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
-      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix'])
+      branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
+      runSyncPeers: runSyncOptions.runSyncPeers,
+      runSyncDirection: runSyncOptions.runSyncDirection,
+      runSyncEvidencePath: runSyncOptions.runSyncEvidencePath,
+      runSyncHistoryPath: runSyncOptions.runSyncHistoryPath
     });
     console.log(JSON.stringify(collectResultForCli(result, boolArg(args.full, false)), null, 2));
     if (!result.ok) process.exitCode = 1;
@@ -101,6 +128,7 @@ try {
     const run = stringArg(args.run);
     const collection = stringArg(args.collection);
     if (!run && !collection) throw new Error(`${command} requires --run <run-dir|swarm-results.json> or --collection <collection-dir|collection.json>`);
+    const runSyncOptions = runSyncOptionsArg(args);
     const result = await continueCodexSwarmLoop({
       run,
       collection,
@@ -109,6 +137,10 @@ try {
       checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
       semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
       branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
+      runSyncPeers: runSyncOptions.runSyncPeers,
+      runSyncDirection: runSyncOptions.runSyncDirection,
+      runSyncEvidencePath: runSyncOptions.runSyncEvidencePath,
+      runSyncHistoryPath: runSyncOptions.runSyncHistoryPath,
       backlogPath: stringArg(args.backlog),
       routingPolicyPath: stringArg(args.routingPolicy ?? args['routing-policy']),
       humanAnswersPath: stringArg(args.humanAnswers ?? args['human-answers'] ?? args.humanActionAnswers ?? args['human-action-answers']),

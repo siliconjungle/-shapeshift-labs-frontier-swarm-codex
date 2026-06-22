@@ -58,6 +58,7 @@ import { createCodexCollectResult, createCodexCollectSummary, persistCodexCollec
 import { attachSemanticPatchBundleOverlaps } from './collect-overlaps.js';
 import { attachRuntimeProjectionMetadata } from './collect-runtime-projections.js';
 import { readCodexRuntimeProjectionArtifacts } from './runtime-projections.js';
+import { syncCodexRunEventPeers } from './run-sync.js';
 
 export { readCodexPidProcesses } from './collect-pids.js';
 
@@ -66,6 +67,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const runDir = await resolveRunDirectory(input.run);
   const outDir = path.resolve(cwd, input.outDir ?? path.join(runDir, 'collected'));
+  const runSync = await syncCodexRunEventPeers({ cwd, run: runDir, outDir: runDir, peers: input.runSyncPeers, direction: input.runSyncDirection, runSyncEvidencePath: input.runSyncEvidencePath, runSyncHistoryPath: input.runSyncHistoryPath });
   const buckets = createEmptyCollectBuckets();
   const collectedBundles: FrontierSwarmMergeBundle[] = [];
   const evidenceEntries: FrontierSwarmEvidenceIndexEntryInput[] = [];
@@ -254,7 +256,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     admission,
     processes,
     generatedAt,
-    metadata: { runDir, outDir }
+    metadata: { runDir, outDir, ...(runSync ? { runSync } : {}) }
   }), semanticImportQualities, semanticImportExpected, contextBudgets, collectedBundles);
   attachRuntimeProjectionMetadata(dashboard, runtimeProjections);
   const semanticPatchBundleOverlaps = await summarizeSemanticPatchBundleOverlaps(collectedBundles);
@@ -314,7 +316,9 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     qualitySignals,
     noiseBreakdown,
     ...(landedHealth ? { landedHealth } : {}),
+    ...(runSync ? { runSync } : {}),
     metadata: {
+      ...(runSync ? { runSync } : {}),
       runtimeProjectionPaths: runtimeProjections.paths,
       ...(runtimeProjections.modelTelemetrySummary ? { modelTelemetrySummary: runtimeProjections.modelTelemetrySummary } : {}),
       ...(runtimeProjections.humanActionState ? { humanActionState: runtimeProjections.humanActionState } : {})

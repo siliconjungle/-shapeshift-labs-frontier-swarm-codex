@@ -9,7 +9,7 @@ import {
 } from './index.js';
 import { contextBudgetArg } from './cli-context-budget.js';
 import { liveRoutingArg } from './cli-live-routing-args.js';
-import { pathOrFalseArg, runEventOptionsArg } from './cli-run-events-args.js';
+import { pathOrFalseArg, runEventOptionsArg, runSyncOptionsArg } from './cli-run-events-args.js';
 export type CliValue = string | boolean | string[]; export type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -82,12 +82,11 @@ export function continuationInputFromRunArgs(args: CliArgs, runDir: string) {
   return {
     cwd: stringArg(args.cwd),
     run: runDir,
-    outDir: stringArg(args.continueOut ?? args['continue-out'] ?? args.nextWaveOut ?? args['next-wave-out'])
-      ?? path.join(runDir, 'continuation'),
+    outDir: stringArg(args.continueOut ?? args['continue-out'] ?? args.nextWaveOut ?? args['next-wave-out']) ?? path.join(runDir, 'continuation'),
     collectionOutDir: stringArg(args.continueCollectionOut ?? args['continue-collection-out']),
     checkStale: boolArg(args.checkStale ?? args['check-stale'], true),
     semanticImportExpected: boolArg(args.semanticImportExpected ?? args['semantic-import-expected'], false),
-    branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']),
+    branchPrefix: stringArg(args.branchPrefix ?? args['branch-prefix']), ...runSyncOptionsArg(args),
     backlogPath: stringArg(args.backlog),
     routingPolicyPath: stringArg(args.routingPolicy ?? args['routing-policy']),
     humanAnswersPath: stringArg(args.humanAnswers ?? args['human-answers'] ?? args.humanActionAnswers ?? args['human-action-answers']),
@@ -146,6 +145,7 @@ export function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarm
     dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
     runVerification: boolArg(args.verify, false),
     ...runEventOptionsArg(args),
+    ...runSyncOptionsArg(args),
     queueStatePath: pathOrFalseArg(args.queueState ?? args['queue-state']), queueEventsPath: pathOrFalseArg(args.queueEvents ?? args['queue-events']), queueSummaryPath: pathOrFalseArg(args.queueSummary ?? args['queue-summary']), modelTelemetryPath: pathOrFalseArg(args.modelTelemetry ?? args['model-telemetry']), modelTelemetrySummaryPath: pathOrFalseArg(args.modelTelemetrySummary ?? args['model-telemetry-summary']), humanActionEventsPath: pathOrFalseArg(args.humanActionEvents ?? args['human-action-events']), humanActionStatePath: pathOrFalseArg(args.humanActionState ?? args['human-action-state']), liveRoutingPolicyPath: pathOrFalseArg(args.liveRoutingPolicy ?? args['live-routing-policy']), liveRoutingControllerPath: pathOrFalseArg(args.liveRoutingController ?? args['live-routing-controller']), liveRoutingHistoryPath: pathOrFalseArg(args.liveRoutingHistory ?? args['live-routing-history']),
     semanticImport: semanticImportArg(args), workspace: workspaceArg(args),
     allowedWritePolicy,
