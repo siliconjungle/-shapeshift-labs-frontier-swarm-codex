@@ -6,6 +6,7 @@ import {
   path,
   scoreCodexSwarmPatches
 } from './context.mjs';
+import { assertApplyEvidence } from './apply-evidence.mjs';
 import { testWeakSemanticAdmissionScore } from './apply-score-semantic.mjs';
 
 const readySemanticImport = {
@@ -139,6 +140,7 @@ export async function testApplyAndScore({ tmp }, mergeBundle) {
   assert.strictEqual(applyDryRun.dryRun, true);
   assert.strictEqual(applyDryRun.summary.checked, 1);
   assert.strictEqual(applyDryRun.entries[0].dryRun, true);
+  await assertApplyEvidence(applyDryRun, { gateKinds: ['git-apply-check'], decisions: ['record-only'] });
   assert.strictEqual(await fs.readFile(path.join(applyRepo, 'src', 'apply.ts'), 'utf8'), 'old\n');
   await testScore(applyRepo, tmp);
   await testScoreIndexOnlyCollection(applyRepo, tmp, readyDir);
@@ -284,19 +286,14 @@ async function testCommitApply(tmp) {
   await fs.writeFile(path.join(cleanApplyRepo, 'src', 'apply.ts'), 'old\n');
   await execFileP('git', ['add', '--', 'src/apply.ts'], { cwd: cleanApplyRepo });
   await execFileP('git', ['commit', '-m', 'Initial apply fixture'], { cwd: cleanApplyRepo });
-  const committedApply = await applyCodexSwarmCollection({
-    collection: path.join(tmp, 'ready-collection'),
-    cwd: cleanApplyRepo,
-    dryRun: false,
-    branchPrefix: 'codex/tiny',
-    commit: true
-  });
+  const committedApply = await applyCodexSwarmCollection({ collection: path.join(tmp, 'ready-collection'), cwd: cleanApplyRepo, dryRun: false, branchPrefix: 'codex/tiny', commit: true });
   assert.strictEqual(committedApply.ok, true);
   assert.strictEqual(committedApply.dryRun, false);
   assert.strictEqual(committedApply.summary.committed, 1);
   assert.strictEqual(committedApply.entries[0].status, 'committed');
   assert.strictEqual(committedApply.entries[0].branchName, 'codex/tiny/apply-job');
   assert.match(committedApply.entries[0].commit, /^[0-9a-f]{40}$/);
+  await assertApplyEvidence(committedApply, { gateKinds: ['git-branch', 'git-apply-check', 'git-apply', 'git-add', 'git-commit'], decisions: ['apply'] });
   assert.strictEqual(await fs.readFile(path.join(cleanApplyRepo, 'src', 'apply.ts'), 'utf8'), 'new\n');
   assert.strictEqual((await execFileP('git', ['branch', '--show-current'], { cwd: cleanApplyRepo })).stdout.trim(), 'codex/tiny/apply-job');
   assert.strictEqual((await execFileP('git', ['status', '--porcelain'], { cwd: cleanApplyRepo })).stdout, '');

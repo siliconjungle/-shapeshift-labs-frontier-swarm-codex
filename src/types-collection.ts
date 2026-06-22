@@ -296,6 +296,14 @@ export interface FrontierCodexApplyResult {
   generatedAt: number;
   dryRun: boolean;
   entries: FrontierCodexApplyEntry[];
+  gateExecutionsPath?: string;
+  gateSummaryPath?: string;
+  runEventsPath?: string;
+  runDashboardPath?: string;
+  evidence?: {
+    gateExecutionCount: number;
+    runEventCount: number;
+  };
   summary: {
     total: number;
     checked: number;
