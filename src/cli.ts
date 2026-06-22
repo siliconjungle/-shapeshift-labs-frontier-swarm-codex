@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { applyCodexSwarmCollection, checkCodexDependencyHealth, collectCodexSwarmRun, continueCodexSwarmLoop, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, syncCodexRunEventPeers, writeCodexDependencyHealthReport } from './index.js';
+import { applyCodexSwarmCollection, checkCodexDependencyHealth, collectCodexSwarmRun, continueCodexSwarmLoop, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexDistributedPilot, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, syncCodexRunEventPeers, writeCodexDependencyHealthReport } from './index.js';
 import { printHelp } from './cli-help.js';
 import { handleCodexTournamentCommand } from './tournament-query.js';
 import { handleCodexQueryCommand } from './query.js';
@@ -69,6 +69,16 @@ try {
       failOnWarnings: boolArg(args.failOnWarnings ?? args['fail-on-warnings'], false)
     });
     if (outFile) await writeCodexDependencyHealthReport(result, path.resolve(outFile));
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'distributed-pilot' || command === 'pilot') {
+    const result = await runCodexDistributedPilot({
+      cwd: stringArg(args.cwd),
+      outDir: stringArg(args.outDir ?? args['out-dir'] ?? args.out),
+      runId: stringArg(args.runId ?? args['run-id']),
+      repos: listArg(args.repo),
+      initializeGit: args.git === undefined ? undefined : boolArg(args.git, true)
+    });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
   } else if (command === 'verify') {

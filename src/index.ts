@@ -250,3 +250,20 @@ export type {
 export type * from './types.js';
 export { createCodexSwarmPlan, coerceCodexSwarmManifestInput, coerceCodexSwarmTasksInput } from './plan.js';
 export { repairCodexWorkspacePackageLinks } from './workspace-link-repair.js';
+export {
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_GATE_EXECUTIONS_FILE,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_GATE_SUMMARY_FILE,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_KIND,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_LEASE_FILE,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_PROOF_FILE,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_QUEUE_EVENTS_FILE,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_QUEUE_STATE_FILE,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_QUEUE_SUMMARY_FILE,
+  FRONTIER_SWARM_CODEX_DISTRIBUTED_PILOT_VERSION,
+  runCodexDistributedPilot
+} from './distributed-pilot.js';
+export type {
+  FrontierCodexDistributedPilotOptions,
+  FrontierCodexDistributedPilotProof,
+  FrontierCodexDistributedPilotRepoResult
+} from './distributed-pilot.js';
