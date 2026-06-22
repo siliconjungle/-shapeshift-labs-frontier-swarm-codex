@@ -44,6 +44,7 @@ export function printHelp(): void {
     '  plan/run consume model-routing-policy.next.json with --routing-policy <file>',
     '  --dependency-health=false --dependency-health-out <file>',
     '  --run-events <file|false> --run-dashboard <file|false> (current frontier-run format)',
+    '  --queue-state <file|false> --queue-events <file|false> --queue-summary <file|false>',
     '  --adaptive --adaptive-mode observe|conservative|balanced|aggressive',
     '  --adaptive-feedback <tournament-adaptive-feedback.json>',
     '  --adaptive-min-concurrency <n> --adaptive-max-concurrency <n>',

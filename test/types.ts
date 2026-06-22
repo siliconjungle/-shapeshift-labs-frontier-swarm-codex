@@ -102,8 +102,16 @@ const runOptions: FrontierCodexSwarmRunOptions = {
   dryRun: true,
   maxConcurrency: 2,
   runEventsPath: 'run-events.jsonl',
-  runDashboardPath: 'run-dashboard.json'
+  runDashboardPath: 'run-dashboard.json',
+  queueStatePath: 'queue-state.json',
+  queueEventsPath: 'queue-events.jsonl',
+  queueSummaryPath: 'queue-summary.json'
 };
+resultPromise.then((result) => {
+  result.queueStatePath satisfies string | undefined;
+  result.queueEventsPath satisfies string | undefined;
+  result.queueSummaryPath satisfies string | undefined;
+});
 const runEventsPath: string | undefined = resolveCodexRunEventsPath({ outDir: '.' });
 const runProjection = createCodexRunProjection([]);
 const cliInput: FrontierCodexSwarmCliInput = {

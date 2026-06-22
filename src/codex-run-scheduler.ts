@@ -24,6 +24,7 @@ import type {
   FrontierCodexAdaptiveConcurrencyOptions,
   FrontierCodexLogSummary
 } from './index.js';
+import type { FrontierCodexQueueRuntime } from './queue-runtime.js';
 
 export async function runScheduledJobPool(
   plan: FrontierSwarmPlan,
@@ -34,6 +35,7 @@ export async function runScheduledJobPool(
     observations?: readonly FrontierSwarmAdaptiveObservationInput[];
     outDir?: string;
     eventStream?: FrontierSwarmEventStream;
+    queueRuntime?: FrontierCodexQueueRuntime;
   },
   worker: (job: FrontierSwarmJob, lease: FrontierSwarmLease) => Promise<FrontierSwarmJobResultInput>
 ): Promise<FrontierSwarmJobResultInput[]> {
@@ -45,6 +47,11 @@ export async function runScheduledJobPool(
   const leases: FrontierSwarmLease[] = [];
   const completed = new Set<string>();
   const resultByJob = new Map<string, FrontierSwarmJobResultInput>();
+  for (const terminalResult of input.queueRuntime?.seedTerminalResults(plan.jobs) ?? []) {
+    results.push(terminalResult);
+    resultByJob.set(terminalResult.jobId, terminalResult);
+    completed.add(terminalResult.jobId);
+  }
   const adaptiveHistory: FrontierSwarmAdaptiveLoadPlan[] = [];
   let currentAdaptiveLimits: FrontierSwarmAdaptiveLoadPlan['effectiveLimits'] | undefined;
   while (resultByJob.size < plan.jobs.length) {
@@ -94,6 +101,10 @@ export async function runScheduledJobPool(
         : { plan: resourceSchedule.plan, run, ...resourceSchedule.limits }),
       maxReadyJobs: readyWindow
     });
+    const queueLeases = input.queueRuntime
+      ? await input.queueRuntime.leaseScheduledJobs(schedule.ready, new Map(resourceSchedule.plan.jobs.map((job) => [job.id, job])), readyWindow)
+      : undefined;
+    const queueLeasedJobIds = queueLeases ? new Set(queueLeases.map((lease) => lease.jobId)) : undefined;
     const nextLeases = createSwarmLeases({
       schedule,
       workerId: 'frontier-swarm-codex',
@@ -103,6 +114,7 @@ export async function runScheduledJobPool(
     for (const lease of nextLeases) {
       const job = resourceSchedule.plan.jobs.find((entry) => entry.id === lease.jobId);
       if (!job || active.has(job.id) || completed.has(job.id)) continue;
+      if (queueLeasedJobIds && !queueLeasedJobIds.has(job.id)) continue;
       leases.push(lease);
       active.set(job.id, worker(job, lease));
     }
@@ -125,9 +137,11 @@ export async function runScheduledJobPool(
     const settled = await Promise.race(Array.from(active.entries()).map(async ([jobId, promise]) => ({ jobId, result: await promise })));
     active.delete(settled.jobId);
     completed.add(settled.jobId);
+    await input.queueRuntime?.settleJob(settled.result);
     results.push(settled.result);
     resultByJob.set(settled.jobId, settled.result);
   }
+  await input.queueRuntime?.writeSummary();
   return plan.jobs.map((job) => resultByJob.get(job.id)).filter((result): result is FrontierSwarmJobResultInput => !!result);
 }
 

@@ -19,6 +19,7 @@ import {
 import { runCodexDependencyHealthPreflight } from './codex-run-health.js';
 import { runScheduledJobPool } from './codex-run-scheduler.js';
 import { runCodexJob } from './codex-run.js';
+import { createCodexQueueRuntime } from './queue-runtime.js';
 import {
   appendCodexRunEvents,
   initCodexRunEvents,
@@ -70,6 +71,7 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     runEventsPath: runEventsPath ?? options.runEventsPath,
     runDashboardPath: runDashboardPath ?? options.runDashboardPath
   };
+  const queueRuntime = await createCodexQueueRuntime(plan, runOptions, outDir);
   const adaptiveObservations = await readAdaptiveFeedbackObservations(options);
   const results = await runScheduledJobPool(plan, {
     concurrency: Math.max(1, options.maxConcurrency ?? 1),
@@ -77,7 +79,8 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     resourceScheduling: options.resourceScheduling,
     observations: adaptiveObservations,
     outDir,
-    eventStream
+    eventStream,
+    queueRuntime
   }, (job, lease) => runCodexJob(job, runOptions, outDir, lease));
   for (const result of results) {
     const job = plan.jobs.find((entry) => entry.id === result.jobId);
@@ -99,13 +102,16 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   await appendFileSwarmEvent(eventStream, { type: 'swarm.finished', runId: run.id, data: { ok, summary: run.summary } });
   const runEvents = runEventsPath ? await readCodexRunEvents(runEventsPath) : [];
   await writeCodexRunDashboard(runDashboardPath, runEvents, { runId: run.id });
+  const queueSummary = await queueRuntime?.writeSummary();
   await fs.writeFile(path.join(outDir, 'swarm-results.json'), JSON.stringify({
     ok,
     outDir,
     run,
     proof,
     ...(runEventsPath ? { runEventsPath } : {}),
-    ...(runDashboardPath ? { runDashboardPath } : {})
+    ...(runDashboardPath ? { runDashboardPath } : {}),
+    ...(queueRuntime ? queueRuntime.paths : {}),
+    ...(queueSummary ? { queueSummary } : {})
   }, null, 2) + '\n');
   await writeSwarmCoordinatorSnapshot(options.coordinatorSnapshotPath ? path.resolve(options.cwd ?? process.cwd(), options.coordinatorSnapshotPath) : path.join(outDir, 'coordinator-dashboard.json'), {
     ok,
@@ -116,7 +122,8 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     eventStream,
     pidManifestPath,
     runEventsPath,
-    runDashboardPath
+    runDashboardPath,
+    ...(queueRuntime ? queueRuntime.paths : {})
   });
   const result: FrontierCodexSwarmRunResult = {
     ok,
@@ -125,7 +132,8 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     run,
     proof,
     ...(runEventsPath ? { runEventsPath } : {}),
-    ...(runDashboardPath ? { runDashboardPath } : {})
+    ...(runDashboardPath ? { runDashboardPath } : {}),
+    ...(queueRuntime ? queueRuntime.paths : {})
   };
   await options.onSwarmFinished?.({ result });
   return result;

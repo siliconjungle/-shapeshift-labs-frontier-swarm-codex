@@ -91,6 +91,22 @@ export type {
   FrontierCodexRunEventPathOptions
 } from './run-events.js';
 export {
+  FRONTIER_SWARM_CODEX_QUEUE_EVENTS_FILE,
+  FRONTIER_SWARM_CODEX_QUEUE_RUNTIME_KIND,
+  FRONTIER_SWARM_CODEX_QUEUE_RUNTIME_VERSION,
+  FRONTIER_SWARM_CODEX_QUEUE_STATE_FILE,
+  FRONTIER_SWARM_CODEX_QUEUE_SUMMARY_FILE,
+  createCodexQueueRuntime,
+  resolveCodexQueueEventsPath,
+  resolveCodexQueueStatePath,
+  resolveCodexQueueSummaryPath
+} from './queue-runtime.js';
+export type {
+  FrontierCodexQueueRuntime,
+  FrontierCodexQueueRuntimePaths,
+  FrontierCodexQueueRuntimeSummary
+} from './queue-runtime.js';
+export {
   buildCodexArgs,
   createCodexResourceAllocation,
   normalizeCodexApprovalPolicy,

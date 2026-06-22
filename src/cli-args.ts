@@ -8,7 +8,7 @@ import {
   type FrontierCodexSwarmRunOptions
 } from './index.js';
 import { contextBudgetArg } from './cli-context-budget.js';
-import { runEventOptionsArg } from './cli-run-events-args.js';
+import { pathOrFalseArg, runEventOptionsArg } from './cli-run-events-args.js';
 export type CliValue = string | boolean | string[];
 export type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
 
@@ -146,8 +146,8 @@ export function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarm
     dryRun: boolArg(args.dryRun ?? args['dry-run'], false),
     runVerification: boolArg(args.verify, false),
     ...runEventOptionsArg(args),
-    semanticImport: semanticImportArg(args),
-    workspace: workspaceArg(args),
+    queueStatePath: pathOrFalseArg(args.queueState ?? args['queue-state']), queueEventsPath: pathOrFalseArg(args.queueEvents ?? args['queue-events']), queueSummaryPath: pathOrFalseArg(args.queueSummary ?? args['queue-summary']),
+    semanticImport: semanticImportArg(args), workspace: workspaceArg(args),
     allowedWritePolicy,
     collectGitStatus: allowedWritePolicy?.mode === 'off' ? false : undefined
   };

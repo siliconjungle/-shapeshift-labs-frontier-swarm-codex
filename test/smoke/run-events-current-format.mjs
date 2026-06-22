@@ -41,8 +41,27 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.runEventsPath, runEventsPath);
   assert.strictEqual(result.runDashboardPath, runDashboardPath);
+  assert.strictEqual(result.queueStatePath, path.join(outDir, 'queue-state.json'));
+  assert.strictEqual(result.queueEventsPath, path.join(outDir, 'queue-events.jsonl'));
+  assert.strictEqual(result.queueSummaryPath, path.join(outDir, 'queue-summary.json'));
   assert.strictEqual(sawPlanEventsWhileExecutorRunning, true);
   assert.strictEqual(await exists(liveEventsPath), false);
+  assert.strictEqual(await exists(result.queueStatePath), true);
+  assert.strictEqual(await exists(result.queueEventsPath), true);
+  assert.strictEqual(await exists(result.queueSummaryPath), true);
+
+  const queueState = JSON.parse(await fs.readFile(result.queueStatePath, 'utf8'));
+  assert.strictEqual(queueState.kind, 'frontier.queue.state');
+  assert.strictEqual(queueState.jobs.length, 1);
+  assert.strictEqual(queueState.jobs[0].status, 'completed');
+  assert.strictEqual(queueState.terminalOutcomes.length, 1);
+  const queueEvents = (await fs.readFile(result.queueEventsPath, 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  assert.ok(queueEvents.some((event) => event.type === 'queue.job.leased'));
+  assert.ok(queueEvents.some((event) => event.type === 'queue.job.completed'));
+  const queueSummary = JSON.parse(await fs.readFile(result.queueSummaryPath, 'utf8'));
+  assert.strictEqual(queueSummary.kind, 'frontier.swarm-codex.queue-runtime');
+  assert.strictEqual(queueSummary.inspection.completed, 1);
+  assert.deepStrictEqual(queueSummary.terminalSwarmJobIds, [jobId]);
 
   const verificationGateEvidence = result.run.results[0].metadata.verificationGateEvidence;
   const gateExecutionsPath = verificationGateEvidence.gateExecutionsPath;
@@ -84,10 +103,16 @@ export async function testRunEventsCurrentFormat({ tmp }) {
   const dashboard = JSON.parse(await fs.readFile(path.join(outDir, 'coordinator-dashboard.json'), 'utf8'));
   assert.strictEqual(dashboard.metadata.runEventsPath, runEventsPath);
   assert.strictEqual(dashboard.metadata.runDashboardPath, runDashboardPath);
+  assert.strictEqual(dashboard.metadata.queueStatePath, result.queueStatePath);
+  assert.strictEqual(dashboard.metadata.queueEventsPath, result.queueEventsPath);
+  assert.strictEqual(dashboard.metadata.queueSummaryPath, result.queueSummaryPath);
   assert.strictEqual('liveRunGraphEventsPath' in dashboard.metadata, false);
   assert.strictEqual(dashboard.metadata.artifactPaths.coordinatorDashboard, path.join(outDir, 'coordinator-dashboard.json'));
   assert.strictEqual(dashboard.metadata.artifactPaths.runEvents, runEventsPath);
   assert.strictEqual(dashboard.metadata.artifactPaths.runDashboard, runDashboardPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.queueState, result.queueStatePath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.queueEvents, result.queueEventsPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.queueSummary, result.queueSummaryPath);
   assert.strictEqual('liveRunGraphEvents' in dashboard.metadata.artifactPaths, false);
   assert.strictEqual(dashboard.metadata.runSource.mode, 'frontier-run-events');
   assert.strictEqual(dashboard.metadata.runSource.format, 'jsonl');

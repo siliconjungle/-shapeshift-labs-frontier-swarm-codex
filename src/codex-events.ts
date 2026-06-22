@@ -51,6 +51,9 @@ export async function writeSwarmCoordinatorSnapshot(
     pidManifestPath?: string;
     runEventsPath?: string;
     runDashboardPath?: string;
+    queueStatePath?: string;
+    queueEventsPath?: string;
+    queueSummaryPath?: string;
   }
 ): Promise<void> {
   const processes = input.pidManifestPath ? await readCodexPidProcesses(input.pidManifestPath).catch(() => []) : [];
@@ -69,9 +72,15 @@ export async function writeSwarmCoordinatorSnapshot(
       pidManifestPath: input.pidManifestPath ?? null,
       runEventsPath: input.runEventsPath ?? null,
       runDashboardPath: input.runDashboardPath ?? null,
+      queueStatePath: input.queueStatePath ?? null,
+      queueEventsPath: input.queueEventsPath ?? null,
+      queueSummaryPath: input.queueSummaryPath ?? null,
       artifactPaths: {
         coordinatorDashboard: file,
-        ...runEventsMetadata.artifactPaths
+        ...runEventsMetadata.artifactPaths,
+        ...(input.queueStatePath ? { queueState: input.queueStatePath } : {}),
+        ...(input.queueEventsPath ? { queueEvents: input.queueEventsPath } : {}),
+        ...(input.queueSummaryPath ? { queueSummary: input.queueSummaryPath } : {})
       },
       runSource: runEventsMetadata.runSource,
       proof: input.proof
