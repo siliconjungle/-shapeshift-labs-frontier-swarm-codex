@@ -40,8 +40,14 @@ export async function runCollectionQualitySmoke(root) {
     'workspace.ignored-noise.ownership-violation',
     'workspace.invalid-git-index'
   ]);
+  assert.ok(signals.failure.ignoredWorkspaceNoiseCompactReasonClasses.includes('infrastructure-noise'));
   assert.strictEqual(signals.failure.requiredFailedCommandCount, 1);
-  assert.deepStrictEqual([...signals.needsPort.jobIds].sort(), ['generated-blob-job', 'generated-setup-job', 'invalid-index-job', 'needs-port-job', 'ownership-job']);
+  assert.strictEqual(signals.needsPort.jobCount, 1);
+  assert.strictEqual(signals.needsPort.rawJobCount, 5);
+  assert.deepStrictEqual(signals.needsPort.jobIds, ['needs-port-job']);
+  assert.deepStrictEqual([...signals.needsPort.rawJobIds].sort(), ['generated-blob-job', 'generated-setup-job', 'invalid-index-job', 'needs-port-job', 'ownership-job']);
+  assert.strictEqual(signals.needsPort.ignoredWorkspaceNoiseJobCount, 4);
+  assert.deepStrictEqual([...signals.needsPort.ignoredWorkspaceNoiseJobIds].sort(), ['generated-blob-job', 'generated-setup-job', 'invalid-index-job', 'ownership-job']);
   assert.deepStrictEqual(signals.stale.jobIds, ['stale-job']);
   assert.strictEqual(signals.ownership.violationCount, 5);
   assert.strictEqual(signals.ownership.sourceViolationCount, 2);
@@ -93,10 +99,12 @@ export async function runCollectionQualitySmoke(root) {
   assert.strictEqual(collection.dashboard.summary.collectionFailureSignalCount, 3);
   assert.strictEqual(collection.dashboard.summary.collectionSourceBlockerSignalCount, 3);
   assert.strictEqual(collection.dashboard.summary.collectionInfrastructureNoiseSignalCount, 4);
-  assert.strictEqual(collection.dashboard.summary.collectionNeedsPortSignalCount, 5);
+  assert.strictEqual(collection.dashboard.summary.collectionNeedsPortSignalCount, 1);
   assert.strictEqual(collection.dashboard.summary.collectionStaleSignalCount, 1);
   assert.strictEqual(collection.dashboard.summary.collectionOwnershipViolationSignalCount, 2);
-  assert.strictEqual(collection.dashboard.summary.collectionQuarantinedChangedPathSignalCount, 4);
+  assert.strictEqual(collection.dashboard.summary.collectionIgnoredWorkspaceNoiseOwnershipViolationSignalCount, 3);
+  assert.strictEqual(collection.dashboard.summary.collectionQuarantinedChangedPathSignalCount, 1);
+  assert.strictEqual(collection.dashboard.summary.collectionIgnoredWorkspaceNoiseQuarantinedChangedPathSignalCount, 3);
   assert.strictEqual(collection.dashboard.summary.collectionContextBudgetWarningSignalCount, 1);
   assert.strictEqual(collection.dashboard.summary.collectionContextBudgetFailedSignalCount, 1);
   assert.strictEqual(collection.dashboard.summary.collectionLogTruncatedJobSignalCount, 1);

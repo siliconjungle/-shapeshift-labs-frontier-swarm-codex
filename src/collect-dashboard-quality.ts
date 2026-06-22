@@ -48,9 +48,12 @@ export function createCollectedQualitySignals(
   const failureReasonClasses = failureJobEntries.flatMap((entry) => entry.reasonClasses).filter((entry) => !ignoredWorkspaceNoiseReasonClass(entry));
   const ignoredNoiseReasonClasses = ignoredNoiseFailureEntries.flatMap((entry) => entry.reasonClasses).filter(ignoredWorkspaceNoiseReasonClass);
   const compactFailureReasonClasses = failureJobEntries.flatMap((entry) => entry.compactReasonClasses);
+  const ignoredNoiseCompactReasonClasses = ignoredNoiseFailureEntries.flatMap((entry) => entry.compactReasonClasses);
   const infrastructureNoiseEntries = failureEntries.filter((entry) => entry.compactReasonClasses.includes('infrastructure-noise') && isRawFailureJob(entry.job, entry.bundle));
   const sourceBlockerEntries = failureJobEntries.filter((entry) => entry.compactReasonClasses.includes('source-blocker'));
-  const needsPortJobs = jobs.filter((job) => job.disposition === 'needs-port');
+  const rawNeedsPortJobs = jobs.filter((job) => job.disposition === 'needs-port');
+  const needsPortEntries = failureEntries.filter((entry) => entry.job.disposition === 'needs-port' && !isIgnoredWorkspaceNoiseOnlyFailureJob(entry.job, entry.bundle));
+  const ignoredNoiseNeedsPortEntries = failureEntries.filter((entry) => entry.job.disposition === 'needs-port' && isIgnoredWorkspaceNoiseOnlyFailureJob(entry.job, entry.bundle));
   const staleJobs = jobs.filter((job) => job.staleAgainstHead || job.disposition === 'stale-against-head');
   const ownershipJobs = jobs.filter((job) => job.ownershipViolations.length > 0);
   const ownershipDetails = ownershipJobs.map((job) => {
@@ -115,11 +118,17 @@ export function createCollectedQualitySignals(
       ignoredWorkspaceNoiseJobIds: limitStrings(ignoredNoiseFailureEntries.map((entry) => entry.job.jobId)),
       ignoredWorkspaceNoiseReasonClasses: limitStrings(ignoredNoiseReasonClasses),
       ignoredWorkspaceNoiseReasonClassCounts: countStrings(ignoredNoiseReasonClasses),
+      ignoredWorkspaceNoiseCompactReasonClasses: limitStrings(ignoredNoiseCompactReasonClasses),
+      ignoredWorkspaceNoiseCompactReasonClassCounts: countStrings(ignoredNoiseCompactReasonClasses),
       jobIds: limitStrings(failureJobs.map((job) => job.jobId))
     },
     needsPort: {
-      jobCount: needsPortJobs.length,
-      jobIds: limitStrings(needsPortJobs.map((job) => job.jobId))
+      jobCount: needsPortEntries.length,
+      rawJobCount: rawNeedsPortJobs.length,
+      jobIds: limitStrings(needsPortEntries.map((entry) => entry.job.jobId)),
+      rawJobIds: limitStrings(rawNeedsPortJobs.map((job) => job.jobId)),
+      ignoredWorkspaceNoiseJobCount: ignoredNoiseNeedsPortEntries.length,
+      ignoredWorkspaceNoiseJobIds: limitStrings(ignoredNoiseNeedsPortEntries.map((entry) => entry.job.jobId))
     },
     stale: {
       jobCount: staleJobs.length,

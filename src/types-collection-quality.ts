@@ -21,6 +21,8 @@ export interface FrontierCodexCollectQualitySignals {
     ignoredWorkspaceNoiseJobIds: string[];
     ignoredWorkspaceNoiseReasonClasses: string[];
     ignoredWorkspaceNoiseReasonClassCounts: Record<string, number>;
+    ignoredWorkspaceNoiseCompactReasonClasses: string[];
+    ignoredWorkspaceNoiseCompactReasonClassCounts: Record<string, number>;
     jobIds: string[];
     landedJobCount?: number;
     landedJobIds?: string[];
@@ -29,7 +31,11 @@ export interface FrontierCodexCollectQualitySignals {
   };
   needsPort: {
     jobCount: number;
+    rawJobCount: number;
     jobIds: string[];
+    rawJobIds: string[];
+    ignoredWorkspaceNoiseJobCount: number;
+    ignoredWorkspaceNoiseJobIds: string[];
     landedJobCount?: number;
     landedJobIds?: string[];
     remainingJobCount?: number;

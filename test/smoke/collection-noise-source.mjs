@@ -129,7 +129,9 @@ function assertDashboardSourceTokens(collectDashboardSources) {
     'collectionNeedsPortSignalCount',
     'collectionStaleSignalCount',
     'collectionOwnershipViolationSignalCount',
+    'collectionIgnoredWorkspaceNoiseOwnershipViolationSignalCount',
     'collectionQuarantinedChangedPathSignalCount',
+    'collectionIgnoredWorkspaceNoiseQuarantinedChangedPathSignalCount',
     'collectionContextBudgetWarningSignalCount',
     'collectionContextBudgetFailedSignalCount',
     'collectionLogTruncatedJobSignalCount',
@@ -140,6 +142,9 @@ function assertDashboardSourceTokens(collectDashboardSources) {
     'infrastructureNoiseJobCount',
     'sourceViolationCount',
     'ignoredWorkspaceNoisePathCount',
+    'ignoredWorkspaceNoiseCompactReasonClasses',
+    'rawJobCount',
+    'rawJobIds',
     'isIgnoredWorkspaceNoiseOnlyFailureJob',
     'compactReasonClassesForFailureJob'
   ]) {
@@ -149,6 +154,11 @@ function assertDashboardSourceTokens(collectDashboardSources) {
     collectDashboardSources,
     /collectionOwnershipViolationSignalCount: collectionQualitySignals\.ownership\.sourceViolationCount/,
     'top-level ownership signal count should report source ownership blockers, not ignored workspace setup noise'
+  );
+  assert.match(
+    collectDashboardSources,
+    /collectionQuarantinedChangedPathSignalCount: collectionQualitySignals\.quarantine\.sourcePathCount/,
+    'top-level quarantine signal count should report source quarantine blockers, not ignored workspace setup noise'
   );
 }
 
@@ -200,8 +210,11 @@ function assertCollectionTypeTokens(typesCollection) {
     'sourceBlockerJobCount',
     'infrastructureNoiseJobCount',
     'ignoredWorkspaceNoiseJobCount',
+    'ignoredWorkspaceNoiseCompactReasonClasses',
     'sourceViolationCount',
     'ignoredWorkspaceNoisePathCount',
+    'rawJobCount',
+    'rawJobIds',
     'FrontierCodexLandedHealthSummary',
     'landedHealth?: FrontierCodexLandedHealthSummary',
     'landedBucketCounts',
