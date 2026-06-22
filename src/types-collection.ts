@@ -28,6 +28,7 @@ import type {
 import type { FrontierCodexCompactDashboard } from './types-evidence.js';
 import type { FrontierCodexRunGraph } from './types-run-graph.js';
 import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
+import type { FrontierCodexApplySemanticLeaseEvidence } from './types-apply-lease.js';
 
 export type * from './types-collection-quality.js';
 export type * from './types-collection-score.js';
@@ -282,6 +283,7 @@ export interface FrontierCodexApplyEntry {
   commit?: string;
   dryRun: boolean;
   commands: Array<{ command: string[]; status: number; stdoutTail: string[]; stderrTail: string[] }>;
+  semanticLease?: FrontierCodexApplySemanticLeaseEvidence;
   error?: string;
 }
 
