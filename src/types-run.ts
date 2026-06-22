@@ -283,6 +283,7 @@ export interface FrontierCodexSwarmRunOptions {
   addDirs?: readonly string[];
   executor?: FrontierCodexExecutor;
   eventStream?: FrontierSwarmEventStream;
+  runEventsPath?: string | false; runDashboardPath?: string | false;
   liveRunGraphEventsPath?: string | false;
   coordinatorSnapshotPath?: string;
   pidManifestPath?: string;
@@ -301,6 +302,8 @@ export interface FrontierCodexSwarmRunResult {
   plan: FrontierSwarmPlan;
   run: FrontierSwarmRun;
   proof: ReturnType<typeof createSwarmProof>;
+  runEventsPath?: string;
+  runDashboardPath?: string;
 }
 
 export interface FrontierCodexSwarmCliInput {

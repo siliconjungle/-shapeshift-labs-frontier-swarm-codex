@@ -6,10 +6,13 @@ import {
   createCodexResourceAllocation,
   createCodexWorkspacePlan,
   createCodexSwarmPlan,
+  createCodexRunProjection,
   createSwarmWorkspaceManifest,
   discoverCodexHandoffArtifacts,
   estimateCodexModelCost,
+  importCodexLegacyRunEvents,
   continueCodexSwarmLoop,
+  resolveCodexRunEventsPath,
   runCodexSwarm,
   scoreCodexSwarmPatches,
   summarizeSemanticEditReplay,
@@ -20,6 +23,7 @@ import {
   type FrontierCodexSwarmCliInput,
   type FrontierCodexCollectResult,
   type FrontierCodexApplyResult,
+  type FrontierCodexLegacyRunEventImportResult,
   type FrontierCodexJsTsSafeMergeApplySummary,
   type FrontierCodexSemanticEditAdmissionDecision,
   type FrontierCodexSemanticEditReplaySummary,
@@ -98,8 +102,12 @@ const resourceScheduling: FrontierCodexResourceSchedulingOptions = {
 const runOptions: FrontierCodexSwarmRunOptions = {
   outDir: '.',
   dryRun: true,
-  maxConcurrency: 2
+  maxConcurrency: 2,
+  runEventsPath: 'run-events.jsonl',
+  runDashboardPath: 'run-dashboard.json'
 };
+const runEventsPath: string | undefined = resolveCodexRunEventsPath({ outDir: '.' });
+const runProjection = createCodexRunProjection([]);
 const cliInput: FrontierCodexSwarmCliInput = {
   manifest: { lanes: [{ id: 'runtime', allowedWrites: ['src/**'] }] },
   tasks: [],
@@ -114,6 +122,7 @@ const collectPromise: Promise<FrontierCodexCollectResult> = collectCodexSwarmRun
 const applyPromise: Promise<FrontierCodexApplyResult> = applyCodexSwarmCollection({ collection: '.', dryRun: true });
 const scorePromise: Promise<FrontierCodexPatchScoreResult> = scoreCodexSwarmPatches({ collection: '.', focusedCommands: ['npm test'] });
 const handoffArtifactsPromise: Promise<FrontierCodexHandoffArtifact[]> = discoverCodexHandoffArtifacts({ root: '.' });
+const runEventImportPromise: Promise<FrontierCodexLegacyRunEventImportResult> = importCodexLegacyRunEvents({ run: '.' });
 const continuationPromise: Promise<FrontierCodexContinuationResult> = continueCodexSwarmLoop({
   collection: '.',
   backlog: { id: 'runtime-backlog', entries: [] },

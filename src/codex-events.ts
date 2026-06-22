@@ -13,6 +13,7 @@ import {
 import { writeJsonAtomic } from './common.js';
 import { readCodexPidProcesses } from './collect.js';
 import { createCodexLiveRunGraphDashboardMetadata } from './run-graph-live.js';
+import { createCodexRunEventsDashboardMetadata } from './run-events.js';
 import type {
   FrontierCodexPidEntry,
   FrontierCodexPidManifest,
@@ -46,9 +47,19 @@ export async function appendFileSwarmEvent(stream: FrontierSwarmEventStream | un
 
 export async function writeSwarmCoordinatorSnapshot(
   file: string,
-  input: FrontierCodexSwarmRunResult & { eventStream?: FrontierSwarmEventStream; pidManifestPath?: string; liveRunGraphEventsPath?: string }
+  input: FrontierCodexSwarmRunResult & {
+    eventStream?: FrontierSwarmEventStream;
+    pidManifestPath?: string;
+    runEventsPath?: string;
+    runDashboardPath?: string;
+    liveRunGraphEventsPath?: string;
+  }
 ): Promise<void> {
   const processes = input.pidManifestPath ? await readCodexPidProcesses(input.pidManifestPath).catch(() => []) : [];
+  const runEventsMetadata = createCodexRunEventsDashboardMetadata({
+    runEventsPath: input.runEventsPath,
+    runDashboardPath: input.runDashboardPath
+  });
   const liveRunGraphMetadata = createCodexLiveRunGraphDashboardMetadata({
     liveRunGraphEventsPath: input.liveRunGraphEventsPath
   });
@@ -61,12 +72,15 @@ export async function writeSwarmCoordinatorSnapshot(
       outDir: input.outDir,
       eventStream: input.eventStream ?? null,
       pidManifestPath: input.pidManifestPath ?? null,
+      runEventsPath: input.runEventsPath ?? null,
+      runDashboardPath: input.runDashboardPath ?? null,
       liveRunGraphEventsPath: input.liveRunGraphEventsPath ?? null,
       artifactPaths: {
         coordinatorDashboard: file,
-        ...liveRunGraphMetadata.artifactPaths
+        ...liveRunGraphMetadata.artifactPaths,
+        ...runEventsMetadata.artifactPaths
       },
-      runSource: liveRunGraphMetadata.runSource,
+      runSource: input.runEventsPath ? runEventsMetadata.runSource : liveRunGraphMetadata.runSource,
       proof: input.proof
     }
   });

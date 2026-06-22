@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { createCodexSwarmPlan, fs, path, runCodexSwarm } from './context.mjs';
+import { createCodexSwarmPlan, fs, importCodexLegacyRunEvents, path, readCodexRunEvents, runCodexSwarm } from './context.mjs';
 import { createCodexLiveJobResultEvents } from '../../dist/run-graph-live.js';
 
 export async function testLiveRunGraphEvents({ tmp }) {
@@ -19,6 +19,8 @@ export async function testLiveRunGraphEvents({ tmp }) {
   });
   const outDir = path.join(tmp, 'live-run-graph-events-run');
   const liveEventsPath = path.join(outDir, 'live-run-graph-events.jsonl');
+  const runEventsPath = path.join(outDir, 'run-events.jsonl');
+  const runDashboardPath = path.join(outDir, 'run-dashboard.json');
   let sawStartedWhileExecutorRunning = false;
 
   const result = await runCodexSwarm(plan, {
@@ -36,7 +38,19 @@ export async function testLiveRunGraphEvents({ tmp }) {
   });
 
   assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.runEventsPath, runEventsPath);
+  assert.strictEqual(result.runDashboardPath, runDashboardPath);
   assert.strictEqual(sawStartedWhileExecutorRunning, true);
+  const runEvents = await readCodexRunEvents(runEventsPath);
+  const runEventTypes = runEvents.map((event) => event.type);
+  for (const type of ['run.created', 'node.created', 'edge.created', 'artifact.attached']) {
+    assert.ok(runEventTypes.includes(type), `missing frontier-run event: ${type}`);
+  }
+  const runDashboard = JSON.parse(await fs.readFile(runDashboardPath, 'utf8'));
+  assert.strictEqual(runDashboard.kind, 'frontier.run.dashboard');
+  assert.strictEqual(runDashboard.runId, result.run.id);
+  assert.ok(runDashboard.counts.task >= 1);
+  assert.ok(runDashboard.counts.attempt >= 1);
   const events = await readLiveEvents(liveEventsPath);
   const types = events.map((event) => event.type);
   for (const type of ['run.started', 'job.started', 'evidence.discovered', 'gate.result', 'terminal.outcome', 'job.finished', 'run.finished']) {
@@ -57,14 +71,28 @@ export async function testLiveRunGraphEvents({ tmp }) {
   assert.ok(finished.nodes.some((node) => node.kind === 'candidate'));
 
   const dashboard = JSON.parse(await fs.readFile(path.join(outDir, 'coordinator-dashboard.json'), 'utf8'));
+  assert.strictEqual(dashboard.metadata.runEventsPath, runEventsPath);
+  assert.strictEqual(dashboard.metadata.runDashboardPath, runDashboardPath);
   assert.strictEqual(dashboard.metadata.liveRunGraphEventsPath, liveEventsPath);
   assert.strictEqual(dashboard.metadata.artifactPaths.coordinatorDashboard, path.join(outDir, 'coordinator-dashboard.json'));
+  assert.strictEqual(dashboard.metadata.artifactPaths.runEvents, runEventsPath);
+  assert.strictEqual(dashboard.metadata.artifactPaths.runDashboard, runDashboardPath);
   assert.strictEqual(dashboard.metadata.artifactPaths.liveRunGraphEvents, liveEventsPath);
-  assert.strictEqual(dashboard.metadata.runSource.mode, 'live-run-graph-events');
+  assert.strictEqual(dashboard.metadata.runSource.mode, 'frontier-run-events');
   assert.strictEqual(dashboard.metadata.runSource.format, 'jsonl');
-  assert.strictEqual(dashboard.metadata.runSource.liveRunGraphEventsPath, liveEventsPath);
+  assert.strictEqual(dashboard.metadata.runSource.runEventsPath, runEventsPath);
+  assert.strictEqual(dashboard.metadata.runSource.runDashboardPath, runDashboardPath);
   assert.strictEqual(discoverLiveRunGraphEventsPath(dashboard), liveEventsPath);
   assert.strictEqual((await readLiveEvents(discoverLiveRunGraphEventsPath(dashboard))).length, events.length);
+
+  const imported = await importCodexLegacyRunEvents({
+    run: outDir,
+    outFile: path.join(outDir, 'imported-run-events.jsonl'),
+    dashboardOutFile: path.join(outDir, 'imported-run-dashboard.json')
+  });
+  assert.strictEqual(imported.ok, true);
+  assert.ok(imported.eventCount >= runEvents.length);
+  assert.strictEqual(imported.dashboard.kind, 'frontier.run.dashboard');
 
   assertLiveSemanticAdmissionEvents();
 }

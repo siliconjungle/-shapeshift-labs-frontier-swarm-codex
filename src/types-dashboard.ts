@@ -23,16 +23,20 @@ export type FrontierCodexDashboardSemanticReadiness = 'clean' | 'candidate' | 'n
 export type FrontierCodexDashboardHumanActionType = 'question' | 'concern' | 'review' | 'approval' | string;
 export type FrontierCodexDashboardHumanActionPriority = 'blocking' | 'important' | 'info' | string;
 export type FrontierCodexDashboardHumanActionStatus = 'open' | 'answered' | 'resolved' | 'dismissed' | 'cancelled' | string;
-export type FrontierCodexDashboardRunSourceMode = 'live-run-graph-events' | 'disabled';
+export type FrontierCodexDashboardRunSourceMode = 'frontier-run-events' | 'live-run-graph-events' | 'disabled';
 
 export interface FrontierCodexDashboardArtifactPaths {
   coordinatorDashboard?: string;
+  runEvents?: string;
+  runDashboard?: string;
   liveRunGraphEvents?: string;
 }
 
 export interface FrontierCodexDashboardRunSourceMetadata {
   mode: FrontierCodexDashboardRunSourceMode;
   format?: 'jsonl';
+  runEventsPath?: string;
+  runDashboardPath?: string;
   liveRunGraphEventsPath?: string;
 }
 

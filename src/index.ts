@@ -73,6 +73,27 @@ export {
   writeSwarmCoordinatorSnapshot
 } from './codex-events.js';
 export {
+  FRONTIER_SWARM_CODEX_RUN_DASHBOARD_FILE,
+  FRONTIER_SWARM_CODEX_RUN_EVENTS_FILE,
+  appendCodexRunEvents,
+  createCodexRunEventsDashboardMetadata,
+  createCodexRunProjection,
+  importCodexLegacyRunEvents,
+  initCodexRunEvents,
+  readCodexRunEvents,
+  resolveCodexRunDashboardPath,
+  resolveCodexRunEventsPath,
+  writeCodexRunDashboard,
+  writeCodexRunEvents
+} from './run-events.js';
+export type {
+  FrontierCodexLegacyRunEventImportOptions,
+  FrontierCodexLegacyRunEventImportResult,
+  FrontierCodexRunDashboardPathOptions,
+  FrontierCodexRunDashboardWriteOptions,
+  FrontierCodexRunEventPathOptions
+} from './run-events.js';
+export {
   buildCodexArgs,
   createCodexResourceAllocation,
   normalizeCodexApprovalPolicy,

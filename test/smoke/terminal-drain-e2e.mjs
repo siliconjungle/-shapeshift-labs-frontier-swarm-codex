@@ -27,7 +27,7 @@ export async function testTerminalDrainMixedOracle({ tmp }) {
   const decisions = new Map(collection.queueOutcomeModel.latestDecisions.map((decision) => [decision.jobId, decision]));
   assertOutcome(decisions, 'applied-patch', { category: 'terminal', outcome: 'applied', terminal: true, reviewDebt: false });
   assertOutcome(decisions, 'ready-patch', { category: 'continuation', outcome: 'continued', terminal: false, reviewDebt: false });
-  assertOutcome(decisions, 'research-only', { category: 'terminal', outcome: 'checked', terminal: true, reviewDebt: false });
+  assertOutcome(decisions, 'research-only', { category: 'terminal', outcome: 'research-complete', terminal: true, reviewDebt: false });
   assertOutcome(decisions, 'rerun-patch', { category: 'stale-rerun', outcome: 'rerun', terminal: false, reviewDebt: false });
   assertOutcome(decisions, 'stale-output', { category: 'stale-rerun', outcome: 'rerun', terminal: false, reviewDebt: false });
   assertOutcome(decisions, 'no-change-output', { category: 'terminal', outcome: 'no-change', terminal: true, reviewDebt: false });

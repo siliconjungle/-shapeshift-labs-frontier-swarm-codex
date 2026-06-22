@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { applyCodexSwarmCollection, checkCodexDependencyHealth, collectCodexSwarmRun, continueCodexSwarmLoop, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, writeCodexDependencyHealthReport } from './index.js';
+import { applyCodexSwarmCollection, checkCodexDependencyHealth, collectCodexSwarmRun, continueCodexSwarmLoop, importCodexLegacyRunEvents, repairCodexWorkspacePackageLinks, resumeCodexSwarmRun, runCodexSwarm, scoreCodexSwarmPatches, stopCodexSwarmRun, writeCodexDependencyHealthReport } from './index.js';
 import { printHelp } from './cli-help.js';
 import { handleCodexTournamentCommand } from './tournament-query.js';
 import { handleCodexQueryCommand } from './query.js';
@@ -24,6 +24,7 @@ import {
   stamp,
   stringArg
 } from './cli-args.js';
+import { pathOrFalseArg } from './cli-run-events-args.js';
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'plan';
 try {
@@ -68,6 +69,20 @@ try {
       failOnWarnings: boolArg(args.failOnWarnings ?? args['fail-on-warnings'], false)
     });
     if (outFile) await writeCodexDependencyHealthReport(result, path.resolve(outFile));
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+  } else if (command === 'import-run' || command === 'run-events') {
+    const subcommand = command === 'run-events' ? args._[1] ?? 'import' : 'import';
+    if (subcommand !== 'import') throw new Error(`unknown run-events command: ${subcommand}`);
+    const positionalRun = command === 'run-events' ? args._[2] : args._[1];
+    const run = stringArg(args.run) ?? stringArg(positionalRun);
+    if (!run) throw new Error(`${command} requires --run <run-dir|swarm-results.json>`);
+    const result = await importCodexLegacyRunEvents({
+      run,
+      cwd: stringArg(args.cwd),
+      outFile: stringArg(args.out ?? args.outFile ?? args['out-file']),
+      dashboardOutFile: pathOrFalseArg(args.runDashboard ?? args['run-dashboard'])
+    });
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exitCode = 1;
   } else if (command === 'verify') {

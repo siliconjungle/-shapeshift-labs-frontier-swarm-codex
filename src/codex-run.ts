@@ -17,7 +17,8 @@ import { createCodexRunMetadata } from './codex-run-metadata.js';
 import { createCodexWorkspacePlan, createSwarmWorkspaceProof, prepareCodexWorkspace } from './codex-workspace.js';
 import { readCodexHumanActionArtifacts } from './human-actions.js';
 import { applyWorkspacePreExecWriteFence, collectChangedPaths, emptyChangedPathCollection, filterWorkspaceChangedPaths, mergeWorkspaceChangedPathCollections, quarantineWorkspacePatchCandidatePaths, restoreWorkspaceChangedPaths, restoreWorkspacePreExecWriteFence, runVerification, shouldSnapshotWorkspaceChanges, snapshotWorkspaceFiles, writeCodexPatchFile } from './codex-workspace-changes.js';
-import { appendCodexLiveRunGraphEvent, createCodexLiveJobResultEvents, createCodexLiveJobStartedEvent, resolveCodexLiveRunGraphEventsPath } from './run-graph-live.js';
+import { appendCodexLiveRunGraphEvent, createCodexLiveJobStartedEvent, resolveCodexLiveRunGraphEventsPath } from './run-graph-live.js';
+import { appendCodexJobResultTimelineEvents } from './codex-run-timeline.js';
 import type { FrontierCodexJobPaths, FrontierCodexSemanticImportSidecar, FrontierCodexSwarmRunOptions } from './index.js';
 
 export { runCodexSwarm } from './codex-run-swarm.js';
@@ -337,16 +338,7 @@ export async function runCodexJob(
     semanticImportExpected,
     handoffArtifacts
   });
-  for (const event of createCodexLiveJobResultEvents({
-    runId: options.eventStream?.runId,
-    outDir,
-    job,
-    result,
-    mergeBundle,
-    generatedAt: result.finishedAt
-  })) {
-    await appendCodexLiveRunGraphEvent(liveRunGraphEventsPath, event);
-  }
+  await appendCodexJobResultTimelineEvents({ options, outDir, job, result, mergeBundle });
   return result;
 }
 
