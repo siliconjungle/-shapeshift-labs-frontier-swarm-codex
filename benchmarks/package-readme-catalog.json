@@ -112,6 +112,14 @@
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-run"
   },
   {
+    "id": "frontier-lease",
+    "name": "@shapeshift-labs/frontier-lease",
+    "role": "Runtime-neutral semantic, file, package, and repository lease claims with fencing tokens, expiry, conflict checks, apply validation, and replayable evidence for Frontier collaboration.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lease",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lease",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lease"
+  },
+  {
     "id": "frontier-inspect",
     "name": "@shapeshift-labs/frontier-inspect",
     "role": "Cross-package inspection/evidence bundles, registry graph snapshots, feature/resource impact reports, timeline/event normalization, redaction, JSONL import/export, and AI-readable app feature maps.",
@@ -230,6 +238,14 @@
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-swarm",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm"
+  },
+  {
+    "id": "frontier-swarm-git",
+    "name": "@shapeshift-labs/frontier-swarm-git",
+    "role": "Node Git, workspace, patch, changed-path, write-fence, package-link repair, patch check, HEAD read, blob hash, and apply-ledger adapter for Frontier swarm runners.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-swarm-git",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-swarm-git",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-swarm-git"
   },
   {
     "id": "frontier-swarm-codex",
