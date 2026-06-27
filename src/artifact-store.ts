@@ -94,12 +94,12 @@ function collectArtifactCandidates(collection: FrontierCodexCollectResult): Arra
       out.push({ file: path.join(entry.outputDir, 'merge.json'), jobId: entry.jobId, bucket, kind: 'merge-bundle' });
       out.push({ file: path.join(entry.outputDir, 'changes.patch'), jobId: entry.jobId, bucket, kind: 'patch' });
       out.push({ file: path.join(entry.outputDir, 'evidence.json'), jobId: entry.jobId, bucket, kind: 'evidence' });
-      for (const evidencePath of entry.bundle.evidencePaths) {
+      for (const evidencePath of entry.bundle.evidencePaths ?? []) {
         out.push({ file: evidencePath, jobId: entry.jobId, bucket, kind: artifactKindForEvidencePath(evidencePath) });
       }
     }
   }
-  for (const name of ['collection.json', 'merge-index.json', 'queue-overlay.json', 'strategy-tournament.json', 'strategy-history.json', 'tournament-adaptive-feedback.json', 'evidence-index.json', 'merge-admission.json', 'coordinator-query.json', 'compact-dashboard.json', 'queue-outcome-model.json', 'terminal-state.json']) {
+  for (const name of ['collection.json', 'merge-index.json', 'queue-overlay.json', 'strategy-tournament.json', 'strategy-history.json', 'tournament-adaptive-feedback.json', 'evidence-index.json', 'merge-admission.json', 'coordinator-query.json', 'compact-dashboard.json', 'queue-outcome-model.json', 'terminal-state.json', 'proof-route-backlog.json']) {
     out.push({ file: path.join(collection.outDir, name), kind: 'coordinator-index' });
   }
   const seen = new Set<string>();

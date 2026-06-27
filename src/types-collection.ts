@@ -4,6 +4,7 @@ import type {
   FrontierSwarmMergeAdmission,
   FrontierSwarmMergeBundle,
   FrontierSwarmMergeIndex,
+  FrontierSwarmBacklog,
   FrontierSwarmQueueOutcomeModel,
   FrontierSwarmStrategyTournamentHistory,
   FrontierSwarmStrategyTournament,
@@ -92,6 +93,8 @@ export interface FrontierCodexCollectResult {
   landedHealth?: FrontierCodexLandedHealthSummary;
   artifactStore?: FrontierCodexArtifactStoreResult;
   artifactStoreStatus?: FrontierCodexArtifactStoreStatus;
+  proofRouteBacklog?: FrontierSwarmBacklog;
+  proofRouteBacklogPath?: string;
   runSync?: FrontierCodexRunSyncResult;
   metadata?: FrontierCodexCollectionMetadata;
   summary: FrontierCodexCollectSummary;
@@ -100,6 +103,8 @@ export interface FrontierCodexCollectResult {
 export type FrontierCodexCollectSummary = Record<FrontierCodexCollectBucket, number> & {
   total: number;
   collectorGeneratedPatchCount?: number;
+  proofRouteTaskCount?: number;
+  proofRouteBacklogPath?: string;
   landed?: number;
   landedJobIds?: string[];
   applyLedger?: FrontierCodexApplyLedgerSummary;

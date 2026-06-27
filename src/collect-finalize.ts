@@ -6,6 +6,10 @@ import {
 } from './constants.js';
 import { isObject } from './common.js';
 import { createBoundedCodexArtifactStore } from './collect-artifact-store.js';
+import {
+  FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE,
+  createCodexProofRouteBacklog
+} from './proof-route-tasks.js';
 import type {
   FrontierCodexApplyLedgerSummary,
   FrontierCodexCollectBucket,
@@ -21,6 +25,8 @@ export function createCodexCollectSummary(input: {
   collectorGeneratedPatchCount: number;
   applyLedgerSummary?: FrontierCodexApplyLedgerSummary;
   landedHealth?: FrontierCodexLandedHealthSummary;
+  proofRouteTaskCount?: number;
+  proofRouteBacklogPath?: string;
 }): FrontierCodexCollectResult['summary'] {
   const summary: FrontierCodexCollectResult['summary'] = {
     total: input.mergeRecordCount,
@@ -32,6 +38,10 @@ export function createCodexCollectSummary(input: {
     'stale-against-head': input.buckets['stale-against-head'].length,
     collectorGeneratedPatchCount: input.collectorGeneratedPatchCount
   };
+  if (input.proofRouteTaskCount) {
+    summary.proofRouteTaskCount = input.proofRouteTaskCount;
+    if (input.proofRouteBacklogPath) summary.proofRouteBacklogPath = input.proofRouteBacklogPath;
+  }
   if (input.applyLedgerSummary) {
     summary.landed = input.applyLedgerSummary.landed;
     summary.landedJobIds = input.applyLedgerSummary.landedJobIds;
@@ -62,6 +72,23 @@ export async function persistCodexCollectResult(input: {
   const { result } = input;
   await fs.mkdir(result.outDir, { recursive: true });
   const collectionPath = path.join(result.outDir, 'collection.json');
+  const proofRouteBacklog = createCodexProofRouteBacklog({ collection: result });
+  if (proofRouteBacklog.entries.length > 0) {
+    const proofRouteBacklogPath = path.join(result.outDir, 'proof-route-backlog.json');
+    result.proofRouteBacklog = proofRouteBacklog;
+    result.proofRouteBacklogPath = proofRouteBacklogPath;
+    result.summary.proofRouteTaskCount = proofRouteBacklog.entries.length;
+    result.summary.proofRouteBacklogPath = proofRouteBacklogPath;
+    result.metadata = {
+      ...(isObject(result.metadata) ? result.metadata : {}),
+      proofRouteBacklog: {
+        path: proofRouteBacklogPath,
+        entryCount: proofRouteBacklog.entries.length,
+        routeNext: FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE
+      }
+    };
+    await fs.writeFile(proofRouteBacklogPath, JSON.stringify(proofRouteBacklogChildArtifact(proofRouteBacklog), null, 2) + '\n');
+  }
   await fs.writeFile(collectionPath, JSON.stringify(result, null, 2) + '\n');
   await writeResultArtifactFiles(result);
   const artifactStorePostProcessing = await createBoundedCodexArtifactStore({
@@ -92,7 +119,18 @@ async function writeResultArtifactFiles(result: FrontierCodexCollectResult): Pro
     ['coordinator-query.json', result.dashboard],
     ['compact-dashboard.json', result.compactDashboard],
     ['queue-outcome-model.json', result.queueOutcomeModel],
-    ['terminal-state.json', result.terminalState]
+    ['terminal-state.json', result.terminalState],
+    ...(result.proofRouteBacklog ? [['proof-route-backlog.json', proofRouteBacklogChildArtifact(result.proofRouteBacklog)] as [string, unknown]] : [])
   ];
   await Promise.all(writes.map(([file, value]) => fs.writeFile(path.join(result.outDir, file), JSON.stringify(value, null, 2) + '\n')));
+}
+
+function proofRouteBacklogChildArtifact(backlog: NonNullable<FrontierCodexCollectResult['proofRouteBacklog']>): Record<string, unknown> {
+  const metadata = (backlog as { metadata?: unknown }).metadata;
+  return {
+    id: backlog.id,
+    title: backlog.title,
+    entries: backlog.entries,
+    ...(isObject(metadata) ? { metadata } : {})
+  };
 }

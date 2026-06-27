@@ -1,5 +1,12 @@
 import assert from 'node:assert';
 import {
+  collectCodexSwarmRun,
+  continueCodexSwarmLoop,
+  exists,
+  fs,
+  path
+} from './context.mjs';
+import {
   FRONTIER_CODEX_HTML_CSS_BROWSER_RUNTIME_PROOF_CODE,
   FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE,
   createCodexProofRouteBacklog,
@@ -102,4 +109,70 @@ export function testProofRouteTasks(mergeBundle) {
     }
   };
   assert.strictEqual(createCodexProofRouteTasks({ collection: partialCollection }).length, 1);
+}
+
+export async function testProofRouteCollectionAutomation({ tmp }, mergeBundle) {
+  const runDir = path.join(tmp, 'proof-route-automation-run');
+  const jobDir = path.join(runDir, 'html-css-worker');
+  await fs.mkdir(jobDir, { recursive: true });
+  await fs.writeFile(path.join(jobDir, 'changes.patch'), [
+    'diff --git a/src/page.html b/src/page.html',
+    '--- a/src/page.html',
+    '+++ b/src/page.html',
+    '@@ -1 +1 @@',
+    '-<button class="old">Save</button>',
+    '+<button class="new">Save</button>',
+    ''
+  ].join('\n'));
+  await fs.writeFile(path.join(jobDir, 'merge.json'), JSON.stringify({
+    ...mergeBundle,
+    id: 'html-css-proof-route-bundle',
+    jobId: 'html-css-worker',
+    taskId: 'html-css-task',
+    queueItemIds: ['html-css-task'],
+    status: 'completed',
+    mergeReadiness: 'verified-patch',
+    disposition: 'needs-port',
+    autoMergeable: false,
+    changedPaths: ['src/page.html', 'src/styles.css', 'src/app.ts'],
+    patchPath: path.join(jobDir, 'changes.patch'),
+    evidencePaths: [],
+    semanticImport: {
+      confidence: {
+        missingEvidence: [{
+          code: FRONTIER_CODEX_HTML_CSS_BROWSER_RUNTIME_PROOF_CODE,
+          routeNext: FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE,
+          summary: 'Run source-bound Playwright assertions before admitting this HTML/CSS browser change.',
+          suggestedInput: {
+            playwrightAssertionRuntimeProof: true,
+            proofBuilderInput: true
+          }
+        }]
+      }
+    },
+    metadata: {}
+  }, null, 2) + '\n');
+
+  const collection = await collectCodexSwarmRun({
+    run: runDir,
+    outDir: path.join(runDir, 'collected'),
+    checkStale: false,
+    semanticImportExpected: true
+  });
+  assert.strictEqual(collection.summary.proofRouteTaskCount, 1);
+  assert.ok(collection.proofRouteBacklogPath.endsWith('proof-route-backlog.json'));
+  assert.ok(await exists(collection.proofRouteBacklogPath));
+  assert.strictEqual(collection.proofRouteBacklog.entries[0].lane, 'browser');
+  assert.ok(collection.proofRouteBacklog.entries[0].targetRefs.includes('src/app.ts'));
+  assert.ok(collection.artifactStore.records.some((record) => record.relativePath === 'proof-route-backlog.json'));
+
+  const continuation = await continueCodexSwarmLoop({
+    collection: collection.outDir,
+    outDir: path.join(tmp, 'proof-route-automation-continuation'),
+    backlog: { id: 'proof-route-base', entries: [] },
+    routingPolicy: { id: 'proof-route-routing', defaultMode: 'fill' }
+  });
+  assert.ok(continuation.childBacklogPaths.includes(collection.proofRouteBacklogPath));
+  assert.strictEqual(continuation.summary.childBacklogEntryCount, 1);
+  assert.ok(continuation.nextBacklog.entries.some((entry) => entry.id === collection.proofRouteBacklog.entries[0].id));
 }
