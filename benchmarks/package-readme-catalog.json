@@ -304,6 +304,22 @@
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-javascript"
   },
   {
+    "id": "frontier-lang-html",
+    "name": "@shapeshift-labs/frontier-lang-html",
+    "role": "HTML semantic merge evidence and projection adapter for Frontier Lang semantic documents, including element tree identity, attributes, text/comment spans, source maps, and fail-closed browser/runtime proof gaps.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-html",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-html",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-html"
+  },
+  {
+    "id": "frontier-lang-css",
+    "name": "@shapeshift-labs/frontier-lang-css",
+    "role": "CSS semantic merge evidence and projection adapter for Frontier Lang semantic documents, including selector specificity, declaration/cascade keys, custom properties, CSS Modules/ICSS export and composition evidence, source maps, and fail-closed browser cascade/render proof gaps.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-css",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-css",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-css"
+  },
+  {
     "id": "frontier-lang-rust",
     "name": "@shapeshift-labs/frontier-lang-rust",
     "role": "Rust projection adapter for Frontier Lang semantic documents, including structs, aliases, and action stubs.",
@@ -330,7 +346,7 @@
   {
     "id": "frontier-lang-compiler",
     "name": "@shapeshift-labs/frontier-lang-compiler",
-    "role": "Compiler facade for Frontier Lang source documents, including parse, check, hash, diagnostics, universal AST envelopes, proof/paradigm semantic summaries, projection to TypeScript, JavaScript, Rust, Python, and C, and native source-import adapters for semantic merge evidence.",
+    "role": "Compiler facade for Frontier Lang source documents, including parse, check, hash, diagnostics, universal AST envelopes, proof/paradigm semantic summaries, projection to TypeScript, JavaScript, HTML, CSS, Rust, Python, and C, and native source-import adapters for semantic merge evidence.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-compiler",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-compiler",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-compiler"
@@ -394,7 +410,7 @@
   {
     "id": "frontier-lang",
     "name": "@shapeshift-labs/frontier-lang",
-    "role": "Umbrella package for Frontier Lang kernel, parser, checker, compiler facade, universal AST helpers, projection adapters, and source-language importer adapters.",
+    "role": "Umbrella package for Frontier Lang kernel, parser, checker, compiler facade, universal AST helpers, projection adapters, HTML/CSS semantic merge evidence adapters, and source-language importer adapters.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-lang",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang"

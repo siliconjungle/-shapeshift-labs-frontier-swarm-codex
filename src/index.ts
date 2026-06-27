@@ -259,6 +259,18 @@ export {
   summarizeSemanticMergeAdmission
 } from './semantic-merge-admission.js';
 export { summarizeSemanticPatchBundleOverlaps } from './semantic-bundle-overlaps.js';
+export {
+  FRONTIER_CODEX_HTML_CSS_BROWSER_RUNTIME_PROOF_CODE,
+  FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE,
+  createCodexProofRouteBacklog,
+  createCodexProofRouteRequests,
+  createCodexProofRouteTasks
+} from './proof-route-tasks.js';
+export type {
+  FrontierCodexProofRouteRequest,
+  FrontierCodexProofRouteRequestInput,
+  FrontierCodexProofRouteTaskInput
+} from './proof-route-tasks.js';
 
 export type {
   FrontierCodexJsTsSafeMergeApplyClassification,
