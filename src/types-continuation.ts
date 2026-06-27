@@ -19,6 +19,7 @@ import type {
   FrontierCodexDistributedRunResolvedOptions,
   FrontierCodexDistributedRunArtifactPaths
 } from './types-distributed-run.js';
+import type { FrontierCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
 import type { FrontierCodexProofParentRecheckResult } from './proof-parent-recheck-results.js';
 
 export interface FrontierCodexContinuationInput {
@@ -79,6 +80,8 @@ export interface FrontierCodexContinuationResult {
   nextTasksPath?: string;
   nextPlanPath?: string;
   proofParentRecheckResultsPath?: string;
+  proofParentApplyCandidatesPath?: string;
+  proofParentApplyCandidateCollectionDir?: string;
   childBacklogNames: string[];
   childBacklogPaths: string[];
   feedbackCount: number;
@@ -88,6 +91,7 @@ export interface FrontierCodexContinuationResult {
   humanAnswers: Record<string, unknown>[];
   nextPlan?: FrontierSwarmPlan;
   proofParentRecheckResults?: FrontierCodexProofParentRecheckResult;
+  proofParentApplyCandidates?: FrontierCodexProofParentApplyCandidates;
   summary: {
     childBacklogCount: number;
     childBacklogEntryCount: number;
@@ -170,6 +174,7 @@ export interface FrontierCodexContinuationResult {
     tournamentObservationCount: number;
     tournamentRecommendationCount: number;
     proofParentRecheck?: FrontierCodexProofParentRecheckResult['summary'];
+    proofParentApplyCandidates?: FrontierCodexProofParentApplyCandidates['summary'];
     collectionBucketCounts?: FrontierCodexCollectResult['summary'];
     tournamentCounts?: Pick<
       FrontierCodexCollectResult['strategyTournament']['summary'],
@@ -189,6 +194,8 @@ export interface FrontierCodexContinuationResult {
       nextTasksPath?: string;
       nextPlanPath?: string;
       proofParentRecheckResultsPath?: string;
+      proofParentApplyCandidatesPath?: string;
+      proofParentApplyCandidateCollectionDir?: string;
       childBacklogPaths: string[];
     };
   };

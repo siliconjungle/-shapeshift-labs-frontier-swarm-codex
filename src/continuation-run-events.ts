@@ -40,6 +40,7 @@ export async function appendContinuationRunEvents(input: {
     nextTasksPath?: string;
     nextPlanPath?: string;
     proofParentRecheckResultsPath?: string;
+    proofParentApplyCandidatesPath?: string;
   };
 }): Promise<ContinuationRunProjection | undefined> {
   const projection = await resolveContinuationRunProjection(input.input, input.cwd, input.outDir, input.collection);

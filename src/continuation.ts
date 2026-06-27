@@ -25,6 +25,7 @@ import { projectContinuationTerminalOutcomes } from './continuation-terminal-out
 import { countByString, sanitizeContinuationBacklogForPlan } from './continuation-plan-utils.js';
 import { coerceCodexSwarmTasksInput, createCodexSwarmPlan } from './index.js';
 import { normalizeCodexDistributedRunOptions } from './distributed-run.js';
+import { writeCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
 import { writeCodexProofParentRecheckResults } from './proof-parent-recheck-results.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
 import type { FrontierCodexContinuationInput, FrontierCodexContinuationResult } from './types-continuation.js';
@@ -111,6 +112,12 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     backlog: projected.backlog,
     generatedAt
   });
+  const proofParentApplyCandidates = await writeCodexProofParentApplyCandidates({
+    cwd,
+    outDir,
+    recheck: proofParentRecheckResults?.result,
+    generatedAt
+  });
   const nextPlan = manifest ? createCodexSwarmPlan({
     manifest,
     tasks: projected.tasks,
@@ -157,7 +164,8 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
       humanActionStatePath: humanActionState.statePath,
       ...(nextTasksPath ? { nextTasksPath } : {}),
       ...(nextPlanPath ? { nextPlanPath } : {}),
-      ...(proofParentRecheckResults?.path ? { proofParentRecheckResultsPath: proofParentRecheckResults.path } : {})
+      ...(proofParentRecheckResults?.path ? { proofParentRecheckResultsPath: proofParentRecheckResults.path } : {}),
+      ...(proofParentApplyCandidates?.path ? { proofParentApplyCandidatesPath: proofParentApplyCandidates.path } : {})
     }
   });
   const result: FrontierCodexContinuationResult = {
@@ -179,6 +187,9 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     ...(nextPlanPath ? { nextPlanPath } : {}),
     ...(proofParentRecheckResults?.path ? { proofParentRecheckResultsPath: proofParentRecheckResults.path } : {}),
     ...(proofParentRecheckResults?.result ? { proofParentRecheckResults: proofParentRecheckResults.result } : {}),
+    ...(proofParentApplyCandidates?.path ? { proofParentApplyCandidatesPath: proofParentApplyCandidates.path } : {}),
+    ...(proofParentApplyCandidates?.collectionDir ? { proofParentApplyCandidateCollectionDir: proofParentApplyCandidates.collectionDir } : {}),
+    ...(proofParentApplyCandidates?.result ? { proofParentApplyCandidates: proofParentApplyCandidates.result } : {}),
     childBacklogNames,
     childBacklogPaths,
     feedbackCount: feedback.length,
@@ -218,6 +229,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
       tournamentObservationCount: tournamentSummary?.adaptiveFeedback.observationCount ?? 0,
       tournamentRecommendationCount: tournamentSummary?.adaptiveFeedback.recommendationCount ?? 0,
       ...(proofParentRecheckResults?.result ? { proofParentRecheck: proofParentRecheckResults.result.summary } : {}),
+      ...(proofParentApplyCandidates?.result ? { proofParentApplyCandidates: proofParentApplyCandidates.result.summary } : {}),
       ...(collection ? {
         collectionBucketCounts: collection.summary,
         tournamentCounts: {
@@ -245,6 +257,8 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
         ...(nextTasksPath ? { nextTasksPath } : {}),
         ...(nextPlanPath ? { nextPlanPath } : {}),
         ...(proofParentRecheckResults?.path ? { proofParentRecheckResultsPath: proofParentRecheckResults.path } : {}),
+        ...(proofParentApplyCandidates?.path ? { proofParentApplyCandidatesPath: proofParentApplyCandidates.path } : {}),
+        ...(proofParentApplyCandidates?.collectionDir ? { proofParentApplyCandidateCollectionDir: proofParentApplyCandidates.collectionDir } : {}),
         childBacklogPaths
       }
     }

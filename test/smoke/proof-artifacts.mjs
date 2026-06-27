@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { collectCodexSwarmRun, continueCodexSwarmLoop, exists, fs, path } from './context.mjs';
+import { applyCodexSwarmCollection, collectCodexSwarmRun, continueCodexSwarmLoop, exists, fs, path } from './context.mjs';
 import {
   FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE,
   FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE,
@@ -169,6 +169,17 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(continuation.proofParentRecheckResults.records[0].sourceJobId, 'html-css-worker');
   assert.strictEqual(continuation.proofParentRecheckResults.records[0].applyCheckPassed, true);
   assert.strictEqual(continuation.proofParentRecheckResults.records[0].gateEvidencePassed, true);
+  assert.strictEqual(continuation.summary.proofParentApplyCandidates.total, 1);
+  assert.ok(await exists(continuation.proofParentApplyCandidatesPath));
+  assert.ok(await exists(path.join(continuation.proofParentApplyCandidateCollectionDir, 'ready-to-apply', 'html-css-worker', 'merge.json')));
+  const applyResult = await applyCodexSwarmCollection({
+    cwd: sourceDir,
+    collection: continuation.proofParentApplyCandidateCollectionDir,
+    dryRun: true
+  });
+  assert.strictEqual(applyResult.ok, true);
+  assert.strictEqual(applyResult.admission.accepted, 1);
+  assert.strictEqual(applyResult.summary.checked, 1);
   assert.strictEqual(continuation.summary.nextJobLaneCounts.coordinator, 1);
   assert.ok(continuation.nextPlan.jobs.some((job) => job.taskId === collection.proofParentRecheckBacklog.entries[0].taskId));
 }
