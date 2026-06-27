@@ -111,6 +111,7 @@ function proofRouteRequestToTask(
     },
     acceptance: [
       'Use @shapeshift-labs/frontier-playwright runFrontierPlaywrightAssertionRuntimeProof or runFrontierPlaywrightSourceRuntimeProof.',
+      'Write playwright-runtime-proof.json with createFrontierPlaywrightRuntimeProofArtifact and stringifyFrontierPlaywrightRuntimeProofArtifact, and include that file path in the merge bundle evidencePaths.',
       'Bind proof input to exact base/worker/head/output source text or hashes when those sources are available.',
       'Write source-bound proofBuilderInput and assertion/runtime evidence under the job evidence directory.',
       'Keep semanticEquivalenceClaim, browserEquivalenceClaim, runtimeEquivalenceClaim, and autoMergeClaim false until the language validator admits the proof.',

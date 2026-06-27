@@ -12,6 +12,7 @@ import { isObject, pathExists, uniqueStrings } from './common.js';
 import { compressArtifactBytes } from './artifact-compression.js';
 import { readSqliteArtifactIndex, writeSqliteArtifactIndex } from './artifact-sqlite.js';
 import { createSemanticCompactSummary } from './semantic-compact-summary.js';
+import { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, codexPlaywrightRuntimeProofArtifactKindForFile, codexPlaywrightRuntimeProofArtifactMetadata, codexPlaywrightRuntimeProofArtifactTags } from './proof-artifacts.js';
 const COMPRESS_EXTENSIONS = new Set(['.json', '.jsonl', '.log', '.txt', '.patch', '.md']);
 export async function createCodexArtifactStore(input: {
   collection: FrontierCodexCollectResult;
@@ -99,7 +100,7 @@ function collectArtifactCandidates(collection: FrontierCodexCollectResult): Arra
       }
     }
   }
-  for (const name of ['collection.json', 'merge-index.json', 'queue-overlay.json', 'strategy-tournament.json', 'strategy-history.json', 'tournament-adaptive-feedback.json', 'evidence-index.json', 'merge-admission.json', 'coordinator-query.json', 'compact-dashboard.json', 'queue-outcome-model.json', 'terminal-state.json', 'proof-route-backlog.json']) {
+  for (const name of ['collection.json', 'merge-index.json', 'queue-overlay.json', 'strategy-tournament.json', 'strategy-history.json', 'tournament-adaptive-feedback.json', 'evidence-index.json', 'merge-admission.json', 'coordinator-query.json', 'compact-dashboard.json', 'queue-outcome-model.json', 'terminal-state.json', FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, 'proof-route-backlog.json']) {
     out.push({ file: path.join(collection.outDir, name), kind: 'coordinator-index' });
   }
   const seen = new Set<string>();
@@ -164,6 +165,7 @@ async function readArtifactMetadata(file: string): Promise<Record<string, unknow
     const semanticEdit = semanticCompactSummary?.semanticEdit;
     return isObject(parsed) ? {
       artifactKind: typeof parsed.kind === 'string' ? parsed.kind : undefined,
+      ...codexPlaywrightRuntimeProofArtifactMetadata(parsed),
       disposition: parsed.disposition,
       status: parsed.status,
       mergeReadiness: parsed.mergeReadiness,
@@ -213,25 +215,21 @@ function artifactTags(candidate: { bucket?: string; kind: string }, metadata: Re
   return uniqueStrings([
     candidate.kind,
     ...(candidate.bucket ? [candidate.bucket] : []),
-    semanticPresent ? 'semantic-sidecar' : '',
-    semanticPresent ? 'semantic-import' : '',
+    semanticPresent ? 'semantic-sidecar' : '', semanticPresent ? 'semantic-import' : '',
     candidate.kind === 'semantic-imports' ? 'semantic-imports' : '',
     lineagePresent ? 'semantic-lineage' : '',
     typeof metadata.semanticEditAdmissionStatus === 'string' ? `semantic-edit-admission-${metadata.semanticEditAdmissionStatus}` : '',
-    metadata.semanticEditAdmissionAutoMergeCandidate ? 'semantic-edit-admission-auto-merge-candidate' : '',
-    metadata.semanticEditAdmissionCleanEligible ? 'semantic-edit-admission-clean-eligible' : '',
-    Number(metadata.semanticEditScriptPortable ?? 0) > 0 ? 'semantic-edit-portable' : '',
-    Number(metadata.semanticEditProjectionProjected ?? 0) > 0 ? 'semantic-edit-projected' : '',
-    Number(metadata.semanticEditProjectionBlocked ?? 0) > 0 ? 'semantic-edit-projection-blocked' : '',
-    Number(metadata.semanticEditProjectionMatchesWorker ?? 0) > 0 ? 'semantic-edit-projection-worker-match' : '',
-    Number(metadata.semanticEditProjectionMismatchesWorker ?? 0) > 0 ? 'semantic-edit-projection-worker-mismatch' : '',
-    Number(metadata.semanticEditProjectionMatchUnknown ?? 0) > 0 ? 'semantic-edit-projection-worker-unknown' : '',
+    metadata.semanticEditAdmissionAutoMergeCandidate ? 'semantic-edit-admission-auto-merge-candidate' : '', metadata.semanticEditAdmissionCleanEligible ? 'semantic-edit-admission-clean-eligible' : '',
+    Number(metadata.semanticEditScriptPortable ?? 0) > 0 ? 'semantic-edit-portable' : '', Number(metadata.semanticEditProjectionProjected ?? 0) > 0 ? 'semantic-edit-projected' : '',
+    Number(metadata.semanticEditProjectionBlocked ?? 0) > 0 ? 'semantic-edit-projection-blocked' : '', Number(metadata.semanticEditProjectionMatchesWorker ?? 0) > 0 ? 'semantic-edit-projection-worker-match' : '',
+    Number(metadata.semanticEditProjectionMismatchesWorker ?? 0) > 0 ? 'semantic-edit-projection-worker-mismatch' : '', Number(metadata.semanticEditProjectionMatchUnknown ?? 0) > 0 ? 'semantic-edit-projection-worker-unknown' : '',
     Number(metadata.semanticEditScriptConflicts ?? 0) > 0 ? 'semantic-edit-conflict' : '',
     Number(metadata.semanticEditScriptStale ?? 0) > 0 ? 'semantic-edit-stale' : '',
     Number(metadata.semanticEditScriptNeedsPort ?? 0) > 0 ? 'semantic-edit-needs-port' : '',
     metadata.staleAgainstHead ? 'stale' : '',
     Number(metadata.traceShards ?? 0) > 0 ? 'trace' : '',
-    Number(metadata.semanticDependencyRelations ?? 0) > 0 ? 'semantic-dependencies' : ''
+    Number(metadata.semanticDependencyRelations ?? 0) > 0 ? 'semantic-dependencies' : '',
+    ...codexPlaywrightRuntimeProofArtifactTags(metadata)
   ]);
 }
 
@@ -271,6 +269,8 @@ function artifactKindForEvidencePath(file: string): string {
   if (name === 'log-summary.json') return 'log-summary';
   if (name === 'resource-allocation.json') return 'resource-allocation';
   if (name === 'workspace-proof.json') return 'workspace-proof';
+  const proofArtifactKind = codexPlaywrightRuntimeProofArtifactKindForFile(name);
+  if (proofArtifactKind) return proofArtifactKind;
   if (name === 'merge.json') return 'merge-bundle';
   if (name === 'evidence.json') return 'evidence';
   return 'worker-evidence';

@@ -14,25 +14,9 @@ import {
   type FrontierSwarmPatchStatus
 } from '@shapeshift-labs/frontier-swarm';
 import type { FrontierCodexCollectBucket, FrontierCodexCollectInput, FrontierCodexCollectResult } from './index.js';
-import {
-  findFilesByName,
-  isObject,
-  pathExists,
-  pathHasIgnoredSegment,
-  slug,
-  uniqueStrings
-} from './common.js';
+import { findFilesByName, isObject, pathExists, pathHasIgnoredSegment, slug, uniqueStrings } from './common.js';
 import { createCodexCompactDashboard } from './dashboard.js';
-import {
-  bundlePatchStaleness,
-  classifyCodexCollectBucket,
-  classifyCodexSemanticCollectAdmission,
-  collectFailureReasonClasses,
-  mergeRecordScore,
-  normalizeCollectedDisposition,
-  normalizeCollectedMergeBundle,
-  normalizeCollectedStaleAgainstHead
-} from './collect-bundles.js';
+import { bundlePatchStaleness, classifyCodexCollectBucket, classifyCodexSemanticCollectAdmission, collectFailureReasonClasses, mergeRecordScore, normalizeCollectedDisposition, normalizeCollectedMergeBundle, normalizeCollectedStaleAgainstHead } from './collect-bundles.js';
 import { copyOrWriteCollectedEvidenceSummary, createCollectedEvidenceEntries } from './collect-evidence.js';
 import { semanticImportSummaryFromBundle, summarizeCodexSemanticImportQuality } from './semantic-import-quality.js';
 import { collectedQualitySignalsFromDashboard, enrichCollectedCoordinatorDashboard } from './collect-dashboard.js';
@@ -59,6 +43,8 @@ import { attachSemanticPatchBundleOverlaps } from './collect-overlaps.js';
 import { attachRuntimeProjectionMetadata } from './collect-runtime-projections.js';
 import { readCodexRuntimeProjectionArtifacts } from './runtime-projections.js';
 import { syncCodexRunEventPeers } from './run-sync.js';
+import { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, collectCodexPlaywrightRuntimeProofArtifacts, createCodexPlaywrightRuntimeProofArtifactIndex, createCodexPlaywrightRuntimeProofEvidenceEntries } from './proof-artifacts.js';
+import type { FrontierCodexPlaywrightRuntimeProofArtifactRecord } from './types-proof-artifacts.js';
 
 export { readCodexPidProcesses } from './collect-pids.js';
 
@@ -75,6 +61,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   const buckets = createEmptyCollectBuckets();
   const collectedBundles: FrontierSwarmMergeBundle[] = [];
   const evidenceEntries: FrontierSwarmEvidenceIndexEntryInput[] = [];
+  const proofArtifactRecords: FrontierCodexPlaywrightRuntimeProofArtifactRecord[] = [];
   const patchStatuses: Record<string, FrontierSwarmPatchStatus> = {};
   const semanticImportExpected = input.semanticImportExpected ?? false;
   const semanticImportQualities = new Map<string, ReturnType<typeof summarizeCodexSemanticImportQuality>>();
@@ -203,7 +190,10 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       staleReasons: staleness.reasons,
       semanticImportExpected
     });
+    const proofArtifacts = await collectCodexPlaywrightRuntimeProofArtifacts({ bundle: nextBundle, bucket, mergePath });
+    proofArtifactRecords.push(...proofArtifacts);
     evidenceEntries.push(...createCollectedEvidenceEntries(nextBundle, collectedEvidencePath, bucket, semanticImportExpected));
+    evidenceEntries.push(...createCodexPlaywrightRuntimeProofEvidenceEntries(proofArtifacts));
     buckets[bucket].push({
       bucket,
       jobId: patchResolution.bundle.jobId,
@@ -241,6 +231,8 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     runId: path.basename(runDir),
     bundles: collectedBundles
   });
+  const proofArtifacts = proofArtifactRecords.length > 0 ? createCodexPlaywrightRuntimeProofArtifactIndex({ runDir, collectionDir: outDir, generatedAt, records: proofArtifactRecords }) : undefined;
+  const proofArtifactsPath = proofArtifacts ? path.join(outDir, FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE) : undefined;
   const evidenceIndex = createSwarmEvidenceIndex({
     id: `codex-evidence-index:${path.basename(runDir)}`,
     entries: evidenceEntries,
@@ -291,7 +283,12 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     buckets,
     collectorGeneratedPatchCount,
     applyLedgerSummary,
-    landedHealth
+    landedHealth,
+    ...(proofArtifacts ? {
+      proofArtifactCount: proofArtifacts.summary.artifactCount, proofArtifactPassedCount: proofArtifacts.summary.passedCount,
+      proofArtifactFailedCount: proofArtifacts.summary.failedCount, proofArtifactValidatorCandidateCount: proofArtifacts.summary.validatorCandidateCount
+    } : {}),
+    proofArtifactsPath
   });
   const qualitySignals = collectedQualitySignalsFromDashboard(dashboard);
   const noiseBreakdown = createCollectionNoiseBreakdown(collectedBundles);
@@ -317,6 +314,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     semanticEditAdmission: compactDashboard.semanticEditAdmission,
     semanticEditScriptAdmission: compactDashboard.semanticEditScriptAdmission,
     semanticPatchBundleOverlaps,
+    ...(proofArtifacts ? { proofArtifacts, proofArtifactsPath } : {}),
     qualitySignals,
     noiseBreakdown,
     ...(landedHealth ? { landedHealth } : {}),
@@ -324,6 +322,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     metadata: {
       ...(runSync ? { runSync } : {}),
       runtimeProjectionPaths: runtimeProjections.paths,
+      ...(proofArtifacts ? { proofArtifacts: proofArtifacts.summary } : {}),
       ...(runtimeProjections.modelTelemetrySummary ? { modelTelemetrySummary: runtimeProjections.modelTelemetrySummary } : {}),
       ...(runtimeProjections.humanActionState ? { humanActionState: runtimeProjections.humanActionState } : {})
     },

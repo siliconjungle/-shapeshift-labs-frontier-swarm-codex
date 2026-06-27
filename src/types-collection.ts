@@ -28,6 +28,7 @@ import type { FrontierCodexApplyLedgerSummary } from './types-apply.js';
 import type { FrontierCodexCompactDashboard } from './types-evidence.js';
 import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
 import type { FrontierCodexRunSyncOptions, FrontierCodexRunSyncResult } from './run-sync.js';
+import type { FrontierCodexPlaywrightRuntimeProofArtifactIndex } from './types-proof-artifacts.js';
 
 export type * from './types-apply.js';
 export type * from './types-collection-quality.js';
@@ -95,6 +96,8 @@ export interface FrontierCodexCollectResult {
   artifactStoreStatus?: FrontierCodexArtifactStoreStatus;
   proofRouteBacklog?: FrontierSwarmBacklog;
   proofRouteBacklogPath?: string;
+  proofArtifacts?: FrontierCodexPlaywrightRuntimeProofArtifactIndex;
+  proofArtifactsPath?: string;
   runSync?: FrontierCodexRunSyncResult;
   metadata?: FrontierCodexCollectionMetadata;
   summary: FrontierCodexCollectSummary;
@@ -105,6 +108,11 @@ export type FrontierCodexCollectSummary = Record<FrontierCodexCollectBucket, num
   collectorGeneratedPatchCount?: number;
   proofRouteTaskCount?: number;
   proofRouteBacklogPath?: string;
+  proofArtifactCount?: number;
+  proofArtifactPassedCount?: number;
+  proofArtifactFailedCount?: number;
+  proofArtifactValidatorCandidateCount?: number;
+  proofArtifactsPath?: string;
   landed?: number;
   landedJobIds?: string[];
   applyLedger?: FrontierCodexApplyLedgerSummary;

@@ -14,6 +14,7 @@ export function classifyCodexHandoffArtifact(file: string): FrontierCodexHandoff
   if (name.includes('trace') || normalized.endsWith('.trace.jsonl')) return 'trace';
   if (name.includes('diagnostic') || name.includes('health') || name.includes('probe')) return 'diagnostic';
   if (name.endsWith('.log') || name.includes('codex-events') || name.includes('events.jsonl')) return 'log';
+  if (name === 'playwright-runtime-proof.json' || name === 'runtime-proof-artifact.json' || name === 'playwright-runtime-proof-artifact.json') return 'playwright-runtime-proof-artifact';
   if (name === 'evidence.json' || name === 'merge.json' || name === 'resource-allocation.json' || name === 'workspace-proof.json') return 'evidence';
   return undefined;
 }
