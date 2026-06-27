@@ -283,7 +283,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     proofArtifactsPath,
     ...(proofReadmission ? {
       proofReadmissionCount: proofReadmission.summary.total, proofReadmissionAdmittedCount: proofReadmission.summary.admitted,
-      proofReadmissionBlockedCount: proofReadmission.summary.blocked, proofReadmissionPath
+      proofReadmissionBlockedCount: proofReadmission.summary.blocked, proofReadmissionSourceLinkedCount: proofReadmission.summary.sourceLinked, proofReadmissionPath
     } : {})
   });
   const qualitySignals = collectedQualitySignalsFromDashboard(dashboard);

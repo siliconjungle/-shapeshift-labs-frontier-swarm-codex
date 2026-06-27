@@ -28,7 +28,10 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
     changedPaths: [],
     evidencePaths: [proofArtifactPath],
     commandsPassed: [{ name: 'playwright proof', command: ['node', 'proof.mjs'], status: 0 }],
-    metadata: { proofRoute: { routeNext: FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE, sourceJobId: 'html-css-worker' } }
+    metadata: {
+      proofRoute: { routeNext: FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE, sourceJobId: 'html-css-worker' },
+      sourceBundle: { jobId: 'html-css-worker', taskId: 'html-css-task', bucket: 'needs-human-port', mergePath: 'source/merge.json' }
+    }
   }, null, 2) + '\n');
 
   const collection = await collectCodexSwarmRun({
@@ -41,12 +44,16 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(collection.summary.proofArtifactValidatorCandidateCount, 1);
   assert.strictEqual(collection.summary.proofReadmissionCount, 1);
   assert.strictEqual(collection.summary.proofReadmissionAdmittedCount, 1);
+  assert.strictEqual(collection.summary.proofReadmissionSourceLinkedCount, 1);
   assert.ok(collection.proofArtifactsPath.endsWith(FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE));
   assert.ok(await exists(collection.proofArtifactsPath));
   assert.strictEqual(collection.proofReadmission.summary.admitted, 1);
+  assert.strictEqual(collection.proofReadmission.summary.sourceLinked, 1);
   assert.strictEqual(collection.proofReadmission.records[0].status, 'admitted');
+  assert.strictEqual(collection.proofReadmission.records[0].sourceBundle.jobId, 'html-css-worker');
   assert.strictEqual(collection.proofArtifacts.summary.validatorCandidateCount, 1);
   assert.strictEqual(collection.proofArtifacts.records[0].validatorReadiness, 'candidate');
+  assert.strictEqual(collection.proofArtifacts.records[0].sourceBundle.jobId, 'html-css-worker');
   assert.strictEqual(collection.proofArtifacts.records[0].runtimeEvidenceBound, true);
   assert.strictEqual(collection.proofArtifacts.records[0].sourcePath, 'src/styles.css');
   assert.deepStrictEqual(collection.proofArtifacts.records[0].languageValidators, ['createCssCascadeRuntimeProof']);
@@ -58,7 +65,8 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.ok(collection.evidenceIndex.entries.some((entry) =>
     entry.kind === 'playwright-proof-readmission' &&
     entry.status === 'admitted' &&
-    entry.path === proofArtifactPath
+    entry.path === proofArtifactPath &&
+    entry.facets.sourceJobId === 'html-css-worker'
   ));
   assert.ok(collection.artifactStore.records.some((record) =>
     record.path === proofArtifactPath &&

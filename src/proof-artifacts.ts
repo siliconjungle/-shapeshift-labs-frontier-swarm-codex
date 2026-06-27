@@ -249,9 +249,24 @@ async function readCodexPlaywrightRuntimeProofArtifactRecord(
     claims,
     proofBuilderInputAvailable,
     languageValidators: languageValidatorsForProof(proofBuilderInput),
-    ...(isObject(parsed.metadata) ? { metadata: parsed.metadata } : {})
+    ...(isObject(parsed.metadata) ? { metadata: parsed.metadata } : {}),
+    ...sourceBundleLink(bundle)
   };
   return record;
+}
+
+function sourceBundleLink(bundle: FrontierSwarmMergeBundle): { sourceBundle?: FrontierCodexPlaywrightRuntimeProofArtifactRecord['sourceBundle'] } {
+  const metadata = isObject(bundle.metadata) ? bundle.metadata : {};
+  const proofRoute = readObject(metadata.proofRoute);
+  const sourceBundle = readObject(metadata.sourceBundle) ?? readObject(proofRoute?.sourceBundle);
+  const link = {
+    jobId: firstString(sourceBundle?.jobId, proofRoute?.sourceJobId, proofRoute?.jobId),
+    taskId: firstString(sourceBundle?.taskId, proofRoute?.sourceTaskId, proofRoute?.taskId),
+    bucket: firstString(sourceBundle?.bucket),
+    mergePath: firstString(sourceBundle?.mergePath),
+    outputDir: firstString(sourceBundle?.outputDir)
+  };
+  const compact = Object.fromEntries(Object.entries(link).filter(([, value]) => value)); return Object.keys(compact).length ? { sourceBundle: compact } : {};
 }
 
 function languageValidatorsForProof(proofBuilderInput: Record<string, unknown> | undefined): string[] {

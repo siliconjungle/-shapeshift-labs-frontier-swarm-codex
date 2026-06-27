@@ -15,6 +15,7 @@ export interface FrontierCodexPlaywrightProofReadmissionRecord {
   readonly artifactPath: string;
   readonly jobId: string;
   readonly sourcePath?: string;
+  readonly sourceBundle?: FrontierCodexPlaywrightRuntimeProofArtifactRecord['sourceBundle'];
   readonly language: 'html' | 'css' | 'unknown';
   readonly validator?: string;
   readonly status: 'admitted' | 'blocked' | 'skipped' | 'unavailable' | 'error';
@@ -40,6 +41,7 @@ export interface FrontierCodexPlaywrightProofReadmission {
     readonly skipped: number;
     readonly unavailable: number;
     readonly error: number;
+    readonly sourceLinked: number;
   };
 }
 
@@ -87,7 +89,10 @@ export function createCodexPlaywrightProofReadmissionEvidenceEntries(
       proofKind: record.proofKind ?? '',
       runtimeEvidenceBound: record.runtimeEvidenceBound,
       reasonCodes: record.reasonCodes.join(','),
-      sourcePath: record.sourcePath ?? ''
+      sourcePath: record.sourcePath ?? '',
+      sourceJobId: record.sourceBundle?.jobId ?? '',
+      sourceTaskId: record.sourceBundle?.taskId ?? '',
+      sourceMergePath: record.sourceBundle?.mergePath ?? ''
     }
   }));
 }
@@ -174,6 +179,7 @@ function readmissionRecord(
     artifactPath: record.path,
     jobId: record.jobId,
     ...(record.sourcePath ? { sourcePath: record.sourcePath } : {}),
+    ...(record.sourceBundle ? { sourceBundle: record.sourceBundle } : {}),
     language,
     ...(input.validator ? { validator: input.validator } : {}),
     status,
@@ -194,7 +200,8 @@ function summarizeReadmission(records: readonly FrontierCodexPlaywrightProofRead
     blocked: records.filter((record) => record.status === 'blocked').length,
     skipped: records.filter((record) => record.status === 'skipped').length,
     unavailable: records.filter((record) => record.status === 'unavailable').length,
-    error: records.filter((record) => record.status === 'error').length
+    error: records.filter((record) => record.status === 'error').length,
+    sourceLinked: records.filter((record) => record.sourceBundle?.jobId).length
   };
 }
 

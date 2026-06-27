@@ -119,6 +119,7 @@ export type FrontierCodexCollectSummary = Record<FrontierCodexCollectBucket, num
   proofReadmissionCount?: number;
   proofReadmissionAdmittedCount?: number;
   proofReadmissionBlockedCount?: number;
+  proofReadmissionSourceLinkedCount?: number;
   proofReadmissionPath?: string;
   landed?: number;
   landedJobIds?: string[];

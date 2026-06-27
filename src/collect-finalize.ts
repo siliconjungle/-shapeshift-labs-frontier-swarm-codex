@@ -37,6 +37,7 @@ export function createCodexCollectSummary(input: {
   proofReadmissionCount?: number;
   proofReadmissionAdmittedCount?: number;
   proofReadmissionBlockedCount?: number;
+  proofReadmissionSourceLinkedCount?: number;
   proofReadmissionPath?: string;
 }): FrontierCodexCollectResult['summary'] {
   const summary: FrontierCodexCollectResult['summary'] = {
@@ -64,6 +65,7 @@ export function createCodexCollectSummary(input: {
     summary.proofReadmissionCount = input.proofReadmissionCount;
     summary.proofReadmissionAdmittedCount = input.proofReadmissionAdmittedCount ?? 0;
     summary.proofReadmissionBlockedCount = input.proofReadmissionBlockedCount ?? 0;
+    summary.proofReadmissionSourceLinkedCount = input.proofReadmissionSourceLinkedCount ?? 0;
     if (input.proofReadmissionPath) summary.proofReadmissionPath = input.proofReadmissionPath;
   }
   if (input.applyLedgerSummary) {

@@ -47,6 +47,15 @@ export interface FrontierCodexPlaywrightRuntimeProofArtifactRecord {
   readonly proofBuilderInputAvailable: boolean;
   readonly languageValidators: readonly string[];
   readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly sourceBundle?: FrontierCodexPlaywrightRuntimeProofSourceBundle;
+}
+
+export interface FrontierCodexPlaywrightRuntimeProofSourceBundle {
+  readonly jobId?: string;
+  readonly taskId?: string;
+  readonly bucket?: string;
+  readonly mergePath?: string;
+  readonly outputDir?: string;
 }
 
 export interface FrontierCodexPlaywrightRuntimeProofArtifactIndex {
