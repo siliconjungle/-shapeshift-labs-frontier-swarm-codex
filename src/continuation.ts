@@ -9,8 +9,7 @@ import {
   type FrontierSwarmModelRoutingFeedback,
   type FrontierSwarmModelRoutingFeedbackInput,
   type FrontierSwarmModelRoutingPolicy,
-  type FrontierSwarmModelRoutingPolicyInput,
-  type FrontierSwarmTaskInput
+  type FrontierSwarmModelRoutingPolicyInput
 } from '@shapeshift-labs/frontier-swarm';
 import { FRONTIER_SWARM_CODEX_CONTINUATION_KIND, FRONTIER_SWARM_CODEX_CONTINUATION_VERSION } from './constants.js';
 import { uniqueStrings } from './common.js';
@@ -23,8 +22,10 @@ import { summarizeNextJobRouting } from './continuation-job-routing-summary.js';
 import { appendContinuationRunEvents, resolvePriorDistributedRunPaths } from './continuation-run-events.js';
 import { writeContinuationTaskSource } from './continuation-task-source.js';
 import { projectContinuationTerminalOutcomes } from './continuation-terminal-outcomes.js';
+import { countByString, sanitizeContinuationBacklogForPlan } from './continuation-plan-utils.js';
 import { coerceCodexSwarmTasksInput, createCodexSwarmPlan } from './index.js';
 import { normalizeCodexDistributedRunOptions } from './distributed-run.js';
+import { writeCodexProofParentRecheckResults } from './proof-parent-recheck-results.js';
 import type { FrontierCodexCollectResult } from './types-collection.js';
 import type { FrontierCodexContinuationInput, FrontierCodexContinuationResult } from './types-continuation.js';
 
@@ -102,6 +103,14 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     answeredHumanActions: humanActionState.answeredActions,
     generatedAt
   });
+  await fs.mkdir(outDir, { recursive: true });
+  const proofParentRecheckResults = await writeCodexProofParentRecheckResults({
+    cwd,
+    outDir,
+    collection,
+    backlog: projected.backlog,
+    generatedAt
+  });
   const nextPlan = manifest ? createCodexSwarmPlan({
     manifest,
     tasks: projected.tasks,
@@ -125,7 +134,6 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
   const childBacklogPaths = childBacklogs.map((entry) => entry.path);
   const nextJobs = nextPlan?.jobs ?? [];
   const nextJobRouting = summarizeNextJobRouting(nextJobs);
-  await fs.mkdir(outDir, { recursive: true });
   await fs.mkdir(path.dirname(backlogPath), { recursive: true });
   await fs.mkdir(path.dirname(routingPolicyPath), { recursive: true });
   await fs.writeFile(backlogPath, JSON.stringify(projected.backlog, null, 2) + '\n');
@@ -148,7 +156,8 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
       routingPolicyPath,
       humanActionStatePath: humanActionState.statePath,
       ...(nextTasksPath ? { nextTasksPath } : {}),
-      ...(nextPlanPath ? { nextPlanPath } : {})
+      ...(nextPlanPath ? { nextPlanPath } : {}),
+      ...(proofParentRecheckResults?.path ? { proofParentRecheckResultsPath: proofParentRecheckResults.path } : {})
     }
   });
   const result: FrontierCodexContinuationResult = {
@@ -168,6 +177,8 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     ...(continuationRun?.distributedRun ? { distributedRun: continuationRun.distributedRun } : {}),
     ...(nextTasksPath ? { nextTasksPath } : {}),
     ...(nextPlanPath ? { nextPlanPath } : {}),
+    ...(proofParentRecheckResults?.path ? { proofParentRecheckResultsPath: proofParentRecheckResults.path } : {}),
+    ...(proofParentRecheckResults?.result ? { proofParentRecheckResults: proofParentRecheckResults.result } : {}),
     childBacklogNames,
     childBacklogPaths,
     feedbackCount: feedback.length,
@@ -206,6 +217,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
       nextJobRouting,
       tournamentObservationCount: tournamentSummary?.adaptiveFeedback.observationCount ?? 0,
       tournamentRecommendationCount: tournamentSummary?.adaptiveFeedback.recommendationCount ?? 0,
+      ...(proofParentRecheckResults?.result ? { proofParentRecheck: proofParentRecheckResults.result.summary } : {}),
       ...(collection ? {
         collectionBucketCounts: collection.summary,
         tournamentCounts: {
@@ -232,6 +244,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
         ...(continuationRun?.distributedRun ? { distributedRunDir: continuationRun.distributedRun.paths.runDir } : {}),
         ...(nextTasksPath ? { nextTasksPath } : {}),
         ...(nextPlanPath ? { nextPlanPath } : {}),
+        ...(proofParentRecheckResults?.path ? { proofParentRecheckResultsPath: proofParentRecheckResults.path } : {}),
         childBacklogPaths
       }
     }
@@ -290,29 +303,4 @@ async function readContinuationRoutingPolicy(input: FrontierCodexContinuationInp
 async function readOptionalJsonPath(file: string | undefined, cwd: string, fallback?: unknown): Promise<unknown | undefined> {
   if (!file) return fallback;
   return JSON.parse(await fs.readFile(path.resolve(cwd, file), 'utf8'));
-}
-
-function countByString(values: readonly string[]): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const value of values) out[value] = (out[value] ?? 0) + 1;
-  return out;
-}
-
-function sanitizeContinuationBacklogForPlan(backlog: FrontierSwarmBacklog, explicitTasks: readonly FrontierSwarmTaskInput[]): FrontierSwarmBacklog {
-  const entryTaskIds = new Map(backlog.entries.map((entry) => [entry.id, entry.taskId ?? entry.id]));
-  const plannedTaskIds = new Set([...explicitTasks.map((task) => task.id), ...entryTaskIds.values()]);
-  const normalizeTaskId = (value: string) => entryTaskIds.get(value) ?? value;
-  return {
-    ...backlog,
-    entries: backlog.entries.map((entry) => {
-      const parentTaskId = entry.parentEntryId ? normalizeTaskId(entry.parentEntryId) : undefined;
-      const dependsOn = uniqueStrings(entry.dependsOn.map(normalizeTaskId).filter((dependency) => plannedTaskIds.has(dependency)));
-      const { parentEntryId: _parentEntryId, ...rest } = entry;
-      return {
-        ...rest,
-        ...(parentTaskId && plannedTaskIds.has(parentTaskId) ? { parentEntryId: parentTaskId } : {}),
-        dependsOn
-      };
-    })
-  };
 }

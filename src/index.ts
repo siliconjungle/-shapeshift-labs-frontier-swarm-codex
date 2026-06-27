@@ -270,6 +270,7 @@ export { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, FRONTIER_CODEX_P
 export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_KIND, createCodexPlaywrightProofReadmission, createCodexPlaywrightProofReadmissionEvidenceEntries } from './proof-readmission.js';
 export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_KIND, createCodexPlaywrightProofParentAdmission, createCodexPlaywrightProofParentAdmissionEvidenceEntries } from './proof-parent-admission.js';
 export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_ROUTE, createCodexProofParentRecheckBacklog, createCodexProofParentRecheckTasks } from './proof-parent-recheck-tasks.js';
+export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_RESULT_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_RESULT_KIND, writeCodexProofParentRecheckResults } from './proof-parent-recheck-results.js';
 export type {
   FrontierCodexProofRouteRequest,
   FrontierCodexProofRouteRequestInput,
@@ -279,6 +280,7 @@ export type { FrontierCodexPlaywrightRuntimeProofArtifactIndex, FrontierCodexPla
 export type { FrontierCodexPlaywrightProofReadmission, FrontierCodexPlaywrightProofReadmissionRecord } from './proof-readmission.js';
 export type { FrontierCodexPlaywrightProofParentAdmission, FrontierCodexPlaywrightProofParentAdmissionRecord, FrontierCodexPlaywrightProofParentAdmissionStatus } from './proof-parent-admission.js';
 export type { FrontierCodexProofParentRecheckTaskInput } from './proof-parent-recheck-tasks.js';
+export type { FrontierCodexProofParentRecheckRecord, FrontierCodexProofParentRecheckResult, FrontierCodexProofParentRecheckStatus } from './proof-parent-recheck-results.js';
 
 export type {
   FrontierCodexJsTsSafeMergeApplyClassification,

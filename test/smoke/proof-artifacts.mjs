@@ -15,10 +15,22 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   const proofArtifactPath = path.join(evidenceDir, 'playwright-runtime-proof.json');
   const sourceDir = path.join(tmp, 'proof-artifact-source-parent');
   const sourceMergePath = path.join(sourceDir, 'merge.json');
+  const sourcePatchPath = path.join(sourceDir, 'changes.patch');
+  const sourceFilePath = path.join(sourceDir, 'src', 'styles.css');
   const runtimeEvidence = createRuntimeEvidence();
   const builderFields = createBuilderFields(runtimeEvidence);
   await fs.mkdir(evidenceDir, { recursive: true });
-  await fs.mkdir(sourceDir, { recursive: true });
+  await fs.mkdir(path.dirname(sourceFilePath), { recursive: true });
+  await fs.writeFile(sourceFilePath, '.button { color: red; }\n');
+  await fs.writeFile(sourcePatchPath, [
+    'diff --git a/src/styles.css b/src/styles.css',
+    '--- a/src/styles.css',
+    '+++ b/src/styles.css',
+    '@@ -1 +1 @@',
+    '-.button { color: red; }',
+    '+.button { color: blue; }',
+    ''
+  ].join('\n'));
   await fs.writeFile(sourceMergePath, JSON.stringify({
     ...mergeBundle,
     id: 'html-css-worker-bundle',
@@ -30,6 +42,9 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
     disposition: 'needs-port',
     autoMergeable: false,
     changedPaths: ['src/styles.css'],
+    patchPath: 'changes.patch',
+    commandsPassed: [{ name: 'parent semantic gate', command: ['node', 'parent-gate.mjs'], status: 0 }],
+    commandsFailed: [],
     evidencePaths: []
   }, null, 2) + '\n');
   await fs.writeFile(proofArtifactPath, JSON.stringify(createProofArtifact(runtimeEvidence, builderFields), null, 2) + '\n');
@@ -130,6 +145,7 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   ));
 
   const continuation = await continueCodexSwarmLoop({
+    cwd: sourceDir,
     collection: collection.outDir,
     outDir: path.join(tmp, 'proof-parent-recheck-continuation'),
     childBacklogNames: [FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE],
@@ -147,6 +163,12 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   });
   assert.ok(continuation.childBacklogPaths.includes(collection.proofParentRecheckBacklogPath));
   assert.strictEqual(continuation.summary.childBacklogEntryCount, 1);
+  assert.strictEqual(continuation.summary.proofParentRecheck.total, 1);
+  assert.strictEqual(continuation.summary.proofParentRecheck['ready-for-apply-admission'], 1);
+  assert.ok(await exists(continuation.proofParentRecheckResultsPath));
+  assert.strictEqual(continuation.proofParentRecheckResults.records[0].sourceJobId, 'html-css-worker');
+  assert.strictEqual(continuation.proofParentRecheckResults.records[0].applyCheckPassed, true);
+  assert.strictEqual(continuation.proofParentRecheckResults.records[0].gateEvidencePassed, true);
   assert.strictEqual(continuation.summary.nextJobLaneCounts.coordinator, 1);
   assert.ok(continuation.nextPlan.jobs.some((job) => job.taskId === collection.proofParentRecheckBacklog.entries[0].taskId));
 }
