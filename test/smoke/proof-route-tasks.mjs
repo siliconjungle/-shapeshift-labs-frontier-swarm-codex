@@ -170,9 +170,22 @@ export async function testProofRouteCollectionAutomation({ tmp }, mergeBundle) {
     collection: collection.outDir,
     outDir: path.join(tmp, 'proof-route-automation-continuation'),
     backlog: { id: 'proof-route-base', entries: [] },
-    routingPolicy: { id: 'proof-route-routing', defaultMode: 'fill' }
+    routingPolicy: { id: 'proof-route-routing', defaultMode: 'fill' },
+    manifest: {
+      id: 'proof-route-browser-manifest',
+      lanes: [{
+        id: 'browser',
+        capabilities: ['browser.playwright'],
+        allowedGlobs: ['src/**', 'agent-runs/**']
+      }]
+    },
+    tasks: { items: [] }
   });
   assert.ok(continuation.childBacklogPaths.includes(collection.proofRouteBacklogPath));
   assert.strictEqual(continuation.summary.childBacklogEntryCount, 1);
   assert.ok(continuation.nextBacklog.entries.some((entry) => entry.id === collection.proofRouteBacklog.entries[0].id));
+  assert.strictEqual(continuation.summary.nextJobCount, 1);
+  assert.strictEqual(continuation.summary.nextJobLaneCounts.browser, 1);
+  assert.ok(continuation.nextPlan.jobs.some((job) => job.taskId === collection.proofRouteBacklog.entries[0].taskId));
+  assert.ok(!continuation.nextPlan.graph.issues.some((issue) => issue.code === 'missing-job-dependency'));
 }
