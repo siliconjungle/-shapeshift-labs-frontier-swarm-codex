@@ -86,4 +86,20 @@ export function testProofRouteTasks(mergeBundle) {
   assert.strictEqual(backlog.summary.taskCount, 1);
   assert.strictEqual(backlog.tasks[0].lane, 'browser');
   assert.ok(backlog.tasks[0].tags.includes(FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE));
+
+  const partialCollection = {
+    buckets: {
+      'needs-human-port': [{
+        bucket: 'needs-human-port',
+        jobId: 'html-css-worker',
+        mergePath: 'collected/needs-human-port/html-css-worker/merge.json',
+        outputDir: 'collected/needs-human-port/html-css-worker',
+        bundle: {
+          ...bundle,
+          evidencePaths: undefined
+        }
+      }]
+    }
+  };
+  assert.strictEqual(createCodexProofRouteTasks({ collection: partialCollection }).length, 1);
 }

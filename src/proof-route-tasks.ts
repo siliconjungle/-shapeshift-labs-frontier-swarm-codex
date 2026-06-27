@@ -259,7 +259,7 @@ function collectionContext(entry: FrontierCodexCollectedBundle): Partial<Frontie
     sourceRefs: htmlCssPaths.length ? htmlCssPaths : changedPaths,
     targetRefs: uniqueWorkspacePaths([
       ...changedPaths,
-      ...entry.bundle.evidencePaths
+      ...(entry.bundle.evidencePaths ?? [])
     ])
   };
 }
