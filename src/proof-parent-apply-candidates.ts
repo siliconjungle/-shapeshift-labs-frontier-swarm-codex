@@ -109,6 +109,7 @@ export function projectCodexProofParentApplyCandidates(value: unknown): Frontier
 export function codexProofParentApplyCandidateJobRows(value: unknown): Record<string, unknown>[] {
   return projectCodexProofParentApplyCandidates(value).records.map((record) => ({
     id: record.jobId,
+    kind: 'proof-parent-apply-candidate',
     jobId: record.jobId,
     ...(record.taskId ? { taskId: record.taskId } : {}),
     title: `Proof parent apply candidate: ${record.jobId}`,

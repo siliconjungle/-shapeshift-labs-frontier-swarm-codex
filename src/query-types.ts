@@ -5,10 +5,12 @@ export type CliArgs = Record<string, CliValue | undefined> & { _: string[] };
 export interface FrontierCodexQueryInput {
   collection?: string;
   run?: string;
+  continuation?: string;
   q?: string;
   jobId?: string;
   bucket?: string;
   kind?: string;
+  proofParentApplyCandidate?: boolean;
   pathIncludes?: string;
   symbol?: string;
   tag?: string;

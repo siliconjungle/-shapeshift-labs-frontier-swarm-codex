@@ -19,6 +19,7 @@ import {
   codexProofParentApplyCandidateJobRows,
   projectCodexProofParentApplyCandidates
 } from '../../dist/index.js';
+import { testProofParentApplyOperatorWorkflow } from './proof-parent-apply-operator.mjs';
 
 export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, mergeBundle) {
   const runDir = path.join(tmp, 'proof-artifact-collection-run');
@@ -205,6 +206,7 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(candidateDashboard.summary.proofParentApplyCandidateReadyCount, 1);
   assert.strictEqual(candidateDashboard.proofParentApplyCandidates.summary.readyForStrictApplyAdmission, 1);
   assert.ok(candidateDashboard.jobs.some((job) => job.id === 'html-css-worker' && job.workKind === 'proof-parent-apply-candidate'));
+  await testProofParentApplyOperatorWorkflow({ sourceDir, continuation, sourceFilePath });
   const applyResult = await applyCodexSwarmCollection({
     cwd: sourceDir,
     collection: continuation.proofParentApplyCandidateCollectionDir,

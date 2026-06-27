@@ -61,6 +61,7 @@ export interface FrontierCodexApplyAdmissionSummary {
 export interface FrontierCodexApplyInput {
   collection?: string;
   run?: string;
+  continuation?: string;
   outDir?: string;
   cwd?: string;
   bucket?: FrontierCodexCollectBucket | 'all';

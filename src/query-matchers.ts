@@ -50,6 +50,8 @@ export function matchesJob(
     && (overlapJobIds === undefined || overlapJobIds.has(String(job.jobId ?? '')))
     && matchesLandedJobId(String(job.jobId ?? ''), input, landedJobIds)
     && (input.bucket === undefined || job.disposition === input.bucket || job.admissionStatus === input.bucket)
+    && (input.kind === undefined || matchesJobKind(job, input.kind))
+    && (input.proofParentApplyCandidate === undefined || isProofParentApplyCandidateJob(job) === input.proofParentApplyCandidate)
     && (input.pathIncludes === undefined || arrayIncludes(job.changedPaths, input.pathIncludes))
     && (input.symbol === undefined || haystack.includes(input.symbol.toLowerCase()))
     && (input.stale === undefined || Boolean(job.staleAgainstHead) === input.stale)
@@ -139,6 +141,18 @@ function matchesReadiness(job: Record<string, unknown>, value: string): boolean 
   if (readiness === 'blocked') return job.status === 'blocked' || job.mergeReadiness === 'blocked' || job.disposition === 'blocked';
   if (readiness === 'evidence-only') return job.mergeReadiness === 'evidence-only' || job.disposition === 'evidence-only';
   return JSON.stringify(job).toLowerCase().includes(readiness);
+}
+
+function matchesJobKind(job: Record<string, unknown>, value: string): boolean {
+  const wanted = value.toLowerCase();
+  return [job.kind, job.workKind, job.bucket, job.disposition, job.mergeReadiness]
+    .some((entry) => typeof entry === 'string' && entry.toLowerCase() === wanted);
+}
+
+function isProofParentApplyCandidateJob(job: Record<string, unknown>): boolean {
+  if (job.workKind === 'proof-parent-apply-candidate') return true;
+  const metadata = isObject(job.metadata) ? job.metadata : {};
+  return isObject(metadata.proofParentApplyCandidate);
 }
 
 function matchesHealth(job: Record<string, unknown>, value: string): boolean {

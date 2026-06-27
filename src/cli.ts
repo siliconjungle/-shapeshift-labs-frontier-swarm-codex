@@ -192,6 +192,7 @@ try {
     const result = await applyCodexSwarmCollection({
       collection: stringArg(args.collection),
       run: stringArg(args.run),
+      continuation: stringArg(args.continuation),
       cwd: stringArg(args.cwd),
       outDir: stringArg(args.outDir ?? args.out),
       bucket: bucketArg(args.bucket),

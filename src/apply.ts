@@ -13,13 +13,16 @@ import {
   createEmptyApplyResult
 } from './apply-admission.js';
 import { writeCodexApplyEvidence } from './apply-evidence.js';
+import { resolveContinuationProofParentApplyCandidateCollection } from './query-io.js';
 
 export async function applyCodexSwarmCollection(input: FrontierCodexApplyInput): Promise<FrontierCodexApplyResult> {
   const cwd = path.resolve(input.cwd ?? process.cwd());
-  if (!input.collection && !input.run) throw new Error('apply requires --collection <dir> or --run <run-dir>');
-  const collectionDir = input.collection
-    ? path.resolve(cwd, input.collection)
-    : (await collectCodexSwarmRun({ run: String(input.run ?? ''), cwd, outDir: input.outDir })).outDir;
+  if (!input.collection && !input.run && !input.continuation) throw new Error('apply requires --collection <dir>, --continuation <dir>, or --run <run-dir>');
+  const continuationCollectionDir = await resolveContinuationProofParentApplyCandidateCollection({ cwd, continuation: input.continuation });
+  if (input.continuation && !continuationCollectionDir) throw new Error(`apply could not find proof parent apply candidates for continuation: ${input.continuation}`);
+  let collectionDir = continuationCollectionDir;
+  if (input.collection) collectionDir = path.resolve(cwd, input.collection);
+  if (!collectionDir) collectionDir = (await collectCodexSwarmRun({ run: String(input.run ?? ''), cwd, outDir: input.outDir })).outDir;
   const admission = await createCodexApplyAdmission({
     cwd,
     collectionDir,
