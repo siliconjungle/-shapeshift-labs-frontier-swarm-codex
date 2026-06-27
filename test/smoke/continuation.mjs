@@ -65,7 +65,7 @@ export async function testContinuation(context, collectionDir) {
 
   assert.strictEqual(continuation.ok, true);
   assert.strictEqual(continuation.summary.childBacklogCount, 1);
-  assert.deepStrictEqual(continuation.childBacklogNames, ['backlog-children.json', 'proof-route-backlog.json', 'child-backlog.json', 'children-backlog.json']);
+  assert.deepStrictEqual(continuation.childBacklogNames, ['backlog-children.json', 'proof-route-backlog.json', 'proof-parent-recheck-backlog.json', 'child-backlog.json', 'children-backlog.json']);
   assert.strictEqual(continuation.summary.childBacklogEntryCount, 1);
   assert.strictEqual(continuation.summary.feedbackCount, 1);
   assert.strictEqual(continuation.summary.totalRoutingFeedbackCount, 1);

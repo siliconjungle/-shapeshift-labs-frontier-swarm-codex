@@ -8,7 +8,7 @@ import {
 import { findFilesByName, pathExists, uniqueStrings } from './common.js';
 import type { FrontierCodexContinuationInput } from './types-continuation.js';
 
-const DEFAULT_CHILD_BACKLOG_NAMES = ['proof-route-backlog.json', 'backlog-children.json', 'child-backlog.json', 'children-backlog.json'];
+const DEFAULT_CHILD_BACKLOG_NAMES = ['proof-route-backlog.json', 'proof-parent-recheck-backlog.json', 'backlog-children.json', 'child-backlog.json', 'children-backlog.json'];
 
 export async function readContinuationChildBacklogs(input: {
   roots: readonly string[];

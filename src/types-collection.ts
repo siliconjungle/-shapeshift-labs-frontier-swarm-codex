@@ -104,6 +104,8 @@ export interface FrontierCodexCollectResult {
   proofReadmissionPath?: string;
   proofParentAdmission?: FrontierCodexPlaywrightProofParentAdmission;
   proofParentAdmissionPath?: string;
+  proofParentRecheckBacklog?: FrontierSwarmBacklog;
+  proofParentRecheckBacklogPath?: string;
   runSync?: FrontierCodexRunSyncResult;
   metadata?: FrontierCodexCollectionMetadata;
   summary: FrontierCodexCollectSummary;
@@ -128,6 +130,8 @@ export type FrontierCodexCollectSummary = Record<FrontierCodexCollectBucket, num
   proofParentAdmissionReadyCount?: number;
   proofParentAdmissionBlockedCount?: number;
   proofParentAdmissionPath?: string;
+  proofParentRecheckTaskCount?: number;
+  proofParentRecheckBacklogPath?: string;
   landed?: number;
   landedJobIds?: string[];
   applyLedger?: FrontierCodexApplyLedgerSummary;

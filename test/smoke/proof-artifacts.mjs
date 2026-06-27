@@ -1,8 +1,10 @@
 import assert from 'node:assert';
-import { collectCodexSwarmRun, exists, fs, path } from './context.mjs';
+import { collectCodexSwarmRun, continueCodexSwarmLoop, exists, fs, path } from './context.mjs';
 import {
   FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE,
   FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE,
+  FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE,
+  FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_ROUTE,
   FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE
 } from '../../dist/index.js';
 
@@ -65,10 +67,13 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(collection.summary.proofParentAdmissionCount, 1);
   assert.strictEqual(collection.summary.proofParentAdmissionReadyCount, 1);
   assert.strictEqual(collection.summary.proofParentAdmissionBlockedCount, 0);
+  assert.strictEqual(collection.summary.proofParentRecheckTaskCount, 1);
   assert.ok(collection.proofArtifactsPath.endsWith(FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE));
   assert.ok(collection.proofParentAdmissionPath.endsWith(FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE));
+  assert.ok(collection.proofParentRecheckBacklogPath.endsWith(FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE));
   assert.ok(await exists(collection.proofArtifactsPath));
   assert.ok(await exists(collection.proofParentAdmissionPath));
+  assert.ok(await exists(collection.proofParentRecheckBacklogPath));
   assert.strictEqual(collection.proofReadmission.summary.admitted, 1);
   assert.strictEqual(collection.proofReadmission.summary.sourceLinked, 1);
   assert.strictEqual(collection.proofReadmission.records[0].status, 'admitted');
@@ -79,6 +84,10 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(collection.proofParentAdmission.records[0].sourceJobId, 'html-css-worker');
   assert.strictEqual(collection.proofParentAdmission.records[0].resolvedSourceMergePath, sourceMergePath);
   assert.deepStrictEqual(collection.proofParentAdmission.records[0].sourceBundleChangedPaths, ['src/styles.css']);
+  assert.strictEqual(collection.proofParentRecheckBacklog.entries.length, 1);
+  assert.strictEqual(collection.proofParentRecheckBacklog.entries[0].lane, 'coordinator');
+  assert.ok(collection.proofParentRecheckBacklog.entries[0].tags.includes(FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_ROUTE));
+  assert.strictEqual(collection.proofParentRecheckBacklog.entries[0].metadata.proofParentAdmission.sourceJobId, 'html-css-worker');
   assert.strictEqual(collection.proofArtifacts.summary.validatorCandidateCount, 1);
   assert.strictEqual(collection.proofArtifacts.records[0].validatorReadiness, 'candidate');
   assert.strictEqual(collection.proofArtifacts.records[0].sourceBundle.jobId, 'html-css-worker');
@@ -115,6 +124,31 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
     record.relativePath === FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE &&
     record.kind === 'coordinator-index'
   ));
+  assert.ok(collection.artifactStore.records.some((record) =>
+    record.relativePath === FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE &&
+    record.kind === 'coordinator-index'
+  ));
+
+  const continuation = await continueCodexSwarmLoop({
+    collection: collection.outDir,
+    outDir: path.join(tmp, 'proof-parent-recheck-continuation'),
+    childBacklogNames: [FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE],
+    backlog: { id: 'proof-parent-recheck-base', entries: [] },
+    routingPolicy: { id: 'proof-parent-recheck-routing', defaultMode: 'fill' },
+    manifest: {
+      id: 'proof-parent-recheck-manifest',
+      lanes: [{
+        id: 'coordinator',
+        capabilities: ['semantic-merge.parent-recheck'],
+        allowedGlobs: ['src/**', 'agent-runs/**']
+      }]
+    },
+    tasks: { items: [] }
+  });
+  assert.ok(continuation.childBacklogPaths.includes(collection.proofParentRecheckBacklogPath));
+  assert.strictEqual(continuation.summary.childBacklogEntryCount, 1);
+  assert.strictEqual(continuation.summary.nextJobLaneCounts.coordinator, 1);
+  assert.ok(continuation.nextPlan.jobs.some((job) => job.taskId === collection.proofParentRecheckBacklog.entries[0].taskId));
 }
 
 function createRuntimeEvidence() {

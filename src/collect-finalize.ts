@@ -13,6 +13,11 @@ import {
 import { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE } from './proof-artifacts.js';
 import { FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE } from './proof-readmission.js';
 import { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE } from './proof-parent-admission.js';
+import {
+  FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE,
+  FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_ROUTE,
+  createCodexProofParentRecheckBacklog
+} from './proof-parent-recheck-tasks.js';
 import type {
   FrontierCodexApplyLedgerSummary,
   FrontierCodexCollectBucket,
@@ -44,6 +49,8 @@ export function createCodexCollectSummary(input: {
   proofParentAdmissionReadyCount?: number;
   proofParentAdmissionBlockedCount?: number;
   proofParentAdmissionPath?: string;
+  proofParentRecheckTaskCount?: number;
+  proofParentRecheckBacklogPath?: string;
 }): FrontierCodexCollectResult['summary'] {
   const summary: FrontierCodexCollectResult['summary'] = {
     total: input.mergeRecordCount,
@@ -78,6 +85,10 @@ export function createCodexCollectSummary(input: {
     summary.proofParentAdmissionReadyCount = input.proofParentAdmissionReadyCount ?? 0;
     summary.proofParentAdmissionBlockedCount = input.proofParentAdmissionBlockedCount ?? 0;
     if (input.proofParentAdmissionPath) summary.proofParentAdmissionPath = input.proofParentAdmissionPath;
+  }
+  if (input.proofParentRecheckTaskCount) {
+    summary.proofParentRecheckTaskCount = input.proofParentRecheckTaskCount;
+    if (input.proofParentRecheckBacklogPath) summary.proofParentRecheckBacklogPath = input.proofParentRecheckBacklogPath;
   }
   if (input.applyLedgerSummary) {
     summary.landed = input.applyLedgerSummary.landed;
@@ -124,7 +135,24 @@ export async function persistCodexCollectResult(input: {
         routeNext: FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE
       }
     };
-    await fs.writeFile(proofRouteBacklogPath, JSON.stringify(proofRouteBacklogChildArtifact(proofRouteBacklog), null, 2) + '\n');
+    await fs.writeFile(proofRouteBacklogPath, JSON.stringify(backlogChildArtifact(proofRouteBacklog), null, 2) + '\n');
+  }
+  const proofParentRecheckBacklog = createCodexProofParentRecheckBacklog({ collection: result });
+  if (proofParentRecheckBacklog.entries.length > 0) {
+    const proofParentRecheckBacklogPath = path.join(result.outDir, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE);
+    result.proofParentRecheckBacklog = proofParentRecheckBacklog;
+    result.proofParentRecheckBacklogPath = proofParentRecheckBacklogPath;
+    result.summary.proofParentRecheckTaskCount = proofParentRecheckBacklog.entries.length;
+    result.summary.proofParentRecheckBacklogPath = proofParentRecheckBacklogPath;
+    result.metadata = {
+      ...(isObject(result.metadata) ? result.metadata : {}),
+      proofParentRecheckBacklog: {
+        path: proofParentRecheckBacklogPath,
+        entryCount: proofParentRecheckBacklog.entries.length,
+        routeNext: FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_ROUTE
+      }
+    };
+    await fs.writeFile(proofParentRecheckBacklogPath, JSON.stringify(backlogChildArtifact(proofParentRecheckBacklog), null, 2) + '\n');
   }
   if (result.proofArtifacts?.records.length && result.proofArtifactsPath) {
     result.metadata = {
@@ -190,12 +218,13 @@ async function writeResultArtifactFiles(result: FrontierCodexCollectResult): Pro
     ...(result.proofArtifacts ? [[FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, result.proofArtifacts] as [string, unknown]] : []),
     ...(result.proofReadmission ? [[FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE, result.proofReadmission] as [string, unknown]] : []),
     ...(result.proofParentAdmission ? [[FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE, result.proofParentAdmission] as [string, unknown]] : []),
-    ...(result.proofRouteBacklog ? [['proof-route-backlog.json', proofRouteBacklogChildArtifact(result.proofRouteBacklog)] as [string, unknown]] : [])
+    ...(result.proofRouteBacklog ? [['proof-route-backlog.json', backlogChildArtifact(result.proofRouteBacklog)] as [string, unknown]] : []),
+    ...(result.proofParentRecheckBacklog ? [[FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE, backlogChildArtifact(result.proofParentRecheckBacklog)] as [string, unknown]] : [])
   ];
   await Promise.all(writes.map(([file, value]) => fs.writeFile(path.join(result.outDir, file), JSON.stringify(value, null, 2) + '\n')));
 }
 
-function proofRouteBacklogChildArtifact(backlog: NonNullable<FrontierCodexCollectResult['proofRouteBacklog']>): Record<string, unknown> {
+function backlogChildArtifact(backlog: NonNullable<FrontierCodexCollectResult['proofRouteBacklog']>): Record<string, unknown> {
   const metadata = (backlog as { metadata?: unknown }).metadata;
   return {
     id: backlog.id,
