@@ -15,7 +15,9 @@ import {
   FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE,
   FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE,
   FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_ROUTE,
-  FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE
+  FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE,
+  codexProofParentApplyCandidateJobRows,
+  projectCodexProofParentApplyCandidates
 } from '../../dist/index.js';
 
 export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, mergeBundle) {
@@ -195,6 +197,9 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(candidateQuery.jobs.length, 1);
   assert.strictEqual(candidateQuery.jobs[0].workKind, 'proof-parent-apply-candidate');
   assert.strictEqual(candidateQuery.jobs[0].disposition, 'ready-to-apply');
+  const candidateProjection = projectCodexProofParentApplyCandidates(continuation.proofParentApplyCandidates);
+  assert.strictEqual(candidateProjection.summary.total, 1);
+  assert.strictEqual(codexProofParentApplyCandidateJobRows(candidateProjection).length, 1);
   const candidateDashboard = await readCodexDashboardSnapshot({ cwd: sourceDir, collection: continuation.proofParentApplyCandidateCollectionDir, continuation: continuation.outDir });
   assert.strictEqual(candidateDashboard.summary.proofParentApplyCandidateCount, 1);
   assert.strictEqual(candidateDashboard.summary.proofParentApplyCandidateReadyCount, 1);

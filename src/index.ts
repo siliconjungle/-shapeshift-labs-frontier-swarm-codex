@@ -269,7 +269,7 @@ export {
 export { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_INDEX_KIND, FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_KIND, FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_RECORD_KIND, collectCodexPlaywrightRuntimeProofArtifacts, createCodexPlaywrightRuntimeProofArtifactIndex, createCodexPlaywrightRuntimeProofEvidenceEntries } from './proof-artifacts.js';
 export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_KIND, createCodexPlaywrightProofReadmission, createCodexPlaywrightProofReadmissionEvidenceEntries } from './proof-readmission.js';
 export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_KIND, createCodexPlaywrightProofParentAdmission, createCodexPlaywrightProofParentAdmissionEvidenceEntries } from './proof-parent-admission.js';
-export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_DIR, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_KIND, writeCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
+export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_DIR, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_KIND, codexProofParentApplyCandidateJobRows, projectCodexProofParentApplyCandidates, writeCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
 export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_ROUTE, createCodexProofParentRecheckBacklog, createCodexProofParentRecheckTasks } from './proof-parent-recheck-tasks.js';
 export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_RESULT_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_RESULT_KIND, writeCodexProofParentRecheckResults } from './proof-parent-recheck-results.js';
 export type {
@@ -280,7 +280,7 @@ export type {
 export type { FrontierCodexPlaywrightRuntimeProofArtifactIndex, FrontierCodexPlaywrightRuntimeProofArtifactRecord } from './types-proof-artifacts.js';
 export type { FrontierCodexPlaywrightProofReadmission, FrontierCodexPlaywrightProofReadmissionRecord } from './proof-readmission.js';
 export type { FrontierCodexPlaywrightProofParentAdmission, FrontierCodexPlaywrightProofParentAdmissionRecord, FrontierCodexPlaywrightProofParentAdmissionStatus } from './proof-parent-admission.js';
-export type { FrontierCodexProofParentApplyCandidateRecord, FrontierCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
+export type { FrontierCodexProofParentApplyCandidateProjection, FrontierCodexProofParentApplyCandidateRecord, FrontierCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
 export type { FrontierCodexProofParentRecheckTaskInput } from './proof-parent-recheck-tasks.js';
 export type { FrontierCodexProofParentRecheckRecord, FrontierCodexProofParentRecheckResult, FrontierCodexProofParentRecheckStatus } from './proof-parent-recheck-results.js';
 
