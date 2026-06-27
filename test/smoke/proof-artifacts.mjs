@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import { collectCodexSwarmRun, exists, fs, path } from './context.mjs';
 import {
   FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE,
+  FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE,
   FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE
 } from '../../dist/index.js';
 
@@ -10,9 +11,25 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   const jobDir = path.join(runDir, 'browser-proof-worker');
   const evidenceDir = path.join(jobDir, 'evidence');
   const proofArtifactPath = path.join(evidenceDir, 'playwright-runtime-proof.json');
+  const sourceDir = path.join(tmp, 'proof-artifact-source-parent');
+  const sourceMergePath = path.join(sourceDir, 'merge.json');
   const runtimeEvidence = createRuntimeEvidence();
   const builderFields = createBuilderFields(runtimeEvidence);
   await fs.mkdir(evidenceDir, { recursive: true });
+  await fs.mkdir(sourceDir, { recursive: true });
+  await fs.writeFile(sourceMergePath, JSON.stringify({
+    ...mergeBundle,
+    id: 'html-css-worker-bundle',
+    jobId: 'html-css-worker',
+    taskId: 'html-css-task',
+    queueItemIds: ['html-css-task'],
+    status: 'completed',
+    mergeReadiness: 'verified-patch',
+    disposition: 'needs-port',
+    autoMergeable: false,
+    changedPaths: ['src/styles.css'],
+    evidencePaths: []
+  }, null, 2) + '\n');
   await fs.writeFile(proofArtifactPath, JSON.stringify(createProofArtifact(runtimeEvidence, builderFields), null, 2) + '\n');
   await fs.writeFile(path.join(jobDir, 'merge.json'), JSON.stringify({
     ...mergeBundle,
@@ -30,7 +47,7 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
     commandsPassed: [{ name: 'playwright proof', command: ['node', 'proof.mjs'], status: 0 }],
     metadata: {
       proofRoute: { routeNext: FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE, sourceJobId: 'html-css-worker' },
-      sourceBundle: { jobId: 'html-css-worker', taskId: 'html-css-task', bucket: 'needs-human-port', mergePath: 'source/merge.json' }
+      sourceBundle: { jobId: 'html-css-worker', taskId: 'html-css-task', bucket: 'needs-human-port', mergePath: sourceMergePath }
     }
   }, null, 2) + '\n');
 
@@ -45,12 +62,23 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(collection.summary.proofReadmissionCount, 1);
   assert.strictEqual(collection.summary.proofReadmissionAdmittedCount, 1);
   assert.strictEqual(collection.summary.proofReadmissionSourceLinkedCount, 1);
+  assert.strictEqual(collection.summary.proofParentAdmissionCount, 1);
+  assert.strictEqual(collection.summary.proofParentAdmissionReadyCount, 1);
+  assert.strictEqual(collection.summary.proofParentAdmissionBlockedCount, 0);
   assert.ok(collection.proofArtifactsPath.endsWith(FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE));
+  assert.ok(collection.proofParentAdmissionPath.endsWith(FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE));
   assert.ok(await exists(collection.proofArtifactsPath));
+  assert.ok(await exists(collection.proofParentAdmissionPath));
   assert.strictEqual(collection.proofReadmission.summary.admitted, 1);
   assert.strictEqual(collection.proofReadmission.summary.sourceLinked, 1);
   assert.strictEqual(collection.proofReadmission.records[0].status, 'admitted');
   assert.strictEqual(collection.proofReadmission.records[0].sourceBundle.jobId, 'html-css-worker');
+  assert.strictEqual(collection.proofParentAdmission.summary.readyForParentRecheck, 1);
+  assert.strictEqual(collection.proofParentAdmission.records[0].status, 'ready-for-parent-recheck');
+  assert.strictEqual(collection.proofParentAdmission.records[0].action, 'recheck-parent-bundle');
+  assert.strictEqual(collection.proofParentAdmission.records[0].sourceJobId, 'html-css-worker');
+  assert.strictEqual(collection.proofParentAdmission.records[0].resolvedSourceMergePath, sourceMergePath);
+  assert.deepStrictEqual(collection.proofParentAdmission.records[0].sourceBundleChangedPaths, ['src/styles.css']);
   assert.strictEqual(collection.proofArtifacts.summary.validatorCandidateCount, 1);
   assert.strictEqual(collection.proofArtifacts.records[0].validatorReadiness, 'candidate');
   assert.strictEqual(collection.proofArtifacts.records[0].sourceBundle.jobId, 'html-css-worker');
@@ -68,6 +96,12 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
     entry.path === proofArtifactPath &&
     entry.facets.sourceJobId === 'html-css-worker'
   ));
+  assert.ok(collection.evidenceIndex.entries.some((entry) =>
+    entry.kind === 'playwright-proof-parent-admission' &&
+    entry.status === 'ready-for-parent-recheck' &&
+    entry.facets.sourceJobId === 'html-css-worker' &&
+    entry.facets.action === 'recheck-parent-bundle'
+  ));
   assert.ok(collection.artifactStore.records.some((record) =>
     record.path === proofArtifactPath &&
     record.kind === 'playwright-runtime-proof-artifact' &&
@@ -75,6 +109,10 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   ));
   assert.ok(collection.artifactStore.records.some((record) =>
     record.relativePath === FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE &&
+    record.kind === 'coordinator-index'
+  ));
+  assert.ok(collection.artifactStore.records.some((record) =>
+    record.relativePath === FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE &&
     record.kind === 'coordinator-index'
   ));
 }

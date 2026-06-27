@@ -12,6 +12,7 @@ import {
 } from './proof-route-tasks.js';
 import { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE } from './proof-artifacts.js';
 import { FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE } from './proof-readmission.js';
+import { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE } from './proof-parent-admission.js';
 import type {
   FrontierCodexApplyLedgerSummary,
   FrontierCodexCollectBucket,
@@ -39,6 +40,10 @@ export function createCodexCollectSummary(input: {
   proofReadmissionBlockedCount?: number;
   proofReadmissionSourceLinkedCount?: number;
   proofReadmissionPath?: string;
+  proofParentAdmissionCount?: number;
+  proofParentAdmissionReadyCount?: number;
+  proofParentAdmissionBlockedCount?: number;
+  proofParentAdmissionPath?: string;
 }): FrontierCodexCollectResult['summary'] {
   const summary: FrontierCodexCollectResult['summary'] = {
     total: input.mergeRecordCount,
@@ -67,6 +72,12 @@ export function createCodexCollectSummary(input: {
     summary.proofReadmissionBlockedCount = input.proofReadmissionBlockedCount ?? 0;
     summary.proofReadmissionSourceLinkedCount = input.proofReadmissionSourceLinkedCount ?? 0;
     if (input.proofReadmissionPath) summary.proofReadmissionPath = input.proofReadmissionPath;
+  }
+  if (input.proofParentAdmissionCount) {
+    summary.proofParentAdmissionCount = input.proofParentAdmissionCount;
+    summary.proofParentAdmissionReadyCount = input.proofParentAdmissionReadyCount ?? 0;
+    summary.proofParentAdmissionBlockedCount = input.proofParentAdmissionBlockedCount ?? 0;
+    if (input.proofParentAdmissionPath) summary.proofParentAdmissionPath = input.proofParentAdmissionPath;
   }
   if (input.applyLedgerSummary) {
     summary.landed = input.applyLedgerSummary.landed;
@@ -135,6 +146,16 @@ export async function persistCodexCollectResult(input: {
       }
     };
   }
+  if (result.proofParentAdmission?.records.length && result.proofParentAdmissionPath) {
+    result.metadata = {
+      ...(isObject(result.metadata) ? result.metadata : {}),
+      proofParentAdmission: {
+        path: result.proofParentAdmissionPath,
+        readyForParentRecheck: result.proofParentAdmission.summary.readyForParentRecheck,
+        blocked: result.proofParentAdmission.summary.blocked
+      }
+    };
+  }
   await fs.writeFile(collectionPath, JSON.stringify(result, null, 2) + '\n');
   await writeResultArtifactFiles(result);
   const artifactStorePostProcessing = await createBoundedCodexArtifactStore({
@@ -168,6 +189,7 @@ async function writeResultArtifactFiles(result: FrontierCodexCollectResult): Pro
     ['terminal-state.json', result.terminalState],
     ...(result.proofArtifacts ? [[FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, result.proofArtifacts] as [string, unknown]] : []),
     ...(result.proofReadmission ? [[FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE, result.proofReadmission] as [string, unknown]] : []),
+    ...(result.proofParentAdmission ? [[FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE, result.proofParentAdmission] as [string, unknown]] : []),
     ...(result.proofRouteBacklog ? [['proof-route-backlog.json', proofRouteBacklogChildArtifact(result.proofRouteBacklog)] as [string, unknown]] : [])
   ];
   await Promise.all(writes.map(([file, value]) => fs.writeFile(path.join(result.outDir, file), JSON.stringify(value, null, 2) + '\n')));
