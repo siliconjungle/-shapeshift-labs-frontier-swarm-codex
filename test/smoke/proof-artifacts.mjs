@@ -1,5 +1,15 @@
 import assert from 'node:assert';
-import { applyCodexSwarmCollection, collectCodexSwarmRun, continueCodexSwarmLoop, exists, fs, path } from './context.mjs';
+import {
+  applyCodexSwarmCollection,
+  collectCodexSwarmRun,
+  continueCodexSwarmLoop,
+  execFileP,
+  exists,
+  fs,
+  path,
+  queryCodexSwarmCollection,
+  readCodexDashboardSnapshot
+} from './context.mjs';
 import {
   FRONTIER_CODEX_PLAYWRIGHT_ASSERTION_PROOF_ROUTE,
   FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE,
@@ -14,14 +24,21 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   const evidenceDir = path.join(jobDir, 'evidence');
   const proofArtifactPath = path.join(evidenceDir, 'playwright-runtime-proof.json');
   const sourceDir = path.join(tmp, 'proof-artifact-source-parent');
-  const sourceMergePath = path.join(sourceDir, 'merge.json');
-  const sourcePatchPath = path.join(sourceDir, 'changes.patch');
+  const sourceBundleDir = path.join(tmp, 'proof-artifact-parent-bundle');
+  const sourceMergePath = path.join(sourceBundleDir, 'merge.json');
+  const sourcePatchPath = path.join(sourceBundleDir, 'changes.patch');
   const sourceFilePath = path.join(sourceDir, 'src', 'styles.css');
   const runtimeEvidence = createRuntimeEvidence();
   const builderFields = createBuilderFields(runtimeEvidence);
   await fs.mkdir(evidenceDir, { recursive: true });
+  await fs.mkdir(sourceBundleDir, { recursive: true });
   await fs.mkdir(path.dirname(sourceFilePath), { recursive: true });
   await fs.writeFile(sourceFilePath, '.button { color: red; }\n');
+  await execFileP('git', ['init'], { cwd: sourceDir });
+  await execFileP('git', ['config', 'user.email', 'frontier-swarm-codex@example.test'], { cwd: sourceDir });
+  await execFileP('git', ['config', 'user.name', 'Frontier Swarm Codex'], { cwd: sourceDir });
+  await execFileP('git', ['add', '--', 'src/styles.css'], { cwd: sourceDir });
+  await execFileP('git', ['commit', '-m', 'Initial proof parent fixture'], { cwd: sourceDir });
   await fs.writeFile(sourcePatchPath, [
     'diff --git a/src/styles.css b/src/styles.css',
     '--- a/src/styles.css',
@@ -172,6 +189,17 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(continuation.summary.proofParentApplyCandidates.total, 1);
   assert.ok(await exists(continuation.proofParentApplyCandidatesPath));
   assert.ok(await exists(path.join(continuation.proofParentApplyCandidateCollectionDir, 'ready-to-apply', 'html-css-worker', 'merge.json')));
+  const candidateQuery = await queryCodexSwarmCollection({ cwd: sourceDir, collection: continuation.proofParentApplyCandidateCollectionDir });
+  assert.strictEqual(candidateQuery.summary.proofParentApplyCandidates.total, 1);
+  assert.strictEqual(candidateQuery.summary.proofParentApplyCandidates.readyForStrictApplyAdmission, 1);
+  assert.strictEqual(candidateQuery.jobs.length, 1);
+  assert.strictEqual(candidateQuery.jobs[0].workKind, 'proof-parent-apply-candidate');
+  assert.strictEqual(candidateQuery.jobs[0].disposition, 'ready-to-apply');
+  const candidateDashboard = await readCodexDashboardSnapshot({ cwd: sourceDir, collection: continuation.proofParentApplyCandidateCollectionDir, continuation: continuation.outDir });
+  assert.strictEqual(candidateDashboard.summary.proofParentApplyCandidateCount, 1);
+  assert.strictEqual(candidateDashboard.summary.proofParentApplyCandidateReadyCount, 1);
+  assert.strictEqual(candidateDashboard.proofParentApplyCandidates.summary.readyForStrictApplyAdmission, 1);
+  assert.ok(candidateDashboard.jobs.some((job) => job.id === 'html-css-worker' && job.workKind === 'proof-parent-apply-candidate'));
   const applyResult = await applyCodexSwarmCollection({
     cwd: sourceDir,
     collection: continuation.proofParentApplyCandidateCollectionDir,
@@ -180,6 +208,14 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(applyResult.ok, true);
   assert.strictEqual(applyResult.admission.accepted, 1);
   assert.strictEqual(applyResult.summary.checked, 1);
+  assert.strictEqual(await fs.readFile(sourceFilePath, 'utf8'), '.button { color: red; }\n');
+  const writeApplyResult = await applyCodexSwarmCollection({ cwd: sourceDir, collection: continuation.proofParentApplyCandidateCollectionDir, dryRun: false });
+  assert.strictEqual(writeApplyResult.ok, true);
+  assert.strictEqual(writeApplyResult.dryRun, false);
+  assert.strictEqual(writeApplyResult.admission.accepted, 1);
+  assert.strictEqual(writeApplyResult.entries[0].admission.status, 'accepted');
+  assert.strictEqual(writeApplyResult.summary.applied, 1);
+  assert.strictEqual(await fs.readFile(sourceFilePath, 'utf8'), '.button { color: blue; }\n');
   assert.strictEqual(continuation.summary.nextJobLaneCounts.coordinator, 1);
   assert.ok(continuation.nextPlan.jobs.some((job) => job.taskId === collection.proofParentRecheckBacklog.entries[0].taskId));
 }

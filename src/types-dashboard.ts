@@ -6,6 +6,7 @@ import type {
 } from './constants.js';
 import type { FrontierCodexApplyLedgerSummary, FrontierCodexCollectBucket, FrontierCodexCollectResult } from './types-collection.js';
 import type { FrontierCodexContinuationResult } from './types-continuation.js';
+import type { FrontierCodexProofParentApplyCandidateProjection } from './proof-parent-apply-candidates.js';
 import type {
   FrontierCodexDashboardHealthMetrics,
   FrontierCodexDashboardQualityMetrics,
@@ -239,9 +240,9 @@ export interface FrontierCodexDashboardSnapshot {
     modelTelemetryBillableInputTokens?: number;
     modelTelemetryOutputTokens?: number;
     modelTelemetryVerificationRequiredFailed?: number;
-    humanActionBrokerActionCount?: number;
-    humanActionBrokerOpenCount?: number;
-    humanActionBrokerDismissedCount?: number;
+    humanActionBrokerActionCount?: number; humanActionBrokerOpenCount?: number; humanActionBrokerDismissedCount?: number;
+    proofParentApplyCandidateCount?: number; proofParentApplyCandidateReadyCount?: number;
+    proofParentApplyCandidateJobIds?: string[];
   };
   semantic: FrontierCodexDashboardSemanticMetrics;
   health: FrontierCodexDashboardHealthMetrics;
@@ -252,14 +253,11 @@ export interface FrontierCodexDashboardSnapshot {
   humanActions: FrontierCodexDashboardHumanAction[];
   events: Array<{ type: string; at?: number; jobId?: string; lane?: string; message?: string }>;
   routing?: {
-    policyId?: string;
-    defaultMode?: string;
-    preferenceCount?: number;
-    preferCount?: number;
-    avoidCount?: number;
+    policyId?: string; defaultMode?: string; preferenceCount?: number; preferCount?: number; avoidCount?: number;
     tournamentObservationCount?: number;
     tournamentRecommendationCount?: number;
   };
+  proofParentApplyCandidates?: FrontierCodexProofParentApplyCandidateProjection;
   backlog?: {
     id?: string;
     entryCount: number;

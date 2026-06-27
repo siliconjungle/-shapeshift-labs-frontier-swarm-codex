@@ -16,6 +16,11 @@ import { resolveCollectionDir, readJsonIfExists, writeMaybe, stringArg, numberAr
 import { landedJobIdsFromSources, queryLandedSummary } from './query-landed.js';
 import { matchesArtifact, matchesEvidence, matchesJob } from './query-matchers.js';
 import {
+  FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_FILE,
+  codexProofParentApplyCandidateJobRows,
+  projectCodexProofParentApplyCandidates
+} from './proof-parent-apply-candidates.js';
+import {
   queryCleanupSummary,
   queryHealthSummary,
   queryOwnershipSummary,
@@ -24,17 +29,19 @@ import {
   queryableCounts
 } from './query-summaries.js';
 import type { CliArgs, FrontierCodexQueryInput } from './query-types.js';
+import type { FrontierCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
 
 export type { CliArgs, CliValue, FrontierCodexQueryInput } from './query-types.js';
 
 export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) {
   const collectionDir = await resolveCollectionDir(input);
-  const [artifacts, dashboard, evidenceIndex, collection, compactDashboard] = await Promise.all([
+  const [artifacts, dashboard, evidenceIndex, collection, compactDashboard, proofParentApplyCandidates] = await Promise.all([
     readCodexArtifactRecords(collectionDir).catch(() => []),
     readJsonIfExists<{ jobs?: unknown[]; summary?: unknown }>(path.join(collectionDir, 'coordinator-query.json')),
     readJsonIfExists<{ entries?: unknown[]; summary?: unknown }>(path.join(collectionDir, 'evidence-index.json')),
     readJsonIfExists<Record<string, unknown>>(path.join(collectionDir, 'collection.json')),
-    readJsonIfExists<Record<string, unknown>>(path.join(collectionDir, 'compact-dashboard.json'))
+    readJsonIfExists<Record<string, unknown>>(path.join(collectionDir, 'compact-dashboard.json')),
+    readJsonIfExists<FrontierCodexProofParentApplyCandidates>(path.join(collectionDir, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_FILE))
   ]);
   const dashboardRecord = isObject(dashboard) ? dashboard : {};
   const collectionRecord = isObject(collection) ? collection : {};
@@ -42,7 +49,11 @@ export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) 
   const landedJobIds = landedJobIdsFromSources(dashboardRecord, collectionRecord, compactDashboardRecord);
   const semanticPatchBundleOverlaps = isObject(dashboardRecord.summary) ? dashboardRecord.summary.semanticPatchBundleOverlaps : undefined;
   const overlapJobIds = semanticPatchBundleOverlapJobIds(semanticPatchBundleOverlaps, input.semanticBundleOverlap);
-  const sourceJobs = (Array.isArray(dashboard?.jobs) ? dashboard.jobs : []).filter(isObject);
+  const proofParentApplyCandidateProjection = projectCodexProofParentApplyCandidates(proofParentApplyCandidates);
+  const sourceJobs = [
+    ...(Array.isArray(dashboard?.jobs) ? dashboard.jobs : []).filter(isObject),
+    ...codexProofParentApplyCandidateJobRows(proofParentApplyCandidates)
+  ];
   const sourceEvidenceRows = (Array.isArray(evidenceIndex?.entries) ? evidenceIndex.entries : []).filter(isObject);
   const jobs = sourceJobs
     .filter((job) => matchesJob(job, input, overlapJobIds, landedJobIds))
@@ -77,6 +88,7 @@ export async function queryCodexSwarmCollection(input: FrontierCodexQueryInput) 
       semanticReadiness: querySemanticReadinessSummary(jobs),
       cleanup: queryCleanupSummary(jobs, evidenceRows),
       ownership: queryOwnershipSummary(jobs, evidenceRows),
+      proofParentApplyCandidates: proofParentApplyCandidateProjection.summary,
       queryable: queryableCounts(sourceJobs, sourceEvidenceRows, landedJobIds, dashboardRecord, collectionRecord, compactDashboardRecord),
       semanticPatchBundleOverlaps
     },

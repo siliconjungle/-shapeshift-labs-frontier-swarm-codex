@@ -3,6 +3,8 @@ import path from 'node:path';
 import { pathExists } from './common.js';
 import type { CliArgs, CliValue, FrontierCodexQueryInput } from './query-types.js';
 
+const PROOF_PARENT_APPLY_CANDIDATES_FILE = 'proof-parent-apply-candidates.json';
+
 export async function resolveCollectionDir(input: Pick<FrontierCodexQueryInput, 'collection' | 'run' | 'cwd'>): Promise<string> {
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const candidates = [
@@ -16,7 +18,8 @@ export async function resolveCollectionDir(input: Pick<FrontierCodexQueryInput, 
       await pathExists(path.join(candidate, 'coordinator-query.json')) ||
       await pathExists(path.join(candidate, 'artifact-store', 'artifacts.jsonl')) ||
       await pathExists(path.join(candidate, 'artifact-store', 'artifact-index.sqlite')) ||
-      await pathExists(path.join(candidate, 'collected-and-indexed.json'))
+      await pathExists(path.join(candidate, 'collected-and-indexed.json')) ||
+      await pathExists(path.join(candidate, PROOF_PARENT_APPLY_CANDIDATES_FILE))
     ) {
       return candidate;
     }

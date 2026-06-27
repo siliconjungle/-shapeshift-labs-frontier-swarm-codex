@@ -41,6 +41,18 @@ export interface FrontierCodexProofParentApplyCandidates {
   readonly summary: { total: number; readyForStrictApplyAdmission: number };
 }
 
+export interface FrontierCodexProofParentApplyCandidateProjection {
+  readonly summary: {
+    readonly total: number;
+    readonly readyForStrictApplyAdmission: number;
+    readonly jobIds: string[];
+    readonly taskIds: string[];
+    readonly changedPaths: string[];
+    readonly collectionDir?: string;
+  };
+  readonly records: FrontierCodexProofParentApplyCandidateRecord[];
+}
+
 export async function writeCodexProofParentApplyCandidates(input: {
   cwd: string;
   outDir: string;
@@ -76,6 +88,43 @@ export async function writeCodexProofParentApplyCandidates(input: {
   const indexPath = path.join(collectionDir, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_FILE);
   await fs.writeFile(indexPath, JSON.stringify(result, null, 2) + '\n');
   return { path: indexPath, collectionDir, result };
+}
+
+export function projectCodexProofParentApplyCandidates(value: unknown): FrontierCodexProofParentApplyCandidateProjection {
+  const source = isObject(value) ? value : {};
+  const records = proofParentApplyCandidateRecords(source.records);
+  return {
+    summary: {
+      total: records.length,
+      readyForStrictApplyAdmission: records.filter((record) => record.status === 'ready-for-strict-apply-admission').length,
+      jobIds: uniqueStrings(records.map((record) => record.jobId)),
+      taskIds: uniqueStrings(records.map((record) => record.taskId).filter((entry): entry is string => !!entry)),
+      changedPaths: uniqueStrings(records.flatMap((record) => record.changedPaths)),
+      ...(typeof source.collectionDir === 'string' ? { collectionDir: source.collectionDir } : {})
+    },
+    records
+  };
+}
+
+export function codexProofParentApplyCandidateJobRows(value: unknown): Record<string, unknown>[] {
+  return projectCodexProofParentApplyCandidates(value).records.map((record) => ({
+    id: record.jobId,
+    jobId: record.jobId,
+    ...(record.taskId ? { taskId: record.taskId } : {}),
+    title: `Proof parent apply candidate: ${record.jobId}`,
+    lane: 'coordinator',
+    status: 'ready',
+    workKind: 'proof-parent-apply-candidate',
+    bucket: 'ready-to-apply',
+    mergeReadiness: 'proof-parent-ready-for-strict-apply-admission',
+    disposition: 'ready-to-apply',
+    admissionStatus: 'ready-to-apply',
+    changedPaths: record.changedPaths,
+    reasons: record.reasons,
+    metadata: {
+      proofParentApplyCandidate: record
+    }
+  }));
 }
 
 async function materializeCandidate(
@@ -167,4 +216,37 @@ function queueReadyDecision(record: FrontierCodexProofParentApplyCandidateRecord
       recheckRecordId: record.recheckRecordId
     }
   };
+}
+
+function proofParentApplyCandidateRecords(value: unknown): FrontierCodexProofParentApplyCandidateRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isObject)
+    .map((record) => {
+      const jobId = stringValue(record.jobId);
+      const sourceMergePath = stringValue(record.sourceMergePath);
+      const sourcePatchPath = stringValue(record.sourcePatchPath);
+      const candidateMergePath = stringValue(record.candidateMergePath);
+      const candidatePatchPath = stringValue(record.candidatePatchPath);
+      const recheckRecordId = stringValue(record.recheckRecordId);
+      if (!jobId || !sourceMergePath || !sourcePatchPath || !candidateMergePath || !candidatePatchPath || !recheckRecordId) return undefined;
+      return {
+        id: stringValue(record.id) ?? `codex-proof-parent-apply-candidate:${stableHash([jobId, sourceMergePath])}`,
+        jobId,
+        ...(stringValue(record.taskId) ? { taskId: stringValue(record.taskId) } : {}),
+        sourceMergePath,
+        sourcePatchPath,
+        candidateMergePath,
+        candidatePatchPath,
+        recheckRecordId,
+        changedPaths: Array.isArray(record.changedPaths) ? uniqueStrings(record.changedPaths.map(String)) : [],
+        status: 'ready-for-strict-apply-admission',
+        reasons: Array.isArray(record.reasons) ? uniqueStrings(record.reasons.map(String)) : []
+      };
+    })
+    .filter((record): record is FrontierCodexProofParentApplyCandidateRecord => !!record);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }

@@ -22,6 +22,11 @@ import { createDashboardTimeSeries } from './dashboard-ui-time-series.js';
 import { dashboardArtifactRoots } from './dashboard-ui-workspace.js';
 import { numberValue } from './dashboard-ui-values.js';
 import {
+  FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_FILE,
+  codexProofParentApplyCandidateJobRows,
+  projectCodexProofParentApplyCandidates
+} from './proof-parent-apply-candidates.js';
+import {
   mergeHumanActionsForProjection,
   modelTelemetrySummaryDashboardFields,
   readCodexRuntimeProjectionArtifacts,
@@ -36,6 +41,7 @@ import type {
   FrontierCodexDashboardSnapshotInput
 } from './types-dashboard.js';
 import type { FrontierCodexSwarmRunResult } from './types-run.js';
+import type { FrontierCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
 
 export {
   createCodexDashboardSteeringIntent,
@@ -61,13 +67,15 @@ export async function readCodexDashboardSnapshot(input: FrontierCodexDashboardSn
   const run = runSource?.json ?? (collectionSource?.json?.runDir ? (await readArtifact<FrontierCodexSwarmRunResult>(cwd, collectionSource.json.runDir, 'swarm-results.json'))?.json : undefined);
   const collection = collectionSource?.json;
   const continuation = fullContinuationSource?.json;
+  const proofParentApplyCandidates = await readProofParentApplyCandidates(cwd, input.collection, continuation);
   const runtimeProjections = await readCodexRuntimeProjectionArtifacts(run?.outDir ?? collection?.runDir);
   const artifactRoots = dashboardArtifactRoots(cwd, runSource?.dir, collectionSource?.dir, collection?.runDir, collection?.outDir);
-  const jobs = await createDashboardJobs(run, collection, { cwd, artifactRoots, artifactBases: artifactRoots });
+  const collectionJobs = await createDashboardJobs(run, collection, { cwd, artifactRoots, artifactBases: artifactRoots });
+  const jobs = mergeDashboardJobs(collectionJobs, proofParentApplyCandidateDashboardJobs(proofParentApplyCandidates));
   const semantic = createDashboardSemanticMetrics(collection, jobs);
   return createDashboardSnapshot({
     cwd,
-    ok: Boolean(run?.ok ?? collection?.ok ?? continuation?.ok ?? false),
+    ok: Boolean(run?.ok ?? collection?.ok ?? continuation?.ok ?? proofParentApplyCandidates),
     sources: {
       ...(runSource?.file ? { runFile: runSource.file, runDir: runSource.dir } : {}),
       ...(collectionSource?.file ? { collectionFile: collectionSource.file, collectionDir: collectionSource.dir } : {}),
@@ -76,6 +84,7 @@ export async function readCodexDashboardSnapshot(input: FrontierCodexDashboardSn
     run,
     collection,
     continuation,
+    proofParentApplyCandidates,
     modelTelemetrySummary: runtimeProjections.modelTelemetrySummary,
     humanActionState: runtimeProjections.humanActionState,
     jobs,
@@ -89,13 +98,20 @@ function dashboardSnapshotFromCoordinatorDashboard(
   continuation: FrontierCodexContinuationResult | undefined
 ): FrontierCodexDashboardSnapshot {
   const dashboard = source.dashboard;
-  const jobs = (Array.isArray(dashboard.jobs) ? dashboard.jobs : [])
+  const baseJobs = (Array.isArray(dashboard.jobs) ? dashboard.jobs : [])
     .map((job) => dashboardJobFromCoordinatorJob(job))
     .sort((left, right) => (left.lane ?? '').localeCompare(right.lane ?? '') || left.id.localeCompare(right.id));
+  const proofParentApplyCandidates = continuation?.proofParentApplyCandidates;
+  const jobs = mergeDashboardJobs(baseJobs, proofParentApplyCandidateDashboardJobs(proofParentApplyCandidates));
   const summaryRecord = isObject(dashboard.summary) ? dashboard.summary : {};
+  const candidateProjection = projectCodexProofParentApplyCandidates(proofParentApplyCandidates);
   const semantic = createDashboardSemanticMetricsFromSummary(summaryRecord, jobs);
   const summary = {
     ...createDashboardSummary(undefined, undefined, continuation, jobs),
+    ...(candidateProjection.summary.total > 0 ? {
+      proofParentApplyCandidateCount: candidateProjection.summary.total,
+      proofParentApplyCandidateReadyCount: candidateProjection.summary.readyForStrictApplyAdmission
+    } : {}),
     bucketCounts: {
       total: numberValue(summaryRecord.jobCount, jobs.length),
       'ready-to-apply': numberValue(summaryRecord.readyToApplyCount),
@@ -124,6 +140,7 @@ function dashboardSnapshotFromCoordinatorDashboard(
     events: [],
     routing: continuationRouting(continuation),
     backlog: continuationBacklog(continuation),
+    ...(candidateProjection.summary.total > 0 ? { proofParentApplyCandidates: candidateProjection } : {}),
     raw: { ...(continuation ? { continuation } : {}) }
   };
 }
@@ -135,6 +152,7 @@ function createDashboardSnapshot(input: {
   run?: FrontierCodexSwarmRunResult;
   collection?: FrontierCodexCollectResult;
   continuation?: FrontierCodexContinuationResult;
+  proofParentApplyCandidates?: FrontierCodexProofParentApplyCandidates;
   modelTelemetrySummary?: FrontierCodexModelTelemetrySummary;
   humanActionState?: FrontierCodexHumanActionBrokerState;
   jobs: FrontierCodexDashboardSnapshot['jobs'];
@@ -143,6 +161,7 @@ function createDashboardSnapshot(input: {
   const summary = {
     ...createDashboardSummary(input.run, input.collection, input.continuation, input.jobs),
     ...modelTelemetrySummaryDashboardFields(input.modelTelemetrySummary),
+    ...(proofParentApplyCandidateSummary(input.proofParentApplyCandidates)),
     ...(input.humanActionState ? {
       humanActionBrokerActionCount: input.humanActionState.actionCount,
       humanActionBrokerOpenCount: input.humanActionState.openActionCount,
@@ -173,6 +192,9 @@ function createDashboardSnapshot(input: {
     })),
     routing: continuationRouting(input.continuation),
     backlog: continuationBacklog(input.continuation),
+    ...(projectCodexProofParentApplyCandidates(input.proofParentApplyCandidates).summary.total > 0 ? {
+      proofParentApplyCandidates: projectCodexProofParentApplyCandidates(input.proofParentApplyCandidates)
+    } : {}),
     raw: { ...(input.run ? { run: input.run } : {}), ...(input.collection ? { collection: input.collection } : {}), ...(input.continuation ? { continuation: input.continuation } : {}) }
   };
 }
@@ -210,4 +232,42 @@ function continuationBacklog(continuation: FrontierCodexContinuationResult | und
     readyCount: continuation.nextBacklog.summary.readyCount,
     childBacklogPaths: continuation.childBacklogPaths
   } : undefined;
+}
+
+async function readProofParentApplyCandidates(
+  cwd: string,
+  collection: string | undefined,
+  continuation: FrontierCodexContinuationResult | undefined
+): Promise<FrontierCodexProofParentApplyCandidates | undefined> {
+  const direct = await readArtifact<FrontierCodexProofParentApplyCandidates>(cwd, collection, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_FILE);
+  if (direct?.json) return direct.json;
+  if (continuation?.proofParentApplyCandidates) return continuation.proofParentApplyCandidates;
+  const fromContinuationPath = await readArtifact<FrontierCodexProofParentApplyCandidates>(
+    cwd,
+    continuation?.proofParentApplyCandidateCollectionDir,
+    FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_APPLY_CANDIDATES_FILE
+  );
+  return fromContinuationPath?.json;
+}
+
+function proofParentApplyCandidateDashboardJobs(value: unknown): FrontierCodexDashboardSnapshot['jobs'] {
+  return codexProofParentApplyCandidateJobRows(value).map((row) => dashboardJobFromCoordinatorJob(row));
+}
+
+function mergeDashboardJobs(
+  jobs: FrontierCodexDashboardSnapshot['jobs'],
+  candidates: FrontierCodexDashboardSnapshot['jobs']
+): FrontierCodexDashboardSnapshot['jobs'] {
+  const byId = new Set(jobs.map((job) => job.id));
+  return [...jobs, ...candidates.filter((job) => !byId.has(job.id))]
+    .sort((left, right) => (left.lane ?? '').localeCompare(right.lane ?? '') || left.id.localeCompare(right.id));
+}
+
+function proofParentApplyCandidateSummary(value: unknown): Record<string, unknown> {
+  const projection = projectCodexProofParentApplyCandidates(value);
+  return projection.summary.total > 0 ? {
+    proofParentApplyCandidateCount: projection.summary.total,
+    proofParentApplyCandidateReadyCount: projection.summary.readyForStrictApplyAdmission,
+    proofParentApplyCandidateJobIds: projection.summary.jobIds
+  } : {};
 }
