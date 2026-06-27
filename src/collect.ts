@@ -1,18 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {
-  createSwarmCoordinatorDashboard,
-  createSwarmEvidenceIndex,
-  createSwarmMergeAdmission,
-  createSwarmMergeIndex,
-  createSwarmMergeTournament,
-  createSwarmStrategyTournamentHistory,
-  createSwarmTournamentAdaptiveFeedback,
-  createSwarmQueueOverlay,
-  type FrontierSwarmEvidenceIndexEntryInput,
-  type FrontierSwarmMergeBundle,
-  type FrontierSwarmPatchStatus
-} from '@shapeshift-labs/frontier-swarm';
+import { createSwarmCoordinatorDashboard, createSwarmEvidenceIndex, createSwarmMergeAdmission, createSwarmMergeIndex, createSwarmMergeTournament, createSwarmStrategyTournamentHistory, createSwarmTournamentAdaptiveFeedback, createSwarmQueueOverlay, type FrontierSwarmEvidenceIndexEntryInput, type FrontierSwarmMergeBundle, type FrontierSwarmPatchStatus } from '@shapeshift-labs/frontier-swarm';
 import type { FrontierCodexCollectBucket, FrontierCodexCollectInput, FrontierCodexCollectResult } from './index.js';
 import { findFilesByName, isObject, pathExists, pathHasIgnoredSegment, slug, uniqueStrings } from './common.js';
 import { createCodexCompactDashboard } from './dashboard.js';
@@ -44,6 +32,7 @@ import { attachRuntimeProjectionMetadata } from './collect-runtime-projections.j
 import { readCodexRuntimeProjectionArtifacts } from './runtime-projections.js';
 import { syncCodexRunEventPeers } from './run-sync.js';
 import { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, collectCodexPlaywrightRuntimeProofArtifacts, createCodexPlaywrightRuntimeProofArtifactIndex, createCodexPlaywrightRuntimeProofEvidenceEntries } from './proof-artifacts.js';
+import { FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE, createCodexPlaywrightProofReadmission, createCodexPlaywrightProofReadmissionEvidenceEntries } from './proof-readmission.js';
 import type { FrontierCodexPlaywrightRuntimeProofArtifactRecord } from './types-proof-artifacts.js';
 
 export { readCodexPidProcesses } from './collect-pids.js';
@@ -233,6 +222,9 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
   });
   const proofArtifacts = proofArtifactRecords.length > 0 ? createCodexPlaywrightRuntimeProofArtifactIndex({ runDir, collectionDir: outDir, generatedAt, records: proofArtifactRecords }) : undefined;
   const proofArtifactsPath = proofArtifacts ? path.join(outDir, FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE) : undefined;
+  const proofReadmission = proofArtifacts ? await createCodexPlaywrightProofReadmission({ proofArtifacts, generatedAt }) : undefined;
+  const proofReadmissionPath = proofReadmission ? path.join(outDir, FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE) : undefined;
+  if (proofReadmission) evidenceEntries.push(...createCodexPlaywrightProofReadmissionEvidenceEntries(proofReadmission.records));
   const evidenceIndex = createSwarmEvidenceIndex({
     id: `codex-evidence-index:${path.basename(runDir)}`,
     entries: evidenceEntries,
@@ -288,7 +280,11 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       proofArtifactCount: proofArtifacts.summary.artifactCount, proofArtifactPassedCount: proofArtifacts.summary.passedCount,
       proofArtifactFailedCount: proofArtifacts.summary.failedCount, proofArtifactValidatorCandidateCount: proofArtifacts.summary.validatorCandidateCount
     } : {}),
-    proofArtifactsPath
+    proofArtifactsPath,
+    ...(proofReadmission ? {
+      proofReadmissionCount: proofReadmission.summary.total, proofReadmissionAdmittedCount: proofReadmission.summary.admitted,
+      proofReadmissionBlockedCount: proofReadmission.summary.blocked, proofReadmissionPath
+    } : {})
   });
   const qualitySignals = collectedQualitySignalsFromDashboard(dashboard);
   const noiseBreakdown = createCollectionNoiseBreakdown(collectedBundles);
@@ -315,6 +311,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     semanticEditScriptAdmission: compactDashboard.semanticEditScriptAdmission,
     semanticPatchBundleOverlaps,
     ...(proofArtifacts ? { proofArtifacts, proofArtifactsPath } : {}),
+    ...(proofReadmission ? { proofReadmission, proofReadmissionPath } : {}),
     qualitySignals,
     noiseBreakdown,
     ...(landedHealth ? { landedHealth } : {}),
@@ -323,6 +320,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
       ...(runSync ? { runSync } : {}),
       runtimeProjectionPaths: runtimeProjections.paths,
       ...(proofArtifacts ? { proofArtifacts: proofArtifacts.summary } : {}),
+      ...(proofReadmission ? { proofReadmission: proofReadmission.summary } : {}),
       ...(runtimeProjections.modelTelemetrySummary ? { modelTelemetrySummary: runtimeProjections.modelTelemetrySummary } : {}),
       ...(runtimeProjections.humanActionState ? { humanActionState: runtimeProjections.humanActionState } : {})
     },

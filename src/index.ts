@@ -266,23 +266,15 @@ export {
   createCodexProofRouteRequests,
   createCodexProofRouteTasks
 } from './proof-route-tasks.js';
-export {
-  FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE,
-  FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_INDEX_KIND,
-  FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_KIND,
-  FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_RECORD_KIND,
-  collectCodexPlaywrightRuntimeProofArtifacts,
-  createCodexPlaywrightRuntimeProofArtifactIndex, createCodexPlaywrightRuntimeProofEvidenceEntries
-} from './proof-artifacts.js';
+export { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_INDEX_KIND, FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_KIND, FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_RECORD_KIND, collectCodexPlaywrightRuntimeProofArtifacts, createCodexPlaywrightRuntimeProofArtifactIndex, createCodexPlaywrightRuntimeProofEvidenceEntries } from './proof-artifacts.js';
+export { FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_KIND, createCodexPlaywrightProofReadmission, createCodexPlaywrightProofReadmissionEvidenceEntries } from './proof-readmission.js';
 export type {
   FrontierCodexProofRouteRequest,
   FrontierCodexProofRouteRequestInput,
   FrontierCodexProofRouteTaskInput
 } from './proof-route-tasks.js';
-export type {
-  FrontierCodexPlaywrightRuntimeProofArtifactIndex,
-  FrontierCodexPlaywrightRuntimeProofArtifactRecord
-} from './types-proof-artifacts.js';
+export type { FrontierCodexPlaywrightRuntimeProofArtifactIndex, FrontierCodexPlaywrightRuntimeProofArtifactRecord } from './types-proof-artifacts.js';
+export type { FrontierCodexPlaywrightProofReadmission, FrontierCodexPlaywrightProofReadmissionRecord } from './proof-readmission.js';
 
 export type {
   FrontierCodexJsTsSafeMergeApplyClassification,

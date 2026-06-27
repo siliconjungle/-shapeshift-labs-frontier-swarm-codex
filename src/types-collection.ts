@@ -29,6 +29,7 @@ import type { FrontierCodexCompactDashboard } from './types-evidence.js';
 import type { FrontierCodexSemanticPatchBundleOverlapSummary } from './types-semantic-bundle-overlap.js';
 import type { FrontierCodexRunSyncOptions, FrontierCodexRunSyncResult } from './run-sync.js';
 import type { FrontierCodexPlaywrightRuntimeProofArtifactIndex } from './types-proof-artifacts.js';
+import type { FrontierCodexPlaywrightProofReadmission } from './proof-readmission.js';
 
 export type * from './types-apply.js';
 export type * from './types-collection-quality.js';
@@ -98,6 +99,8 @@ export interface FrontierCodexCollectResult {
   proofRouteBacklogPath?: string;
   proofArtifacts?: FrontierCodexPlaywrightRuntimeProofArtifactIndex;
   proofArtifactsPath?: string;
+  proofReadmission?: FrontierCodexPlaywrightProofReadmission;
+  proofReadmissionPath?: string;
   runSync?: FrontierCodexRunSyncResult;
   metadata?: FrontierCodexCollectionMetadata;
   summary: FrontierCodexCollectSummary;
@@ -113,6 +116,10 @@ export type FrontierCodexCollectSummary = Record<FrontierCodexCollectBucket, num
   proofArtifactFailedCount?: number;
   proofArtifactValidatorCandidateCount?: number;
   proofArtifactsPath?: string;
+  proofReadmissionCount?: number;
+  proofReadmissionAdmittedCount?: number;
+  proofReadmissionBlockedCount?: number;
+  proofReadmissionPath?: string;
   landed?: number;
   landedJobIds?: string[];
   applyLedger?: FrontierCodexApplyLedgerSummary;

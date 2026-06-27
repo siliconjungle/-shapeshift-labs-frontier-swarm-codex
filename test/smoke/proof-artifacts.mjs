@@ -39,8 +39,12 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.strictEqual(collection.summary.proofArtifactCount, 1);
   assert.strictEqual(collection.summary.proofArtifactPassedCount, 1);
   assert.strictEqual(collection.summary.proofArtifactValidatorCandidateCount, 1);
+  assert.strictEqual(collection.summary.proofReadmissionCount, 1);
+  assert.strictEqual(collection.summary.proofReadmissionAdmittedCount, 1);
   assert.ok(collection.proofArtifactsPath.endsWith(FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE));
   assert.ok(await exists(collection.proofArtifactsPath));
+  assert.strictEqual(collection.proofReadmission.summary.admitted, 1);
+  assert.strictEqual(collection.proofReadmission.records[0].status, 'admitted');
   assert.strictEqual(collection.proofArtifacts.summary.validatorCandidateCount, 1);
   assert.strictEqual(collection.proofArtifacts.records[0].validatorReadiness, 'candidate');
   assert.strictEqual(collection.proofArtifacts.records[0].runtimeEvidenceBound, true);
@@ -49,6 +53,11 @@ export async function testPlaywrightRuntimeProofArtifactCollection({ tmp }, merg
   assert.ok(collection.evidenceIndex.entries.some((entry) =>
     entry.kind === 'playwright-runtime-proof-artifact' &&
     entry.status === 'candidate' &&
+    entry.path === proofArtifactPath
+  ));
+  assert.ok(collection.evidenceIndex.entries.some((entry) =>
+    entry.kind === 'playwright-proof-readmission' &&
+    entry.status === 'admitted' &&
     entry.path === proofArtifactPath
   ));
   assert.ok(collection.artifactStore.records.some((record) =>
@@ -104,6 +113,9 @@ function createBuilderFields(runtimeEvidence) {
 }
 
 function createProofArtifact(runtimeEvidence, builderFields) {
+  const base = '.button { color: red; }\n';
+  const worker = '@media (min-width: 700px) { .button { color: red; } }\n';
+  const output = '@media (min-width: 700px) {\n  .button {\n    color: red;\n  }\n}\n';
   return {
     kind: 'frontier.playwright.runtime-proof-artifact',
     version: 1,
@@ -120,8 +132,15 @@ function createProofArtifact(runtimeEvidence, builderFields) {
       reasonCode: 'css-atrule-new-scope-unsupported',
       side: 'worker',
       shapeKey: 'at-rule:media::(min-width: 700px)',
-      workerSourceText: '@media (min-width: 700px) { .button { color: red; } }\n',
-      outputSourceText: '@media (min-width: 700px) { .button { color: red; } }\n',
+      base,
+      worker,
+      head: base,
+      output,
+      baseSourceText: base,
+      workerSourceText: worker,
+      headSourceText: base,
+      outputSourceText: output,
+      scopedCascadeGraphHash: 'hash_scoped_cascade',
       ...builderFields
     },
     sourceTextHashes: { worker: 'fnv1a32:worker', output: 'fnv1a32:output' },
