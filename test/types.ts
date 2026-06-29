@@ -11,6 +11,7 @@ import {
   discoverCodexHandoffArtifacts,
   estimateCodexModelCost,
   continueCodexSwarmLoop,
+  createContinuationMergeMetricsFeedback,
   createCodexLiveRoutingController,
   readCodexHumanActionBrokerState,
   readCodexModelTelemetrySummary,
@@ -21,6 +22,7 @@ import {
   scoreCodexSwarmPatches,
   summarizeSemanticEditReplay,
   type FrontierCodexContinuationResult,
+  type FrontierCodexContinuationMergeMetricsFeedback,
   type FrontierCodexHandoffArtifact,
   type FrontierCodexWorkspacePlan,
   type FrontierCodexWorkspaceManifest,
@@ -169,6 +171,7 @@ const continuationPromise: Promise<FrontierCodexContinuationResult> = continueCo
   routingPolicy: { id: 'routing-policy', defaultMode: 'fill' },
   routingMode: 'fill'
 });
+const continuationMergeMetrics: FrontierCodexContinuationMergeMetricsFeedback = createContinuationMergeMetricsFeedback({ generatedAt: Date.now(), repository: 'repo' });
 const semanticEditAdmission: FrontierCodexSemanticEditAdmissionDecision = classifySemanticEditScriptAdmission(undefined);
 const semanticEditReplay: FrontierCodexSemanticEditReplaySummary | undefined = summarizeSemanticEditReplay(undefined);
 const semanticMergeAdmission: FrontierCodexSemanticMergeAdmissionSummary = {
@@ -281,11 +284,13 @@ continuationPromise.then((continuation) => {
   continuation.summary.routingCost.pricedFeedbackCount satisfies number;
   continuation.summary.adaptiveRouting.signalCount satisfies number;
   continuation.summary.adaptiveRouting.skippedRecommendationCount satisfies number;
+  continuation.summary.mergeMetrics.backlogEntryCount satisfies number;
   continuation.summary.nextJobRouting.routedJobCount satisfies number;
   continuation.summary.nextJobRouting.changedComputeCount satisfies number;
   continuation.summary.nextJobRouting.selectedComputeCounts satisfies Record<string, number>;
   continuation.nextTasksPath satisfies string | undefined;
 });
+continuationMergeMetrics.summary.routingFeedbackCount satisfies number;
 semanticEditAdmission.status satisfies string;
 semanticEditReplay?.acceptedClean satisfies number | undefined;
 semanticMergeAdmission.byClassification.safe satisfies number | undefined;

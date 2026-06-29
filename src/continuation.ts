@@ -1,16 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {
-  createSwarmBacklog,
-  createSwarmModelRoutingPolicy,
-  mergeSwarmBacklogs,
-  type FrontierSwarmBacklog,
-  type FrontierSwarmBacklogInput,
-  type FrontierSwarmModelRoutingFeedback,
-  type FrontierSwarmModelRoutingFeedbackInput,
-  type FrontierSwarmModelRoutingPolicy,
-  type FrontierSwarmModelRoutingPolicyInput
-} from '@shapeshift-labs/frontier-swarm';
+import { createSwarmBacklog, createSwarmModelRoutingPolicy, mergeSwarmBacklogs, type FrontierSwarmBacklog, type FrontierSwarmBacklogInput, type FrontierSwarmModelRoutingFeedback, type FrontierSwarmModelRoutingFeedbackInput, type FrontierSwarmModelRoutingPolicy, type FrontierSwarmModelRoutingPolicyInput } from '@shapeshift-labs/frontier-swarm';
 import { FRONTIER_SWARM_CODEX_CONTINUATION_KIND, FRONTIER_SWARM_CODEX_CONTINUATION_VERSION } from './constants.js';
 import { uniqueStrings } from './common.js';
 import { collectCodexSwarmRun } from './collect.js';
@@ -19,6 +9,7 @@ import { readContinuationChildBacklogs, resolveContinuationChildBacklogNames } f
 import { createContinuationFeedback, createContinuationRoutingCostSummary, createContinuationTournamentSummary } from './continuation-feedback.js';
 import { createContinuationHumanActionState } from './continuation-human-actions.js';
 import { summarizeNextJobRouting } from './continuation-job-routing-summary.js';
+import { createContinuationMergeMetricsFeedback } from './continuation-merge-metrics.js';
 import { appendContinuationRunEvents, resolvePriorDistributedRunPaths } from './continuation-run-events.js';
 import { writeContinuationTaskSource } from './continuation-task-source.js';
 import { projectContinuationTerminalOutcomes } from './continuation-terminal-outcomes.js';
@@ -41,23 +32,27 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     roots: uniqueStrings([collection?.outDir, collection?.runDir].filter((entry): entry is string => !!entry)),
     names: childBacklogNames
   });
+  const mergeMetricsFeedback = createContinuationMergeMetricsFeedback({ collection, repository: input.repository ?? path.basename(cwd), packageName: input.package, generatedAt });
   const nextBacklog = mergeSwarmBacklogs({
     base: baseBacklog,
     backlogs: childBacklogs.map((entry) => entry.backlog),
+    entries: mergeMetricsFeedback.backlogEntries,
     generatedAt,
     metadata: {
       continuationGeneratedAt: generatedAt,
       childBacklogNames,
-      childBacklogPaths: childBacklogs.map((entry) => entry.path)
+      childBacklogPaths: childBacklogs.map((entry) => entry.path),
+      mergeMetrics: mergeMetricsFeedback.summary
     }
   });
   const humanActionState = await createContinuationHumanActionState({ continuation: input, cwd, outDir, collection, generatedAt });
-  const feedback = createContinuationFeedback({
+  const collectionFeedback = createContinuationFeedback({
     collection,
     repository: input.repository ?? path.basename(cwd),
     packageName: input.package
   });
-  const routingCostSummary = createContinuationRoutingCostSummary(feedback);
+  const feedback = [...collectionFeedback, ...mergeMetricsFeedback.routingFeedback];
+  const routingCostSummary = createContinuationRoutingCostSummary(collectionFeedback);
   const tournamentSummary = createContinuationTournamentSummary(collection);
   const adaptiveRoutingSignals = createAdaptiveRoutingSignalsFromTournamentFeedback(collection);
   const adaptiveRouting = summarizeAdaptiveRoutingSignals(collection, adaptiveRoutingSignals);
@@ -82,7 +77,8 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     metadata: {
       ...((baseRoutingPolicy as FrontierSwarmModelRoutingPolicy | undefined)?.metadata ?? {}),
       continuationGeneratedAt: generatedAt,
-      feedbackCount: feedback.length,
+      feedbackCount: collectionFeedback.length,
+      mergeMetrics: mergeMetricsFeedback.summary,
       repository: input.repository ?? path.basename(cwd),
       ...(input.package ? { package: input.package } : {}),
       collectionDir: collection?.outDir,
@@ -192,7 +188,7 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     ...(proofParentApplyCandidates?.result ? { proofParentApplyCandidates: proofParentApplyCandidates.result } : {}),
     childBacklogNames,
     childBacklogPaths,
-    feedbackCount: feedback.length,
+    feedbackCount: collectionFeedback.length,
     nextBacklog: projected.backlog,
     nextRoutingPolicy,
     humanActions: humanActionState.actions,
@@ -201,9 +197,10 @@ export async function continueCodexSwarmLoop(input: FrontierCodexContinuationInp
     summary: {
       childBacklogCount: childBacklogs.length,
       childBacklogEntryCount: childBacklogs.reduce((sum, entry) => sum + entry.backlog.entries.length, 0),
-      feedbackCount: feedback.length,
+      feedbackCount: collectionFeedback.length,
       totalRoutingFeedbackCount: nextRoutingPolicy.feedback.length,
       backlogEntryCount: projected.backlog.entries.length,
+      mergeMetrics: mergeMetricsFeedback.summary,
       terminalOutcomeProjection: projected.summary,
       humanActions: {
         ...humanActionState.summary,

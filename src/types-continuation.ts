@@ -19,6 +19,7 @@ import type {
   FrontierCodexDistributedRunResolvedOptions,
   FrontierCodexDistributedRunArtifactPaths
 } from './types-distributed-run.js';
+import type { FrontierCodexContinuationMergeMetricsFeedback } from './continuation-merge-metrics.js';
 import type { FrontierCodexProofParentApplyCandidates } from './proof-parent-apply-candidates.js';
 import type { FrontierCodexProofParentRecheckResult } from './proof-parent-recheck-results.js';
 
@@ -98,6 +99,7 @@ export interface FrontierCodexContinuationResult {
     feedbackCount: number;
     totalRoutingFeedbackCount: number;
     backlogEntryCount: number;
+    mergeMetrics: FrontierCodexContinuationMergeMetricsFeedback['summary'];
     terminalOutcomeProjection: {
       closedEntryCount: number;
       closedTaskCount: number;
