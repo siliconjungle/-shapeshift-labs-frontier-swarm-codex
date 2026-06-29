@@ -56,6 +56,7 @@ import './smoke/workspace-lockdown.mjs';
 const context = await createSmokeContext();
 
 await testPlanningAndLinks(context);
+await testPlanDefaultConcurrency(context);
 await testResourceAwareScheduling(context);
 await testRunEventsCurrentFormat(context);
 await testRunSync(context);
@@ -185,6 +186,45 @@ async function testResourceAwareScheduling({ tmp }) {
   assert.strictEqual(peak.apiCheck, 1);
   assert.strictEqual(peak.fuzzer, 1);
   assert.ok(peak.total > peak.browser);
+}
+
+async function testPlanDefaultConcurrency({ tmp }) {
+  const plan = createCodexSwarmPlan({
+    manifest: {
+      id: 'plan-default-concurrency',
+      compute: [{ id: 'codex.test', kind: 'codex', model: 'test', reasoningEffort: 'medium', maxConcurrency: 3 }],
+      policy: { defaultCompute: 'codex.test', defaultConcurrency: 3 },
+      lanes: [
+        { id: 'alpha', allowedGlobs: ['alpha/**'] },
+        { id: 'beta', allowedGlobs: ['beta/**'] },
+        { id: 'gamma', allowedGlobs: ['gamma/**'] }
+      ]
+    },
+    tasks: {
+      items: [
+        { id: 'alpha-task', lane: 'alpha', ownedFiles: ['alpha/task.txt'] },
+        { id: 'beta-task', lane: 'beta', ownedFiles: ['beta/task.txt'] },
+        { id: 'gamma-task', lane: 'gamma', ownedFiles: ['gamma/task.txt'] }
+      ]
+    }
+  });
+  let active = 0;
+  let peak = 0;
+  const run = await runCodexSwarm(plan, {
+    outDir: path.join(tmp, 'plan-default-concurrency-run'),
+    cwd: tmp,
+    dependencyHealth: false,
+    executor: async (input) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      active -= 1;
+      await fs.writeFile(input.paths.lastMessagePath, `${input.job.id} done\n`);
+      return { exitCode: 0, changedPaths: [], lastMessage: `${input.job.id} done` };
+    }
+  });
+  assert.strictEqual(run.ok, true);
+  assert.strictEqual(peak, 3);
 }
 
 async function testSemanticAdmissionReasonCodes({ tmp }, mergeBundle) {

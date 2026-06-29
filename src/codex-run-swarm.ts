@@ -107,8 +107,9 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
     });
   };
   const adaptiveObservations = await readAdaptiveFeedbackObservations(runInputOptions);
+  const concurrency = resolveCodexRunConcurrency(plan, runInputOptions.maxConcurrency);
   const results = await runScheduledJobPool(plan, {
-    concurrency: Math.max(1, runInputOptions.maxConcurrency ?? 1),
+    concurrency,
     adaptive: runInputOptions.adaptiveConcurrency,
     resourceScheduling: runInputOptions.resourceScheduling,
     observations: adaptiveObservations,
@@ -254,6 +255,23 @@ export async function runCodexSwarm(plan: FrontierSwarmPlan, options: FrontierCo
   };
   await runInputOptions.onSwarmFinished?.({ result });
   return result;
+}
+
+function resolveCodexRunConcurrency(plan: FrontierSwarmPlan, requested: number | undefined): number {
+  const candidates = [
+    requested,
+    plan.limits.maxReadyJobs,
+    plan.manifest?.policy.defaultConcurrency,
+    ...(plan.manifest?.compute ?? []).map((compute) => compute.maxConcurrency),
+    ...plan.jobs.map((job) => job.compute.maxConcurrency)
+  ];
+  const selected = candidates.map(positiveInteger).find((value): value is number => value !== undefined) ?? 1;
+  return Math.max(1, Math.min(selected, Math.max(1, plan.jobs.length || selected)));
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : undefined;
 }
 
 function uniqueRunSyncPeers(peers: readonly string[]): string[] {

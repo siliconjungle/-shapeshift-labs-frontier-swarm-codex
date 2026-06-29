@@ -121,7 +121,7 @@ export function runOptionsArg(args: CliArgs, outDir: string): FrontierCodexSwarm
     outDir,
     cwd: stringArg(args.cwd),
     codexPath: stringArg(args.codex),
-    maxConcurrency: numberArg(args.maxConcurrency ?? args['max-concurrency'], 1),
+    maxConcurrency: numberArg(args.maxConcurrency ?? args['max-concurrency'], undefined),
     adaptiveConcurrency: adaptiveConcurrencyArg(args),
     compactLogs: compactLogsArg(args),
     contextBudget: contextBudgetArg(args),

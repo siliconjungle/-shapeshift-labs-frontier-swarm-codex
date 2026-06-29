@@ -312,6 +312,30 @@
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-javascript"
   },
   {
+    "id": "frontier-lang-jsx",
+    "name": "@shapeshift-labs/frontier-lang-jsx",
+    "role": "Runtime-neutral JSX semantic merge evidence for Frontier Lang, including element identity, prop records, keyed children, spread props, source spans, and fail-closed renderer/runtime proof gaps.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-jsx",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-jsx",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-jsx"
+  },
+  {
+    "id": "frontier-lang-svg",
+    "name": "@shapeshift-labs/frontier-lang-svg",
+    "role": "Runtime-neutral SVG semantic merge evidence for Frontier Lang, including element identity, local id definitions, url/href reference graphs, source spans, and fail-closed paint/runtime proof gaps.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-svg",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-svg",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-svg"
+  },
+  {
+    "id": "frontier-lang-package",
+    "name": "@shapeshift-labs/frontier-lang-package",
+    "role": "Runtime-neutral package manifest semantic merge evidence for Frontier Lang, including dependency, script, export/import, bin, workspace, package-manager, source-span, and fail-closed install/runtime proof gaps.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-package",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-package",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-package"
+  },
+  {
     "id": "frontier-lang-html",
     "name": "@shapeshift-labs/frontier-lang-html",
     "role": "HTML semantic merge evidence and projection adapter for Frontier Lang semantic documents, including element tree identity, attributes, text/comment spans, source maps, and fail-closed browser/runtime proof gaps.",
@@ -354,7 +378,7 @@
   {
     "id": "frontier-lang-compiler",
     "name": "@shapeshift-labs/frontier-lang-compiler",
-    "role": "Compiler facade for Frontier Lang source documents, including parse, check, hash, diagnostics, universal AST envelopes, proof/paradigm semantic summaries, projection to TypeScript, JavaScript, HTML, CSS, Rust, Python, and C, and native source-import adapters for semantic merge evidence.",
+    "role": "Compiler facade for Frontier Lang source documents, including parse, check, hash, diagnostics, universal AST envelopes, proof/paradigm semantic summaries, projection to TypeScript, JavaScript, JSX, TSX, SVG, HTML, CSS, package manifests, Rust, Python, and C, and native source-import adapters for semantic merge evidence.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-compiler",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-compiler",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-compiler"
