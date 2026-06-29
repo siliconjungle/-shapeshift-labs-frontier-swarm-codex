@@ -128,6 +128,14 @@
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-inspect"
   },
   {
+    "id": "frontier-runtime-proof",
+    "name": "@shapeshift-labs/frontier-runtime-proof",
+    "role": "Runtime-neutral proof capsules, source-bound runtime telemetry, and admission evidence helpers for Frontier merge and review workflows.",
+    "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-runtime-proof",
+    "repoName": "siliconjungle/-shapeshift-labs-frontier-runtime-proof",
+    "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-runtime-proof"
+  },
+  {
     "id": "frontier-scheduler",
     "name": "@shapeshift-labs/frontier-scheduler",
     "role": "Deterministic work scheduling, lanes, cancellation, backpressure, frame policies, replay snapshots, and work graphs.",
@@ -314,7 +322,7 @@
   {
     "id": "frontier-lang-css",
     "name": "@shapeshift-labs/frontier-lang-css",
-    "role": "CSS semantic merge evidence and projection adapter for Frontier Lang semantic documents, including selector specificity, declaration/cascade keys, custom properties, CSS Modules/ICSS export and composition evidence, source maps, and fail-closed browser cascade/render proof gaps.",
+    "role": "CSS semantic merge evidence and projection adapter for Frontier Lang semantic documents, including selector specificity, declaration/cascade keys, custom properties, `@property` and `@page` descriptor evidence, CSS Modules/ICSS export and composition evidence, source maps, and fail-closed browser cascade/render proof gaps.",
     "npmUrl": "https://www.npmjs.com/package/@shapeshift-labs/frontier-lang-css",
     "repoName": "siliconjungle/-shapeshift-labs-frontier-lang-css",
     "repoUrl": "https://github.com/siliconjungle/-shapeshift-labs-frontier-lang-css"
