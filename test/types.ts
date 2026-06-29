@@ -262,6 +262,7 @@ collectPromise.then((collection) => {
   collection.queueOutcomeModel?.summary.visibleReviewDebtCount satisfies number | undefined;
   collection.terminalState?.summary.activeItemCount satisfies number | undefined;
   collection.summary.collectorGeneratedPatchCount satisfies number | undefined;
+  collection.mergeMetricsFeedback.summary.eventCount satisfies number;
   collection.metadata?.modelTelemetrySummary satisfies unknown;
   collection.metadata?.humanActionState satisfies unknown;
   collection.buckets['needs-human-port'][0]?.generatedByCollector satisfies boolean | undefined;

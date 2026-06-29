@@ -213,6 +213,7 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(collection.strategyTournament.summary.topStrategyId, 'runtime');
   assert.strictEqual(collection.strategyHistory.kind, 'frontier.swarm.strategy-tournament-history');
   assert.strictEqual(collection.tournamentAdaptiveFeedback.kind, 'frontier.swarm.tournament-adaptive-feedback');
+  assert.deepStrictEqual([collection.mergeMetricsFeedback.kind, collection.mergeMetricsFeedback.summary.eventCount, collection.mergeMetricsFeedback.report.kind], ['frontier.swarm-codex.merge-metrics-feedback', 1, 'frontier.mergeMetrics.correlatedWorkReport']);
   assert.strictEqual(collection.evidenceIndex.summary.jobCount, 1);
   assert.strictEqual(collection.admission.summary.deferredCount, 1);
   assert.strictEqual(collection.dashboard.summary.jobCount, 1);
@@ -223,6 +224,7 @@ async function testCollectedRun(tmp) {
   assert.ok(await exists(path.join(collection.outDir, 'strategy-tournament.json')));
   assert.ok(await exists(path.join(collection.outDir, 'strategy-history.json')));
   assert.ok(await exists(path.join(collection.outDir, 'tournament-adaptive-feedback.json')));
+  assert.ok(await exists(path.join(collection.outDir, 'merge-metrics-feedback.json')));
   assert.ok(await exists(path.join(collection.outDir, 'evidence-index.json')));
   assert.ok(await exists(path.join(collection.outDir, 'merge-admission.json')));
   assert.ok(await exists(path.join(collection.outDir, 'coordinator-query.json')));
@@ -263,6 +265,8 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(semanticArtifact.metadata.semanticRecordCount, 1);
   assert.ok(semanticArtifact.metadata.semanticDependencyPredicates.includes('calls'));
   assert.ok((await fs.readFile(path.join(collection.outDir, 'artifact-store', 'artifact-index.sql'), 'utf8')).includes('metadata_json'));
+  const mergeMetricsArtifact = collection.artifactStore.records.find((record) => record.relativePath === 'merge-metrics-feedback.json');
+  assert.strictEqual(mergeMetricsArtifact?.kind, 'coordinator-index');
   assert.ok(collection.compactDashboard.semanticImport.universalAstLayerCount >= 0);
   assert.ok(collection.compactDashboard.semanticImport.dependencyRelationCount >= 1);
   assert.ok(collection.compactDashboard.semanticImport.dependencyPredicates.includes('calls'));
@@ -302,6 +306,8 @@ async function testCollectedRun(tmp) {
   assert.strictEqual(coordinatorQuery.jobs[0].semanticImportQuality.imported, 1);
   assert.strictEqual(coordinatorQuery.jobs[0].semanticImportQuality.candidates, 1);
   assert.ok(coordinatorQuery.jobs[0].primaryEvidencePath.endsWith('evidence.json'));
+  const mergeMetricsFeedback = JSON.parse(await fs.readFile(path.join(collection.outDir, 'merge-metrics-feedback.json'), 'utf8'));
+  assert.deepStrictEqual([mergeMetricsFeedback.kind, mergeMetricsFeedback.summary.eventCount, mergeMetricsFeedback.events[0].jobId], ['frontier.swarm-codex.merge-metrics-feedback', 1, 'runtime-runtime-action']);
   const artifactQuery = await queryCodexSwarmCollection({ collection: collection.outDir, q: 'runtime', semantic: true });
   assert.strictEqual(artifactQuery.kind, 'frontier.swarm-codex.query');
   assert.strictEqual(artifactQuery.jobs.length, 1);

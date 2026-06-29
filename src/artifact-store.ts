@@ -99,7 +99,7 @@ function collectArtifactCandidates(collection: FrontierCodexCollectResult): Arra
       }
     }
   }
-  for (const name of ['collection.json', 'merge-index.json', 'queue-overlay.json', 'strategy-tournament.json', 'strategy-history.json', 'tournament-adaptive-feedback.json', 'evidence-index.json', 'merge-admission.json', 'coordinator-query.json', 'compact-dashboard.json', 'queue-outcome-model.json', 'terminal-state.json', FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE, 'proof-route-backlog.json']) {
+  for (const name of ['collection.json', 'merge-index.json', 'queue-overlay.json', 'strategy-tournament.json', 'strategy-history.json', 'tournament-adaptive-feedback.json', 'merge-metrics-feedback.json', 'evidence-index.json', 'merge-admission.json', 'coordinator-query.json', 'compact-dashboard.json', 'queue-outcome-model.json', 'terminal-state.json', FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE, FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_RECHECK_FILE, 'proof-route-backlog.json']) {
     out.push({ file: path.join(collection.outDir, name), kind: 'coordinator-index' });
   }
   const seen = new Set<string>();

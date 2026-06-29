@@ -11,6 +11,7 @@ import {
   createCodexProofRouteBacklog
 } from './proof-route-tasks.js';
 import { FRONTIER_CODEX_PLAYWRIGHT_RUNTIME_PROOF_ARTIFACT_FILE } from './proof-artifacts.js';
+import { FRONTIER_SWARM_CODEX_MERGE_METRICS_FEEDBACK_FILE } from './merge-metrics-feedback.js';
 import { FRONTIER_CODEX_PLAYWRIGHT_PROOF_READMISSION_FILE } from './proof-readmission.js';
 import { FRONTIER_CODEX_PLAYWRIGHT_PROOF_PARENT_ADMISSION_FILE } from './proof-parent-admission.js';
 import {
@@ -209,6 +210,7 @@ async function writeResultArtifactFiles(result: FrontierCodexCollectResult): Pro
     ['strategy-tournament.json', result.strategyTournament],
     ['strategy-history.json', result.strategyHistory],
     ['tournament-adaptive-feedback.json', result.tournamentAdaptiveFeedback],
+    [FRONTIER_SWARM_CODEX_MERGE_METRICS_FEEDBACK_FILE, result.mergeMetricsFeedback],
     ['evidence-index.json', result.evidenceIndex],
     ['merge-admission.json', result.admission],
     ['coordinator-query.json', result.dashboard],

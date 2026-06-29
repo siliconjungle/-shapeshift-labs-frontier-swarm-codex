@@ -12,6 +12,7 @@ import type {
   FrontierSwarmTournamentAdaptiveFeedback,
   FrontierSwarmQueueOverlay
 } from '@shapeshift-labs/frontier-swarm';
+import type { FrontierCodexMergeMetricsFeedback } from './merge-metrics-feedback.js';
 import type {
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_KIND,
   FRONTIER_SWARM_CODEX_ARTIFACT_STORE_VERSION,
@@ -83,6 +84,7 @@ export interface FrontierCodexCollectResult {
   strategyTournament: FrontierSwarmStrategyTournament;
   strategyHistory: FrontierSwarmStrategyTournamentHistory;
   tournamentAdaptiveFeedback: FrontierSwarmTournamentAdaptiveFeedback;
+  mergeMetricsFeedback: FrontierCodexMergeMetricsFeedback;
   evidenceIndex: FrontierSwarmEvidenceIndex;
   admission: FrontierSwarmMergeAdmission;
   dashboard: FrontierSwarmCoordinatorDashboard;

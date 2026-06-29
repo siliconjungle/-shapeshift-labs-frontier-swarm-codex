@@ -31,6 +31,7 @@ import { attachSemanticPatchBundleOverlaps } from './collect-overlaps.js';
 import { attachRuntimeProjectionMetadata } from './collect-runtime-projections.js';
 import { readCodexRuntimeProjectionArtifacts } from './runtime-projections.js';
 import { syncCodexRunEventPeers } from './run-sync.js';
+import { createCodexMergeMetricsFeedback } from './merge-metrics-feedback.js';
 import { collectCodexPlaywrightRuntimeProofArtifacts, createCodexPlaywrightRuntimeProofEvidenceEntries } from './proof-artifacts.js';
 import { createCodexCollectProofProjections } from './collect-proof-projections.js';
 import type { FrontierCodexPlaywrightRuntimeProofArtifactRecord } from './types-proof-artifacts.js';
@@ -216,6 +217,12 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     history: strategyHistory,
     generatedAt
   });
+  const mergeMetricsFeedback = createCodexMergeMetricsFeedback({
+    runId: path.basename(runDir),
+    bundles: collectedBundles,
+    mergeIndex,
+    generatedAt
+  });
   const queueOverlay = createSwarmQueueOverlay({
     runId: path.basename(runDir),
     bundles: collectedBundles
@@ -289,6 +296,7 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     strategyTournament,
     strategyHistory,
     tournamentAdaptiveFeedback,
+    mergeMetricsFeedback,
     evidenceIndex,
     admission,
     dashboard,
@@ -308,6 +316,12 @@ export async function collectCodexSwarmRun(input: FrontierCodexCollectInput): Pr
     ...(runSync ? { runSync } : {}),
     metadata: {
       ...(runSync ? { runSync } : {}),
+      mergeMetricsFeedback: {
+        eventCount: mergeMetricsFeedback.summary.eventCount,
+        suggestionCount: mergeMetricsFeedback.summary.suggestionCount,
+        preferredLeaseKeyCount: mergeMetricsFeedback.summary.preferredLeaseKeyCount,
+        avoidConcurrentRegionKeyCount: mergeMetricsFeedback.summary.avoidConcurrentRegionKeyCount
+      },
       runtimeProjectionPaths: runtimeProjections.paths,
       ...proofProjections.metadata,
       ...(runtimeProjections.modelTelemetrySummary ? { modelTelemetrySummary: runtimeProjections.modelTelemetrySummary } : {}),
